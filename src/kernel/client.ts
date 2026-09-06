@@ -271,6 +271,7 @@ function toWireMountSpec(m: MountSpec): WireMountSpec {
     containerPath: m.containerPath,
     mode: m.mode,
     groupScope: m.groupScope,
+    origin: m.origin,
   };
 }
 

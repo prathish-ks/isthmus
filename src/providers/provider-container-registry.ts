@@ -28,6 +28,8 @@ export interface VolumeMount {
   mountClass?: import('../drivers/types.js').MountClass;
   /** Agent group this mount is pinned to, for `group-state`. */
   scope?: string;
+  /** Provenance for `allowlisted-extra` mounts — see `MountSpec.origin`. */
+  origin?: import('../drivers/types.js').MountSpec['origin'];
 }
 
 export interface ProviderContainerContext {
