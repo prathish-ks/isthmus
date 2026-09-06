@@ -1,0 +1,11 @@
+{
+  "$comment": "P9-05 (Phase 9/10 hardening): the machine-readable form of docs/baseline.md's 'Stable Baseline' section. This file is what .github/workflows/ci.yml's upstream-watch job diffs the live nanocoai/nanoclaw release tag against — a mismatch does not mean this project is broken, only that a newer upstream release exists and docs/version-compatibility.md's upstream-compatibility review process should be (re-)run before promoting this pin. Update this file by hand, in the same commit as any docs/baseline.md pin change and any resulting ADR — never let CI or a script rewrite it automatically (LAW-09: the pin is a deliberate, reviewed promotion, not something that should silently track upstream churn).",
+  "repo": "nanocoai/nanoclaw",
+  "tag": "v2.3.0",
+  "commit": "54d9d9a50c0e572fa3969d63ab87a4dd3d75cc6f",
+  "release_date": "2026-08-24",
+  "pinned_recorded_date": "2026-08-29",
+  "last_upstream_compatibility_review": "2026-09-03",
+  "last_reviewed_upstream_main_commit": "f6cf8dcf80b31d9c50b3d141581481fa166e7475",
+  "review_doc": "go-host/docs/ADR-017-p9-07-upstream-overlap-review.md"
+}

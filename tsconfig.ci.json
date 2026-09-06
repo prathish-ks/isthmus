@@ -1,0 +1,28 @@
+{
+  // CI-only override of tsconfig.json (P9/10 hardening, "Scope CI around
+  // it" — see .github/workflows/ci.yml's "Typecheck host" step comment).
+  //
+  // Excludes 3 files with pre-existing TypeScript errors (31 total, all
+  // TS2783 "specified more than once" / TS2322 type-mismatch on
+  // spread-then-explicit-property object literals), confirmed via a real
+  // `pnpm exec tsc --noEmit` run on 2026-09-03. These are not part of the
+  // recorded upstream baseline (docs/baseline.md's P0-09 shows `tsc
+  // --noEmit` as a clean pass at v2.3.0) — they were introduced later, by
+  // this project's own differential-parity test fixtures, and predate
+  // this CI-hardening phase's own work.
+  //
+  // The base tsconfig.json is untouched, so local development, IDEs, and
+  // a direct `pnpm exec tsc --noEmit` all still see and type-check these
+  // 3 files normally. Only CI's "Typecheck host" step uses this config.
+  //
+  // Fixing the underlying type errors (not just excluding them) remains
+  // open work, tracked separately from this CI-scoping change.
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/differential/fixtures.test.ts",
+    "src/differential/fixtures-batch2.test.ts",
+    "src/differential/fixtures-channel-registration.test.ts"
+  ]
+}

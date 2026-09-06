@@ -1,0 +1,79 @@
+--- a/src/drivers/docker-driver.ts
++++ b/src/drivers/docker-driver.ts
+@@ -29,7 +29,6 @@
+   LABELS,
+   asFailureError,
+   deniedByPolicy,
+-  labelsForKey,
+   specInvalid,
+   validateSpec,
+   type ContainerSpec,
+--- a/src/differential/fixtures.test.ts
++++ b/src/differential/fixtures.test.ts
+@@ -39,7 +39,7 @@
+ } from '../db/index.js';
+ import { getUnregisteredSenders } from '../db/dropped-messages.js';
+ import { findSession } from '../db/sessions.js';
+-import { markContainerRunning, writeSessionMessage } from '../session-manager.js';
++import { markContainerRunning } from '../session-manager.js';
+ import type { InboundEvent } from '../channels/adapter.js';
+ import { IdNormalizer, normalizeTimestamp } from './normalize.js';
+ import type { ParityResult } from './types.js';
+--- a/src/differential/fixtures-batch2.test.ts
++++ b/src/differential/fixtures-batch2.test.ts
+@@ -18,16 +18,15 @@
+   createAgentGroup,
+   createMessagingGroup,
+   createMessagingGroupAgent,
+-  getDb,
+   initTestDb,
+   runMigrations,
+ } from '../db/index.js';
+ import { getUnregisteredSenders } from '../db/dropped-messages.js';
+ import { setMessagingGroupDeniedAt } from '../db/messaging-groups.js';
+-import { createSession, findSession, findSessionForAgent } from '../db/sessions.js';
++import { createSession, findSession } from '../db/sessions.js';
+ import { isUniqueViolation } from '../db/errors.js';
+ import { resolveSession } from '../session-manager.js';
+ import type { InboundEvent } from '../channels/adapter.js';
+-import { IdNormalizer, normalizeTimestamp } from './normalize.js';
++import { IdNormalizer } from './normalize.js';
+ import type { ParityResult } from './types.js';
+ import type { Session } from '../types.js';
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -78,13 +78,23 @@
+           go-version-file: go-host/go.mod
+ 
++      # gofmt check is scoped to this project's own files, excluding
++      # vendor/. Vendored third-party sources are not expected to match
++      # this repo's own gofmt formatting (confirmed here after the first
++      # real CI run found genuine, pre-existing gofmt findings inside
++      # vendor/github.com/google/uuid, vendor/github.com/mattn/go-isatty,
++      # and vendor/github.com/remyoudompheng/bigfft) and this project does
++      # not reformat code it does not own. go vet/build/test below already
++      # only cover this project's own packages (module-mode "./..." never
++      # expands into vendor/ regardless), so this step is the only one that
++      # needed an explicit exclusion.
+       - name: gofmt check
+         run: |
+-          unformatted="$(gofmt -l .)"
++          unformatted="$(gofmt -l . | grep -v '^vendor/' || true)"
+           if [ -n "$unformatted" ]; then
+             echo "The following files are not gofmt-formatted:"
+             echo "$unformatted"
+             echo
+-            echo "Run: (cd go-host && gofmt -w .)"
++            echo "Run: (cd go-host && gofmt -w .) then re-check nothing under vendor/ was touched"
+             exit 1
+           fi
+ 
+--- a/go-host/README.md
++++ b/go-host/README.md
+@@ -71,5 +71,5 @@
+ ```sh
+-gofmt -l .                 # formatting
++gofmt -l . | grep -v "^vendor/"  # formatting (vendored code is excluded; it is not this project's own)
+ go vet -mod=vendor ./...   # static analysis
+ go build -mod=vendor ./...
+ go test -mod=vendor ./... -v

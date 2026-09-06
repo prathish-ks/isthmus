@@ -1,0 +1,20 @@
+# Isthmus's own Go trust-kernel and its release/CI surface - maintainer only
+/go-host/ @prathish-ks
+/.github/workflows/ci.yml @prathish-ks
+/.github/workflows/nanogo-release.yml @prathish-ks
+/.github/workflows/approve-agent-image.yml @prathish-ks
+/.github/workflows/verify-agent-image.yml @prathish-ks
+
+# Everything below is NanoClaw's own inherited TypeScript ecosystem,
+# unmodified by Isthmus - no independent review authority is claimed over
+# its design here; upstream's own CODEOWNERS (nanocoai/nanoclaw) owns that.
+# These entries just route review to whoever maintains this fork day to day.
+/src/ @prathish-ks
+/container/ @prathish-ks
+/groups/ @prathish-ks
+/launchd/ @prathish-ks
+/package.json @prathish-ks
+/package-lock.json @prathish-ks
+
+# Skills - open to contributors
+/.claude/skills/

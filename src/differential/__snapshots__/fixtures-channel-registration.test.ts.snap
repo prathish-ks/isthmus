@@ -1,0 +1,26 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`P2-04 batch2 fixture: channel-registration-escalation > a mention on a brand-new, unwired channel escalates to the owner via a connect/reject card 1`] = `
+{
+  "dbState": {
+    "tables": {
+      "pending_channel_approvals": [
+        {
+          "agent_group_id": "AGENT_GROUP_1",
+          "approver_user_id": "discord:owner",
+          "created_at": "<TIMESTAMP>",
+          "messaging_group_id": "MG_1",
+          "title": "💬 New direct message",
+        },
+      ],
+    },
+  },
+  "routing": {
+    "channelRegistrationEscalated": true,
+    "dispositions": [],
+    "dropReason": "no_agent_wired",
+    "messageOutcome": "dropped",
+  },
+  "scenario": "channel-registration-escalation",
+}
+`;

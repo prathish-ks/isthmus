@@ -1,0 +1,149 @@
+name: nanogo release
+
+# P10-02 (Phase 11, Release Packaging): produces verifiable, checksummed,
+# SBOM'd, keylessly-signed nanogo binaries for every supported platform.
+# See go-host/docs/release-verification.md for how a user verifies what
+# this workflow publishes, and go-host/docs/ADR-020-p10-01-minimum-trust-
+# install.md for how go-host/scripts/install.sh consumes these artifacts.
+#
+# Scoped to its own tag prefix (nanogo-v*) so a release of the Go kernel is
+# independent of any release process the TS host side may have of its own
+# — matches this project's existing "one pinned thing at a time" posture
+# (see docs/version-compatibility.md's version-range strategy for the same
+# idea applied to the upstream NanoClaw pin).
+on:
+  push:
+    tags:
+      - "nanogo-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release (e.g. nanogo-v0.1.0) — for a manual re-run, not normal use"
+        required: true
+
+permissions:
+  contents: write # to create the GitHub release and upload assets
+  id-token: write # for cosign's keyless signing (Sigstore/Fulcio via GitHub OIDC — no stored key)
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-host/go.mod
+
+      - name: Build nanogo
+        working-directory: go-host
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          # modernc.org/sqlite is a pure-Go implementation specifically so
+          # cross-compilation needs no C toolchain for the target platform
+          # (see docs/baseline.md's rationale for that dependency choice).
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          out="dist/nanogo-${GOOS}-${GOARCH}"
+          go build -mod=vendor -trimpath \
+            -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
+            -o "$out" ./cmd/nanogo
+          chmod +x "$out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nanogo-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: go-host/dist/*
+          if-no-files-found: error
+
+  sbom:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # One SBOM for the module as built, not per-platform-binary — the Go
+      # dependency graph a release actually ships is the same across every
+      # GOOS/GOARCH combination (CGO_ENABLED=0, no per-platform deps), so a
+      # single CycloneDX document naming go.mod's real, pinned dependency
+      # set is accurate for every published binary, without generating and
+      # publishing four near-identical copies of the same information.
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: go-host
+          format: cyclonedx-json
+          output-file: nanogo-sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nanogo-sbom
+          path: nanogo-sbom.cdx.json
+
+  release:
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        # download-artifact with no name filter pulls every artifact from
+        # this run into dist/ (merge-multiple flattens the per-job
+        # subdirectories) — the four platform binaries AND nanogo-sbom.cdx.json
+        # land here together, so one SHA256SUMS covers everything this
+        # release actually publishes, the SBOM included.
+        run: |
+          sha256sum nanogo-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Keyless-sign the checksum file
+        working-directory: dist
+        # Signs SHA256SUMS itself (not each binary individually) — anyone
+        # who trusts SHA256SUMS.sig transitively trusts every binary it
+        # lists, and this is exactly the same shape release-verification.md
+        # asks a user to check. No private key anywhere in this repo or its
+        # secrets: cosign's keyless mode signs using a short-lived
+        # certificate issued to *this workflow run's own GitHub OIDC
+        # identity* (Sigstore/Fulcio), which is what `cosign verify-blob
+        # --certificate-identity`/`--certificate-oidc-issuer` checks against
+        # on the consuming end — see release-verification.md.
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign-blob --yes \
+            --output-signature SHA256SUMS.sig \
+            --output-certificate SHA256SUMS.pem \
+            SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist/nanogo-darwin-*
+            dist/nanogo-linux-*
+            dist/nanogo-sbom.cdx.json
+            dist/SHA256SUMS
+            dist/SHA256SUMS.sig
+            dist/SHA256SUMS.pem
+          generate_release_notes: true

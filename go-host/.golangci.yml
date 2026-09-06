@@ -1,0 +1,55 @@
+# golangci-lint v2 config for go-host (Phase 9/10, P9-01 / release-readiness.md
+# §1, §2, §6): a single aggregator for go vet, staticcheck (which absorbs
+# gosimple as of golangci-lint v2), errcheck, ineffassign, unused, revive,
+# and gosec. Run in CI as a report-only job (.github/workflows/ci.yml's
+# `go-lint`, continue-on-error: true — see that file's comment on why this
+# is not yet a required merge gate) and locally with:
+#
+#   cd go-host && golangci-lint run
+#
+# Deliberately conservative: this project's own doc-comment discipline
+# (every exported identifier's comment starts with its own name, citing the
+# exact TS source line it ports) is already close to staticcheck's ST1000,
+# so this config does not turn on stylistic linters that would produce a
+# large one-time diff unrelated to any actual bug (e.g. gofumpt-style
+# formatters, exhaustruct, wsl). The goal here is the same one section 1 of
+# release-readiness.md names: catch real bugs and unsafe patterns, not chase
+# a linter score.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - gosec
+  settings:
+    revive:
+      rules:
+        # ST1000-equivalent: every exported identifier's doc comment must
+        # start with its own name — already this project's stated house
+        # style (release-readiness.md §1); this makes it a checked
+        # invariant rather than a manual review note.
+        - name: exported
+          severity: warning
+          disabled: false
+    gosec:
+      # G304 (file path from variable) fires on almost every path this
+      # kernel legitimately builds from validated components (mount.go,
+      # ownership.go's own SafeMailboxPath) — the validation IS the
+      # mitigation those packages exist to provide, and gosec cannot see
+      # that a path has already passed ValidateSpec/ValidateID by the time
+      # it reaches os.Open. Excluded here rather than silenced per call
+      # site with a nolint comment on every one of them.
+      excludes:
+        - G304
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

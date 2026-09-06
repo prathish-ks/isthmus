@@ -1,0 +1,431 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > a cli_command grant naming a DIFFERENT command than the one approved is refused 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "grant-invalid-or-mismatched-denied",
+  },
+  "scenario": "guard-cli-grant-mismatch",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > a cli_command grant naming the exact approved command satisfies the hold 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "grant-satisfied-hold-allowed",
+  },
+  "scenario": "guard-cli-grant-satisfied",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > a host caller is always allowed — the 0600 socket is the auth story 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "cli-host-caller-allowed",
+  },
+  "scenario": "guard-cli-host-caller",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > a host-only command is denied to ANY container caller, even at cli_scope=global 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "cli-host-only-command-denied",
+  },
+  "scenario": "guard-cli-host-only-denied",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > a non-host, non-agent caller is denied 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "cli-non-host-non-agent-denied",
+  },
+  "scenario": "guard-cli-non-host-non-agent",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > an access=approval command that passes every scope check holds for admin approval 1`] = `
+{
+  "guard": {
+    "effect": "hold",
+    "reasonCategory": "cli-approval-required-hold",
+  },
+  "scenario": "guard-cli-approval-required-hold",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > an access=open command that passes every scope check is allowed 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "cli-open-command-allowed",
+  },
+  "scenario": "guard-cli-open-command",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > cli_scope=disabled denies a non-host-only command outright 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "cli-scope-disabled-denied",
+  },
+  "scenario": "guard-cli-scope-disabled",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > cli_scope=group (the default) denies a resource not on the group-scope allowlist 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "cli-scope-resource-not-allowlisted-denied",
+  },
+  "scenario": "guard-cli-scope-resource-not-allowlisted",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > cli_scope=group denies a wirings-update arg outside the allowed set 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "cli-scope-wiring-update-args-denied",
+  },
+  "scenario": "guard-cli-scope-wiring-update-args",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > cli_scope=group denies an --agent-group-id/--group arg pointing at a different group 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "cli-scope-cross-group-denied",
+  },
+  "scenario": "guard-cli-scope-cross-group-arg",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > cli_scope=group denies an --id arg pointing at a different group, for resource=groups 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "cli-scope-cross-group-denied",
+  },
+  "scenario": "guard-cli-scope-cross-group-id",
+}
+`;
+
+exports[`P2-04 guard catalog: CLI-derived restart-style guard (commandDecide) > cli_scope=group denies any attempt to change cli_scope itself — privilege escalation 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "cli-scope-mutation-denied",
+  },
+  "scenario": "guard-cli-scope-mutation-denied",
+}
+`;
+
+exports[`P2-04 guard catalog: a2a.send > a grant naming a DIFFERENT target than the one held is refused 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "grant-invalid-or-mismatched-denied",
+  },
+  "scenario": "guard-a2a-send-grant-mismatch",
+}
+`;
+
+exports[`P2-04 guard catalog: a2a.send > a grant naming the exact held target satisfies the hold 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "grant-satisfied-hold-allowed",
+  },
+  "scenario": "guard-a2a-send-grant-satisfied",
+}
+`;
+
+exports[`P2-04 guard catalog: a2a.send > a self-send is allowed without needing a destination row 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "a2a-send-self-send-allowed",
+  },
+  "scenario": "guard-a2a-send-self-send",
+}
+`;
+
+exports[`P2-04 guard catalog: a2a.send > destination + target exist, a message policy row: holds for its named approver 1`] = `
+{
+  "guard": {
+    "effect": "hold",
+    "reasonCategory": "a2a-send-policy-hold",
+  },
+  "scenario": "guard-a2a-send-policy-hold",
+}
+`;
+
+exports[`P2-04 guard catalog: a2a.send > destination + target exist, no policy row: allowed 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "a2a-send-no-policy-allowed",
+  },
+  "scenario": "guard-a2a-send-no-policy",
+}
+`;
+
+exports[`P2-04 guard catalog: a2a.send > destination exists but the target agent group does not denied 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "a2a-send-target-not-found-denied",
+  },
+  "scenario": "guard-a2a-send-target-not-found",
+}
+`;
+
+exports[`P2-04 guard catalog: a2a.send > no destination row for (from,to) denied 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "a2a-send-no-destination-denied",
+  },
+  "scenario": "guard-a2a-send-no-destination",
+}
+`;
+
+exports[`P2-04 guard catalog: a2a.send > non-agent actor denied 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "a2a-send-non-agent-denied",
+  },
+  "scenario": "guard-a2a-send-non-agent",
+}
+`;
+
+exports[`P2-04 guard catalog: agents.create > a grant naming a DIFFERENT name than requested is refused, not silently accepted 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "grant-invalid-or-mismatched-denied",
+  },
+  "scenario": "guard-agents-create-grant-mismatch",
+}
+`;
+
+exports[`P2-04 guard catalog: agents.create > a grant naming the same requested name satisfies the hold 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "grant-satisfied-hold-allowed",
+  },
+  "scenario": "guard-agents-create-grant-satisfied",
+}
+`;
+
+exports[`P2-04 guard catalog: agents.create > cli_scope=global allows directly — trusted owner agent group 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "agents-create-global-scope-allowed",
+  },
+  "scenario": "guard-agents-create-global-scope",
+}
+`;
+
+exports[`P2-04 guard catalog: agents.create > cli_scope=group (the default, and any unknown value) holds for admin approval 1`] = `
+{
+  "guard": {
+    "effect": "hold",
+    "reasonCategory": "agents-create-group-scope-hold",
+  },
+  "scenario": "guard-agents-create-group-scope-default",
+}
+`;
+
+exports[`P2-04 guard catalog: agents.create > non-agent actor denied — create_agent is container-originated 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "agents-create-non-agent-denied",
+  },
+  "scenario": "guard-agents-create-non-agent",
+}
+`;
+
+exports[`P2-04 guard catalog: channels.register > an anchor-group admin (not the delivered approver) is also allowed — same reason text as above, see normalize.ts 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "channels-register-allowed",
+  },
+  "scenario": "guard-channels-register-anchor-admin",
+}
+`;
+
+exports[`P2-04 guard catalog: channels.register > an unprivileged human who is neither the approver nor an admin is denied 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "channels-register-ineligible-denied",
+  },
+  "scenario": "guard-channels-register-ineligible",
+}
+`;
+
+exports[`P2-04 guard catalog: channels.register > no pending row for the questionId denied 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "channels-register-no-pending-denied",
+  },
+  "scenario": "guard-channels-register-no-pending",
+}
+`;
+
+exports[`P2-04 guard catalog: channels.register > non-human actor denied — resolves only via human clicks/replies 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "channels-register-non-human-denied",
+  },
+  "scenario": "guard-channels-register-non-human",
+}
+`;
+
+exports[`P2-04 guard catalog: channels.register > the delivered approver is allowed 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "channels-register-allowed",
+  },
+  "scenario": "guard-channels-register-approver",
+}
+`;
+
+exports[`P2-04 guard catalog: guard()'s fail-closed backstops > a decide fn that throws is caught and denied, not propagated 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "guard-throwing-decide-denied",
+  },
+  "scenario": "guard-throwing-decide",
+}
+`;
+
+exports[`P2-04 guard catalog: guard()'s fail-closed backstops > a value not minted by defineGuardedAction is denied, not fail-open 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "guard-malformed-action-denied",
+  },
+  "scenario": "guard-malformed-action",
+}
+`;
+
+exports[`P2-04 guard catalog: self_mod.install_packages / add_mcp_server > add_mcp_server: non-agent actor denied 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "self-mod-non-agent-denied",
+  },
+  "scenario": "guard-self-mod-add-mcp-non-agent",
+}
+`;
+
+exports[`P2-04 guard catalog: self_mod.install_packages / add_mcp_server > add_mcp_server: still holds on a driver WITHOUT imageBuild — it needs no rebuild, so it must not inherit install_packages' gate 1`] = `
+{
+  "guard": {
+    "effect": "hold",
+    "reasonCategory": "self-mod-admin-approval-hold",
+  },
+  "scenario": "guard-self-mod-add-mcp-hold",
+}
+`;
+
+exports[`P2-04 guard catalog: self_mod.install_packages / add_mcp_server > install_packages: a grant cannot resurrect a deny (approved under Docker, replayed after a driver switch) 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "self-mod-image-build-unavailable-denied",
+  },
+  "scenario": "guard-self-mod-install-grant-cannot-resurrect",
+}
+`;
+
+exports[`P2-04 guard catalog: self_mod.install_packages / add_mcp_server > install_packages: denied at request time when the driver lacks imageBuild 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "self-mod-image-build-unavailable-denied",
+  },
+  "scenario": "guard-self-mod-install-no-image-build",
+}
+`;
+
+exports[`P2-04 guard catalog: self_mod.install_packages / add_mcp_server > install_packages: holds for admin approval on a capable driver 1`] = `
+{
+  "guard": {
+    "effect": "hold",
+    "reasonCategory": "self-mod-admin-approval-hold",
+  },
+  "scenario": "guard-self-mod-install-hold",
+}
+`;
+
+exports[`P2-04 guard catalog: self_mod.install_packages / add_mcp_server > install_packages: non-agent actor denied even on a capable driver 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "self-mod-non-agent-denied",
+  },
+  "scenario": "guard-self-mod-install-non-agent",
+}
+`;
+
+exports[`P2-04 guard catalog: senders.admit (pure) > policy=decline_notify denies 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "unknown-sender-decline-notify-denied",
+  },
+  "scenario": "guard-senders-admit-decline-notify",
+}
+`;
+
+exports[`P2-04 guard catalog: senders.admit (pure) > policy=public allows unconditionally 1`] = `
+{
+  "guard": {
+    "effect": "allow",
+    "reasonCategory": "unknown-sender-public-allowed",
+  },
+  "scenario": "guard-senders-admit-public",
+}
+`;
+
+exports[`P2-04 guard catalog: senders.admit (pure) > policy=request_approval holds 1`] = `
+{
+  "guard": {
+    "effect": "hold",
+    "reasonCategory": "unknown-sender-request-approval-hold",
+  },
+  "scenario": "guard-senders-admit-request-approval",
+}
+`;
+
+exports[`P2-04 guard catalog: senders.admit (pure) > policy=strict (and any other/unset value) denies, fail-closed 1`] = `
+{
+  "guard": {
+    "effect": "deny",
+    "reasonCategory": "unknown-sender-strict-denied",
+  },
+  "scenario": "guard-senders-admit-strict",
+}
+`;

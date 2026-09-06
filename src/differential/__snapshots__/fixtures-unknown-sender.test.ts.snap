@@ -1,0 +1,60 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`P2-03 fixture: unknown-sender > holds for admin approval on first message from an unrecognized sender (request_approval policy) 1`] = `
+{
+  "dbState": {
+    "tables": {
+      "pending_sender_approvals": [
+        {
+          "agent_group_id": "AGENT_GROUP_1",
+          "approver_user_id": "discord:owner",
+          "created_at": "<TIMESTAMP>",
+          "id": "APPROVAL_1",
+          "messaging_group_id": "MG_1",
+          "originalMessagePreview": {
+            "channelType": "discord",
+            "hasTimestamp": true,
+            "messageId": "msg-stranger-1",
+            "platformId": "chan-123",
+          },
+          "sender_identity": "discord:Stranger",
+          "sender_name": "Stranger",
+        },
+      ],
+      "unregistered_senders": [
+        {
+          "agent_group_id": "AGENT_GROUP_1",
+          "channel_type": "discord",
+          "first_seen": "<TIMESTAMP>",
+          "last_seen": "<TIMESTAMP>",
+          "message_count": 2,
+          "messaging_group_id": "MG_1",
+          "platform_id": "chan-123",
+          "reason": "no_agent_engaged",
+          "sender_name": "Stranger",
+          "user_id": "discord:Stranger",
+        },
+      ],
+    },
+  },
+  "guard": {
+    "effect": "hold",
+    "reasonCategory": "unknown-sender-request-approval-hold",
+  },
+  "routing": {
+    "channelRegistrationEscalated": false,
+    "dispositions": [
+      {
+        "accessOk": false,
+        "agentGroupId": "AGENT_GROUP_1",
+        "engageMode": "pattern",
+        "outcome": "dropped",
+        "scopeOk": true,
+      },
+    ],
+    "dropReason": "no_agent_engaged",
+    "messageOutcome": "dropped",
+  },
+  "scenario": "unknown-sender",
+}
+`;

@@ -1,0 +1,134 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`P2-03 fixture: duplicate-input > characterizes what happens when the same inbound message id is delivered twice 1`] = `
+{
+  "rowCountForDuplicateId": 1,
+  "scenario": "duplicate-input",
+  "secondCallThrew": true,
+}
+`;
+
+exports[`P2-03 fixture: existing-session > reuses the same session for a second message to the same (mg, thread) 1`] = `
+{
+  "scenario": "existing-session",
+  "session": {
+    "containerStatus": "stopped",
+    "created": false,
+    "lastActiveTouched": true,
+    "sessionId": "SESSION_1",
+    "sessionMode": "shared",
+  },
+}
+`;
+
+exports[`P2-03 fixture: mention > engages when engage_mode is mention and the platform reports isMention 1`] = `
+{
+  "routing": {
+    "channelRegistrationEscalated": false,
+    "dispositions": [
+      {
+        "accessOk": true,
+        "agentGroupId": "AGENT_GROUP_1",
+        "engageMode": "mention",
+        "outcome": "engaged",
+        "scopeOk": true,
+      },
+    ],
+    "messageOutcome": "routed",
+  },
+  "scenario": "mention",
+}
+`;
+
+exports[`P2-03 fixture: message-persistence > persists inbound message content byte-for-byte, including JSON-shaped payloads 1`] = `
+{
+  "routing": {
+    "channelRegistrationEscalated": false,
+    "dispositions": [
+      {
+        "accessOk": true,
+        "agentGroupId": "AGENT_GROUP_1",
+        "engageMode": "pattern",
+        "outcome": "engaged",
+        "scopeOk": true,
+      },
+    ],
+    "messageOutcome": "routed",
+  },
+  "scenario": "message-persistence",
+}
+`;
+
+exports[`P2-03 fixture: new-session > creates a brand-new session on the first message to a wired, empty messaging group 1`] = `
+{
+  "containerWake": {
+    "attempted": true,
+    "outcome": true,
+  },
+  "dbState": {
+    "tables": {
+      "sessions": [
+        {
+          "agent_group_id": "AGENT_GROUP_1",
+          "agent_provider": null,
+          "container_status": "stopped",
+          "created_at": "<TIMESTAMP>",
+          "id": "SESSION_1",
+          "last_active": "<TIMESTAMP>",
+          "messaging_group_id": "MG_1",
+          "status": "active",
+          "thread_id": null,
+        },
+      ],
+    },
+  },
+  "scenario": "new-session",
+  "session": {
+    "containerStatus": "stopped",
+    "created": true,
+    "lastActiveTouched": true,
+    "sessionId": "SESSION_1",
+    "sessionMode": "shared",
+  },
+}
+`;
+
+exports[`P2-03 fixture: non-mention > drops (does not engage) when engage_mode is mention and isMention is false, with no accumulate policy 1`] = `
+{
+  "routing": {
+    "channelRegistrationEscalated": false,
+    "dispositions": [
+      {
+        "accessOk": false,
+        "agentGroupId": "AGENT_GROUP_1",
+        "engageMode": "mention",
+        "outcome": "dropped",
+        "scopeOk": false,
+      },
+    ],
+    "dropReason": "no_agent_engaged",
+    "messageOutcome": "dropped",
+  },
+  "scenario": "non-mention",
+}
+`;
+
+exports[`P2-03 fixture: running-container > routes to an existing session already marked container_status=running 1`] = `
+{
+  "containerStatusAtSecondMessage": "running",
+  "created": false,
+  "sameSession": true,
+  "scenario": "running-container",
+  "wakeContainerCalledAgain": true,
+}
+`;
+
+exports[`P2-03 fixture: stopped-container > routes to an existing session still marked container_status=stopped (the default) 1`] = `
+{
+  "containerStatusAtSecondMessage": "stopped",
+  "created": false,
+  "sameSession": true,
+  "scenario": "stopped-container",
+  "wakeContainerCalledAgain": true,
+}
+`;

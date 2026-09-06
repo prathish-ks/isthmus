@@ -1,0 +1,8 @@
+{
+  "data_dir": "/path/to/nanoclaw/data",
+  "groups_dir": "/path/to/nanoclaw/groups",
+  "user_id": "discord:owner",
+  "agent_group_id": "ag-1",
+  "agent_folder": "test-agent",
+  "session_id": "sess-1"
+}

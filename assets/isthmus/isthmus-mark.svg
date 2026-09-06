@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 140" width="200" height="140" role="img" aria-label="Isthmus mark">
+  <title>Isthmus</title>
+  <!-- Two landmasses joined by a narrow, guarded isthmus -->
+  <rect x="8" y="15" width="70" height="110" rx="35" ry="35" fill="#1b2430"/>
+  <rect x="122" y="15" width="70" height="110" rx="35" ry="35" fill="#1b2430"/>
+  <rect x="60" y="55" width="80" height="30" rx="6" fill="#1b2430"/>
+  <rect x="90" y="60" width="20" height="20" rx="4" fill="#14b8a6"/>
+</svg>

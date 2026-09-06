@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 430 140" width="430" height="140" role="img" aria-label="Isthmus">
+  <title>Isthmus</title>
+  <g transform="translate(0,28) scale(0.6)">
+    <rect x="8" y="15" width="70" height="110" rx="35" ry="35" fill="#1b2430"/>
+    <rect x="122" y="15" width="70" height="110" rx="35" ry="35" fill="#1b2430"/>
+    <rect x="60" y="55" width="80" height="30" rx="6" fill="#1b2430"/>
+    <rect x="90" y="60" width="20" height="20" rx="4" fill="#14b8a6"/>
+  </g>
+  <text x="150" y="90" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="56" letter-spacing="0.5" fill="#1b2430">Isthmus</text>
+</svg>

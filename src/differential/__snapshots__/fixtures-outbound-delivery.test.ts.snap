@@ -1,0 +1,67 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`P2-03 fixture: outbound-delivery > delivers a directly-written outbound message exactly once 1`] = `
+{
+  "delivery": {
+    "attempts": 1,
+    "outcome": "delivered",
+    "target": {
+      "channelType": "discord",
+      "platformId": "chan-123",
+      "threadId": null,
+    },
+  },
+  "scenario": "outbound-delivery",
+  "session": {
+    "containerStatus": "stopped",
+    "created": true,
+    "lastActiveTouched": false,
+    "sessionId": "SESSION_1",
+    "sessionMode": "shared",
+  },
+}
+`;
+
+exports[`P2-04 batch2 fixture: delivery-permanent-failure > a detached messaging group fails delivery permanently after MAX_DELIVERY_ATTEMPTS (3) 1`] = `
+{
+  "delivery": {
+    "attempts": 3,
+    "outcome": "permanent-failure",
+    "target": {
+      "channelType": "discord",
+      "platformId": "chan-123",
+      "threadId": null,
+    },
+  },
+  "scenario": "delivery-permanent-failure",
+  "session": {
+    "containerStatus": "stopped",
+    "created": true,
+    "lastActiveTouched": false,
+    "sessionId": "SESSION_1",
+    "sessionMode": "shared",
+  },
+}
+`;
+
+exports[`P2-04 batch2 fixture: delivery-retry-then-recovers > a retryable failure that clears before the attempt ceiling still delivers 1`] = `
+{
+  "delivery": {
+    "attempts": 2,
+    "outcome": "delivered",
+    "target": {
+      "channelType": "discord",
+      "platformId": "chan-123",
+      "threadId": null,
+    },
+  },
+  "scenario": "delivery-retry-then-recovers",
+  "session": {
+    "containerStatus": "stopped",
+    "created": true,
+    "lastActiveTouched": false,
+    "sessionId": "SESSION_1",
+    "sessionMode": "shared",
+  },
+}
+`;

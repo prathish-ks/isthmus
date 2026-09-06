@@ -1,0 +1,10 @@
+# Build artifact — never a tracked deliverable. Rebuilding it is cheap and
+# is now done unconditionally by every harness script (see p3-06-e2e.sh's
+# comment on why a stale binary here silently answers with an old flag set).
+/nanogo
+
+# Build artifacts — never tracked deliverables (same reasoning as the
+# /nanogo entry above; these are produced by go-host/scripts/install.sh
+# and the EC-06 live-smoke harness, both cheap to rebuild).
+/bin/
+/livesmoke

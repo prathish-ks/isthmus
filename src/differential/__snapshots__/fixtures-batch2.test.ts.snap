@@ -1,0 +1,136 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`P2-04 batch2 fixture: accumulate-stores-without-waking > ignored_message_policy=accumulate creates a session and stores context, but never wakes the container 1`] = `
+{
+  "containerWake": {
+    "attempted": true,
+    "outcome": null,
+  },
+  "routing": {
+    "channelRegistrationEscalated": false,
+    "dispositions": [
+      {
+        "accessOk": false,
+        "agentGroupId": "AGENT_GROUP_1",
+        "engageMode": "mention",
+        "outcome": "accumulated",
+        "scopeOk": false,
+      },
+    ],
+    "messageOutcome": "routed",
+  },
+  "scenario": "accumulate-stores-without-waking",
+  "session": {
+    "containerStatus": "stopped",
+    "created": true,
+    "lastActiveTouched": true,
+    "sessionId": "SESSION_1",
+    "sessionMode": "shared",
+  },
+}
+`;
+
+exports[`P2-04 batch2 fixture: container-wake-failure > a failed wake never throws through routeInbound — the session is created and left stopped 1`] = `
+{
+  "containerWake": {
+    "attempted": true,
+    "outcome": false,
+  },
+  "scenario": "container-wake-failure",
+  "session": {
+    "containerStatus": "stopped",
+    "created": true,
+    "lastActiveTouched": true,
+    "sessionId": "SESSION_1",
+    "sessionMode": "shared",
+  },
+}
+`;
+
+exports[`P2-04 batch2 fixture: mention-sticky-dm-never-engages > mention-sticky never engages a non-mention message in a DM, even with a prior session 1`] = `
+{
+  "routing": {
+    "channelRegistrationEscalated": false,
+    "dispositions": [
+      {
+        "accessOk": false,
+        "agentGroupId": "AGENT_GROUP_1",
+        "engageMode": "mention-sticky",
+        "outcome": "dropped",
+        "scopeOk": false,
+      },
+    ],
+    "dropReason": "no_agent_engaged",
+    "messageOutcome": "dropped",
+  },
+  "scenario": "mention-sticky-dm-never-engages",
+}
+`;
+
+exports[`P2-04 batch2 fixture: mention-sticky-follow-up-engages > mention-sticky follow-up (no mention) still engages once a session exists for the thread 1`] = `
+{
+  "routing": {
+    "channelRegistrationEscalated": false,
+    "dispositions": [
+      {
+        "accessOk": true,
+        "agentGroupId": "AGENT_GROUP_1",
+        "engageMode": "mention-sticky",
+        "outcome": "engaged",
+        "scopeOk": true,
+      },
+    ],
+    "messageOutcome": "routed",
+  },
+  "scenario": "mention-sticky-follow-up-engages",
+}
+`;
+
+exports[`P2-04 batch2 fixture: no-agent-wired-denied-channel > a channel already denied by the owner drops silently with no drop record at all 1`] = `
+{
+  "dropRecordWritten": false,
+  "scenario": "no-agent-wired-denied-channel",
+}
+`;
+
+exports[`P2-04 batch2 fixture: no-agent-wired-no-gate > an unwired channel with no channel-request gate registered drops silently with reason=no_agent_wired 1`] = `
+{
+  "routing": {
+    "channelRegistrationEscalated": false,
+    "dispositions": [],
+    "dropReason": "no_agent_wired",
+    "messageOutcome": "dropped",
+  },
+  "scenario": "no-agent-wired-no-gate",
+}
+`;
+
+exports[`P2-04 batch2 fixture: session-id-collision-classified > a duplicate session id throws a constraint error that isUniqueViolation recognizes 1`] = `
+{
+  "classifiedAsUniqueViolation": true,
+  "scenario": "session-id-collision-classified",
+  "secondCallThrew": true,
+}
+`;
+
+exports[`P2-04 batch2 fixture: session-mode-agent-shared > resolveSession shares one session per agent group across DIFFERENT messaging groups when session_mode=agent-shared 1`] = `
+{
+  "firstCreated": true,
+  "sameSessionAcrossMessagingGroups": true,
+  "scenario": "session-mode-agent-shared",
+  "secondCallCreated": false,
+  "sessionId": "SESSION_1",
+}
+`;
+
+exports[`P2-04 batch2 fixture: session-mode-per-thread > resolveSession isolates sessions per thread and reuses them on repeat 1`] = `
+{
+  "distinctThreads": true,
+  "scenario": "session-mode-per-thread",
+  "threadACreatedFirstTime": true,
+  "threadAReusedSecondTime": true,
+  "threadASessionId": "SESSION_1",
+  "threadBCreatedFirstTime": true,
+  "threadBSessionId": "SESSION_2",
+}
+`;
