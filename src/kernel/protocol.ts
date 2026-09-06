@@ -78,6 +78,8 @@ export interface WireMountSpec {
   containerPath: string;
   mode: 'rw' | 'ro';
   groupScope?: string;
+  /** Mirrors `mount.Spec.Origin` (Go) / `MountSpec.origin` (drivers/types.ts) — see either's doc comment. */
+  origin?: 'operator' | 'provider';
 }
 
 /**

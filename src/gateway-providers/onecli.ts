@@ -46,6 +46,9 @@ export function contributionFromArgs(args: readonly string[], groupScope: string
           containerPath: parts[1],
           mode: parts[2] === 'ro' ? 'ro' : 'rw',
           groupScope,
+          // Provider-stamped (OneCLI's own CA cert / credential stubs), never
+          // the operator's mount-allowlist.json — exempt from that check.
+          origin: 'provider',
         });
         continue;
       }

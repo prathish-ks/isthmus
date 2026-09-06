@@ -52,6 +52,14 @@ export interface MountSpec {
   mode: 'rw' | 'ro';
   /** Lets a realization — by admission or by in-code checks — pin group-state to the group subtree. */
   groupScope: string;
+  /**
+   * Provenance of an 'allowlisted-extra' mount. `'provider'` marks a mount
+   * stamped by gateway/provider composition (e.g. OneCLI's CA-cert and
+   * credential-stub files) rather than the operator's mount-allowlist.json —
+   * these never appear in that file and must not be checked against it.
+   * Unset (the historical shape) is equivalent to `'operator'`.
+   */
+  origin?: 'operator' | 'provider';
 }
 
 export interface ContainerSpec {

@@ -15,6 +15,7 @@ import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { MountSpec, SessionSpec } from '../drivers/types.js';
 import { KernelClient, KernelError } from './client.js';
 import type { CapabilityRequestPayload, KernelEnvelope, KernelResponseEnvelope } from './protocol.js';
 import { KERNEL_PROTOCOL_VERSION } from './protocol.js';
@@ -120,6 +121,42 @@ describe('wake', () => {
     expect(envelope.payload.capability).toBe('container.wake');
     expect(envelope.payload.session?.key).toEqual({ installSlug: 'spike', agentGroupId: 'g1', sessionId: 's1' });
     expect(envelope.payload.session?.containers?.[0]?.image).toBe('nanoclaw-agent:spike-p0');
+  });
+
+  it("carries a mount's origin over the wire, not just in-process (regression: silently dropped by toWireMountSpec until 2026-09-06)", async () => {
+    // A provider-contributed mount (OneCLI's CA cert, an agent-provider's own
+    // volumes) is exempt from the operator's mount-allowlist — but only if
+    // mount.Origin actually reaches the Go kernel doing that check. It's easy
+    // to set `origin` correctly at every TS-side composition step and still
+    // lose it right here, at serialization, if this struct's own field list
+    // isn't kept in sync — exactly what happened: MountSpec.origin existed
+    // and was set correctly in-process, but toWireMountSpec's return object
+    // never listed it, so every OneCLI-contributed mount silently reverted to
+    // operator-allowlist checking and was denied on any install with an
+    // empty (i.e. default) mount-allowlist.json.
+    fake.respondWith((envelope) =>
+      okResponse(envelope.requestId, { allowed: true, containerId: 'cid', containerName: 'ncl-spike-s1' }),
+    );
+
+    const client = new KernelClient(socketPath);
+    const mounts: MountSpec[] = [
+      {
+        class: 'allowlisted-extra',
+        hostPath: '/tmp/onecli-proxy-ca.pem',
+        containerPath: '/usr/local/share/ca.pem',
+        mode: 'ro',
+        groupScope: 'g1',
+        origin: 'provider',
+      },
+    ];
+    const base = fixtureSpec();
+    const spec: SessionSpec = { ...base, containers: [{ ...base.containers[0], mounts }] };
+    await client.wake(spec);
+
+    const wireMounts = fake.received[0].payload.session?.containers?.[0]?.mounts as
+      | Array<Record<string, unknown>>
+      | undefined;
+    expect(wireMounts).toEqual([expect.objectContaining({ hostPath: '/tmp/onecli-proxy-ca.pem', origin: 'provider' })]);
   });
 
   it('translates memoryMb/shmSizeMb (internal casing) to memoryMB/shmSizeMB (the real Go json tags)', async () => {
