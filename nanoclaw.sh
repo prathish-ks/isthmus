@@ -197,12 +197,13 @@ rm -f  "$PROGRESS_LOG"
 mkdir -p "$STEPS_DIR" "$LOGS_DIR"
 write_header
 
-# NanoClaw splash — under-the-sea lobster mascot in truecolor braille,
-# with the figlet wordmark and taglines below. Pre-rendered into
-# assets/setup-splash.txt (built from assets/nanoclaw-icon.png via chafa +
-# figlet); the bash script just streams the literal frame. clack's intro
-# then carries the "let's get you set up" framing — setup:auto sees
-# NANOCLAW_BOOTSTRAPPED=1 and skips re-printing the wordmark.
+# Isthmus splash — figlet wordmark and taglines, pre-rendered into
+# assets/setup-splash.txt; the bash script just streams the literal frame.
+# Deliberately carries no mascot art — this is an independent, unofficial
+# project (see README's disclaimer), not NanoClaw's own installer, and a
+# borrowed mascot would blur that distinction more than the wordmark text
+# alone does. clack's intro then carries the "let's get you set up" framing
+# — setup:auto sees NANOCLAW_BOOTSTRAPPED=1 and skips re-printing the wordmark.
 cat "$PROJECT_ROOT/assets/setup-splash.txt"
 
 # ─── pre-flight: minimum hardware specs ────────────────────────────────
