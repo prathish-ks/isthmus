@@ -7,6 +7,10 @@
 
 <p align="center"><em>A small, independently auditable Go trust-kernel for a NanoClaw-based personal agent host.</em></p>
 
+<p align="center">
+  <a href="https://github.com/prathish-ks/isthmus/actions/workflows/ci.yml"><img src="https://github.com/prathish-ks/isthmus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
 > **Independent, unofficial companion project.** Isthmus is not affiliated with, endorsed by, or an official artifact of NanoClaw or its maintainers ([nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw), [nanoclaw.dev](https://nanoclaw.dev)). It is a derivative work, built and published under its own name per NanoClaw's own MIT license, which preserves NanoClaw's entire ecosystem (channels, skills, customization model) untouched and re-implements a small set of security- and liveness-critical host decisions in Go. See [License](#license) for attribution.
 
 **Status:** pre-beta / experiment. The Go trust-kernel (guard decisions, mount security, egress verification, and a handful of liveness/lifecycle decisions) is implemented and tested — behaviorally pinned against NanoClaw `v2.3.0` — alongside NanoClaw's untouched TypeScript ecosystem. A full solo dry run (install stock NanoClaw → pair a real Telegram bot → upgrade to Isthmus in place → round trip → roll back to stock → round trip again, same data directory throughout, zero data loss) is done and documented in [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — but that's one operator, one machine, one channel. Still early, and still seeking outside testers across more channels and machines before any broader claim; see [Current status](#current-status-and-whats-not-changed) below for exactly what that does and doesn't mean.
