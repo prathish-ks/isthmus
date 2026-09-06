@@ -22,7 +22,7 @@ import (
 // HostVersion identifies this Go host build. Independent of the wire
 // protocol version internal/kernel freezes (ADR-008) — this changes with
 // any host release; that changes only when the socket protocol shape does.
-const HostVersion = "0.1.0-dev"
+const HostVersion = "0.1.0"
 
 // Report is nanogo status's full output shape — human- and machine-
 // (JSON-)readable alike, since every field is already a plain value.
