@@ -404,6 +404,73 @@ jobs:
           NANOCLAW_EC05_LIVE_DOCKER: "1"
         run: go test -mod=vendor ./internal/kernel/... -run TestLive -v
 
+  # go-egress-live-docker (ADR-013 Decision 3): the live-Docker test from
+  # go-host/internal/egress/live_docker_test.go — the one that actually
+  # runs a real privileged helper container against a real Docker daemon,
+  # mutates the real DOCKER-USER iptables chain, and confirms via an
+  # independent `iptables -C` check (not the package's own Check function)
+  # that the cloud-metadata/link-local block is genuinely active. Same
+  # shape and rationale as go-ec05-live-docker just below: gated behind
+  # NANOCLAW_EGRESS_LIVE_DOCKER=1 so a plain `go test ./...` — here or
+  # locally — never mutates a real iptables chain by accident, and
+  # report-only (continue-on-error: true, outside the `ci` gate's needs:)
+  # since a shared runner's Docker/iptables environment is more
+  # failure-prone than an in-process unit test and a flake here should
+  # never block an unrelated PR. This mechanism is Linux-only by design
+  # (see internal/egress's package doc comment on Docker Desktop for Mac's
+  # --network host being a proxy/forwarding emulation, not a real shared
+  # network namespace) so this job only needs ubuntu-latest, unlike
+  # go-host-os-matrix above.
+  go-egress-live-docker:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: go-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-host/go.mod
+      # Diagnostic-only (never fails the job on its own — every command is
+      # best-effort, `|| true`): two live-Docker fix attempts based on
+      # externally-documented iptables-nft/legacy split theories both
+      # failed to resolve this job's real failure, which means the theory
+      # is missing something specific to this runner. Rather than guess a
+      # third time, this step prints ground truth directly from the host
+      # (not from inside any helper container, so it can't share whatever
+      # bug the container-side mechanism has) — which iptables/nft variant
+      # the host resolves by default, whether DOCKER-USER exists under
+      # either backend already, and Docker's own reported security/network
+      # configuration. Read this output first when this job fails again.
+      - name: Diagnose host firewall backend (ground truth, not a guess)
+        run: |
+          echo "--- iptables --version (host) ---"
+          iptables --version || true
+          echo "--- ip6tables --version (host) ---"
+          ip6tables --version || true
+          echo "--- nft --version (host) ---"
+          nft --version || true
+          echo "--- update-alternatives --display iptables (host) ---"
+          update-alternatives --display iptables || true
+          echo "--- host: iptables -S DOCKER-USER ---"
+          sudo iptables -S DOCKER-USER || true
+          echo "--- host: nft list chain ip filter DOCKER-USER ---"
+          sudo nft list chain ip filter DOCKER-USER || true
+          echo "--- host: nft list ruleset (ip filter table only) ---"
+          sudo nft list table ip filter || true
+          echo "--- docker info (security/network relevant fields) ---"
+          docker info --format 'SecurityOptions: {{.SecurityOptions}} | CgroupDriver: {{.CgroupDriver}}' || true
+          echo "--- docker version (server) ---"
+          docker version --format '{{.Server.Version}}' || true
+          echo "--- kernel ---"
+          uname -a || true
+        continue-on-error: true
+      - name: egress live-Docker test (ADR-013 Decision 3)
+        env:
+          NANOCLAW_EGRESS_LIVE_DOCKER: "1"
+        run: go test -mod=vendor ./internal/egress/... -run TestLive -v
+
   # upstream-watch (P9-05, Phase 9/10 hardening): "CI obtains a pinned/
   # current NanoClaw upstream revision, runs baseline contracts and
   # compares Go behavior; alert on schema/contract drift" — the automated

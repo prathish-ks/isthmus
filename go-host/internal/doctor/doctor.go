@@ -1,11 +1,12 @@
 // Package doctor implements P7-02 (Phase 7 — UX & Operations): a set of
 // independent, named, read-only checks over the pieces a NanoClaw Go host
 // depends on — container runtime, agent image, central DB/mailboxes,
-// credential-provider connectivity, and the kernel socket boundary — each
-// returning a Result a person or a script can act on. Per the task's own
-// instruction, doctor never auto-fixes anything it finds wrong; every
-// Result with Level != LevelPass carries a Remediation string describing
-// the manual next step instead.
+// credential-provider connectivity, the kernel socket boundary, and (ADR-013
+// Decision 3) the cloud-metadata/link-local egress block — each returning a
+// Result a person or a script can act on. Per the task's own instruction,
+// doctor never auto-fixes anything it finds wrong; every Result with
+// Level != LevelPass carries a Remediation string describing the manual
+// next step instead.
 package doctor
 
 import (
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/prathish-ks/isthmus/go-host/internal/config"
+	"github.com/prathish-ks/isthmus/go-host/internal/egress"
 	"github.com/prathish-ks/isthmus/go-host/internal/hosterrors"
 	"github.com/prathish-ks/isthmus/go-host/internal/session"
 	"github.com/prathish-ks/isthmus/go-host/internal/status"
@@ -80,6 +82,17 @@ type Options struct {
 	AgentImage   string // docker image tag to check for; empty skips the check
 	KernelSocket string // Unix socket path to probe; empty skips the check
 	Runner       CommandRunner
+	// CheckEgressBlock opts into the ADR-013 Decision 3 check (whether the
+	// cloud-metadata/link-local firewall rule is active). Unlike this
+	// package's other checks, it is NOT free: on Linux it spawns a real,
+	// short-lived container to inspect the real DOCKER-USER chain — the
+	// same reason internal/kernel's live-Docker adversarial tests are
+	// gated behind an explicit opt-in rather than run on every plain
+	// `go test`/RunAll call. False (the zero value) skips it with a plain
+	// "not checked" Result, never touching a real Docker daemon — matching
+	// the AgentImage/KernelSocket convention above ("empty skips the
+	// check") — so cmd/nanogo is the only caller expected to set it true.
+	CheckEgressBlock bool
 }
 
 // RunAll runs every named check and returns all of their Results, in a
@@ -95,7 +108,33 @@ func RunAll(ctx context.Context, opts Options) []Result {
 		checkCentralDB(opts),
 		checkCredentialProvider(opts),
 		checkKernelBoundary(opts),
+		checkMetadataEgressBlock(ctx, opts),
 	}
+}
+
+// egressCheckName is shared between the "not checked" skip Result below
+// and internal/egress.Check's own Result.Name, so both paths report under
+// the identical check name regardless of whether CheckEgressBlock is set.
+const egressCheckName = "egress: cloud-metadata/link-local block"
+
+// checkMetadataEgressBlock delegates to internal/egress.Check (ADR-013
+// Decision 3) — a live-Docker check like checkContainerRuntime/
+// checkAgentImage above, so it belongs here rather than in
+// internal/securitycheck (see that package's own doc comment: it inspects
+// configuration/policy only, never a live daemon) — but unlike those two,
+// it is opt-in (see Options.CheckEgressBlock's doc comment for why) rather
+// than always live. egress.Result is redeclared, not imported from this
+// package, to keep egress a leaf with no dependency back on doctor — so
+// the conversion here is a plain field copy, not a shared type.
+func checkMetadataEgressBlock(ctx context.Context, opts Options) Result {
+	if !opts.CheckEgressBlock {
+		return Result{Name: egressCheckName, Level: LevelPass,
+			Detail: "not checked this run (pass -check-egress-block, or Options.CheckEgressBlock, to verify) — " +
+				"this check spawns a short-lived container, unlike this package's other checks, so it is opt-in " +
+				"rather than run by default on every doctor/RunAll call"}
+	}
+	r := egress.Check(ctx, opts.Runner)
+	return Result{Name: r.Name, Level: Level(r.Level), Detail: r.Detail, Remediation: r.Remediation}
 }
 
 func checkContainerRuntime(ctx context.Context, opts Options) Result {

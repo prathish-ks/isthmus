@@ -168,12 +168,13 @@ func runDoctorCmd(args []string) {
 	configPath := fs.String("config", "", "path to a config file (required)")
 	kernelSocket := fs.String("kernel-socket", "", "optional kernel Unix socket path to check")
 	agentImage := fs.String("agent-image", "", "optional docker image tag to check for locally")
+	checkEgressBlock := fs.Bool("check-egress-block", true, "verify the ADR-013 cloud-metadata/link-local firewall rule is active (spawns a short-lived container; set false to skip for a faster, container-free doctor run)")
 	jsonOut := fs.Bool("json", false, "print machine-readable JSON instead of text")
 	_ = fs.Parse(args)
 
 	cfg := mustLoadConfig(*configPath, "doctor")
 	results := doctor.RunAll(context.Background(), doctor.Options{
-		Config: cfg, AgentImage: *agentImage, KernelSocket: *kernelSocket,
+		Config: cfg, AgentImage: *agentImage, KernelSocket: *kernelSocket, CheckEgressBlock: *checkEgressBlock,
 	})
 
 	if *jsonOut {
