@@ -232,12 +232,36 @@ func Ensure(ctx context.Context, run Runner) error {
 // without ever changing anything (this package's mutating call is Ensure,
 // called only from nanogo serve's startup path — see doc.go's
 // non-capabilities convention for why doctor/security-check never mutate).
+//
+// Check's helper container is granted --cap-add NET_ADMIN even though its
+// script never inserts a rule — a real, live-CI-caught bug, not a guess:
+// listing a netlink-backed ruleset (`nft list chain ...`, and `iptables -S`/
+// `-C` once they resolve through the nft-compat backend, as they do on
+// Debian/Ubuntu by default) opens a netlink socket, and the kernel requires
+// CAP_NET_ADMIN to do that regardless of whether the caller intends to
+// write anything — an unprivileged container gets "Operation not permitted
+// (you must be root)" on a pure list/check just as it would on an insert.
+// Two earlier fix attempts here targeted the nft-vs-legacy-iptables backend
+// split (see detectAndScript's doc comment) because that's a real,
+// documented class of bug in this exact "container manipulates the host's
+// firewall" pattern — but a live CI run's own diagnostic dump (added to
+// gather ground truth after both of those fixes failed to change the
+// outcome) showed the actual failure directly: every read attempted by the
+// unprivileged verification container failed with "Operation not permitted
+// (you must be root)"/"netlink: Error: cache initialization failed:
+// Operation not permitted", regardless of backend. The capability, not the
+// backend, was the missing piece — granting it here does not weaken the
+// "never mutates" guarantee below, since capability governs what the
+// container is *allowed* to do, not what checkScript's own read-only
+// commands *choose* to do (see TestScripts_DetectBothNftAndLegacyBackends
+// and TestCheck_Linux_NeverMutates for the tests that keep that guarantee
+// verified independently of this capability grant).
 func Check(ctx context.Context, run Runner) Result {
 	const name = "egress: cloud-metadata/link-local block"
 	if runtime.GOOS != "linux" {
 		return unsupportedPlatformResult("check")
 	}
-	args := []string{"run", "--rm", "--network", "host", helperImage, "sh", "-c", checkScript()}
+	args := []string{"run", "--rm", "--network", "host", "--cap-add", "NET_ADMIN", helperImage, "sh", "-c", checkScript()}
 	if _, err := run.Run(ctx, "docker", args...); err != nil {
 		return Result{
 			Name:  name,

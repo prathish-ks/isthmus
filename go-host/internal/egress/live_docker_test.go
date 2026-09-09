@@ -77,7 +77,7 @@ func requireLiveLinuxDocker(t *testing.T) {
 //
 // It checks both the nft and legacy iptables backends, same as
 // detectAndScript itself — an earlier version of this helper checked only
-// legacy `iptables -C`, which is exactly why the first real CI run against
+// legacy `iptables -C`, which is exactly why an early real CI run against
 // ubuntu-24.04 reported "not found" for a rule Ensure had, in fact, just
 // installed via nft: Ubuntu's system iptables (and therefore the
 // DOCKER-USER chain Docker itself created there) points at the
@@ -85,6 +85,15 @@ func requireLiveLinuxDocker(t *testing.T) {
 // Alpine's legacy `iptables` package. See detectAndScript's doc comment in
 // egress.go for the full explanation. A single-backend independent check
 // would silently repeat that exact false negative on any nft-backed host.
+//
+// It also runs with --cap-add NET_ADMIN, confirmed necessary by real
+// evidence, not assumption: without it, this container's own `nft list`/
+// `iptables -S` calls failed with "Operation not permitted (you must be
+// root)" — a pure read, no insert attempted — which is what made two
+// earlier nft/legacy-backend fixes look like they weren't working: this
+// helper's own check was the thing failing to read, not the underlying
+// rule failing to exist. See egress.go's Check doc comment for the fuller
+// explanation (Check itself had, and needed, the same fix).
 func dockerUserRuleActive(t *testing.T) bool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -96,7 +105,7 @@ func dockerUserRuleActive(t *testing.T) bool {
 	// #nosec G204 -- every arg is a fixed literal or this file's own
 	// unexported package constants; nothing external/attacker-controlled
 	// reaches this argv.
-	_, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "host", helperImage, "sh", "-c", script).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	_, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "host", "--cap-add", "NET_ADMIN", helperImage, "sh", "-c", script).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	return err == nil
 }
 
@@ -106,17 +115,22 @@ func dockerUserRuleActive(t *testing.T) bool {
 // t.Logf so it shows up in `go test -v` regardless of whether the calling
 // test then passes or fails.
 //
-// Why this exists: two prior fix attempts for this test's failure were
-// each based on a plausible, externally-documented theory (first: Alpine's
-// legacy iptables vs Ubuntu's nft-compat default; then: detecting and
-// following whichever backend owns DOCKER-USER) and neither actually
-// resolved the failure on the real CI runner. Two theory-based fixes
-// failing in a row means the theory is missing something specific to this
-// environment — the responsible next step is ground truth from the actual
-// failing environment, not a third guess. This dumps exactly what
-// iptables/nft resolve to and what they can see, from inside the same
-// container context Ensure/Check use, so a real failure here carries the
-// evidence needed to diagnose it instead of just the bare assertion.
+// Why this exists, and what it already found: two prior fix attempts for
+// this test's failure were each based on a plausible, externally-documented
+// theory (first: Alpine's legacy iptables vs Ubuntu's nft-compat default;
+// then: detecting and following whichever backend owns DOCKER-USER) and
+// neither actually resolved the failure on the real CI runner. This dump
+// was added to get ground truth instead of a third guess — and on the very
+// next CI run, it worked exactly as intended: every line came back
+// "Operation not permitted (you must be root)" / "netlink: Error: cache
+// initialization failed: Operation not permitted", on pure list/read
+// commands, regardless of backend. That's what actually diagnosed the real
+// bug (this container itself lacked --cap-add NET_ADMIN, now fixed — see
+// egress.go's Check doc comment for the full explanation) rather than the
+// two backend theories, which were reasonable but not what was actually
+// failing. Left in place (not reverted) as ongoing tooling: any future
+// live-Docker failure here gets a container-level ground-truth dump for
+// free, without needing another diagnostics round-trip first.
 func dumpContainerDiagnostics(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -132,7 +146,7 @@ func dumpContainerDiagnostics(t *testing.T) {
 	// #nosec G204 -- every arg is a fixed literal or this file's own
 	// unexported package constants; nothing external/attacker-controlled
 	// reaches this argv.
-	out, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "host", helperImage, "sh", "-c", script).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	out, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "host", "--cap-add", "NET_ADMIN", helperImage, "sh", "-c", script).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	if err != nil {
 		t.Logf("dumpContainerDiagnostics: the diagnostic container itself errored (%v) — output so far:\n%s", err, string(out))
 		return

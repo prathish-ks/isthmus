@@ -141,6 +141,18 @@ func TestCheck_Linux_AbsentReportsWarnNotFail(t *testing.T) {
 	}
 }
 
+// TestCheck_Linux_NeverMutates locks in the "never mutates" guarantee at
+// the level that actually matters: the shell script Check's helper
+// container runs contains no insert command under either backend. It
+// deliberately does NOT assert anything about --cap-add NET_ADMIN being
+// absent from the container's argv — a real live-CI run proved that
+// capability grant is required for a pure read too (listing a
+// netlink-backed ruleset needs CAP_NET_ADMIN regardless of intent to write;
+// see Check's doc comment for the full story), so Check legitimately
+// carries the same capability as Ensure. "Never mutates" is a property of
+// what checkScript's commands *do*, not of what capabilities the container
+// *has* — conflating the two is exactly what let a real bug (Check unable
+// to read the ruleset at all) hide behind this test for two fix rounds.
 func TestCheck_Linux_NeverMutates(t *testing.T) {
 	skipUnlessLinux(t)
 	run := &fakeRunner{}
@@ -149,8 +161,11 @@ func TestCheck_Linux_NeverMutates(t *testing.T) {
 		t.Fatalf("Check: expected exactly one docker call, got %d", len(run.calls))
 	}
 	joined := strings.Join(run.calls[0].args, " ")
-	if strings.Contains(joined, "-I ") || strings.Contains(joined, "--cap-add") || strings.Contains(joined, "nft insert") {
-		t.Fatalf("Check: must never mutate (no -I insert, no nft insert, no NET_ADMIN) — got argv %q", joined)
+	if strings.Contains(joined, "-I ") || strings.Contains(joined, "nft insert") {
+		t.Fatalf("Check: must never mutate (no -I insert, no nft insert) — got argv %q", joined)
+	}
+	if !strings.Contains(joined, "--cap-add") || !strings.Contains(joined, "NET_ADMIN") {
+		t.Fatalf("Check: expected --cap-add NET_ADMIN — reading a netlink-backed ruleset requires it even for a pure list/check (see Check's doc comment) — got argv %q", joined)
 	}
 	if !strings.Contains(joined, "-C ") {
 		t.Fatalf("Check: expected a read-only legacy -C (check) invocation, got argv %q", joined)
