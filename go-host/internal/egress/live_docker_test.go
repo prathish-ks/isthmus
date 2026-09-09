@@ -70,16 +70,29 @@ func requireLiveLinuxDocker(t *testing.T) {
 	}
 }
 
-// dockerUserRuleActive runs the same `iptables -C DOCKER-USER ...` check
-// this package's own Check performs, but directly via a throwaway helper
-// container built by this test file rather than by calling into the
-// package under test — so this test's verification doesn't share a bug
-// with the code it's verifying.
+// dockerUserRuleActive checks whether the DOCKER-USER rule is present,
+// directly via a throwaway helper container built by this test file rather
+// than by calling into the package under test (detectAndScript) — so this
+// test's verification doesn't share a bug with the code it's verifying.
+//
+// It checks both the nft and legacy iptables backends, same as
+// detectAndScript itself — an earlier version of this helper checked only
+// legacy `iptables -C`, which is exactly why the first real CI run against
+// ubuntu-24.04 reported "not found" for a rule Ensure had, in fact, just
+// installed via nft: Ubuntu's system iptables (and therefore the
+// DOCKER-USER chain Docker itself created there) points at the
+// nftables-compat backend by default, a separate kernel-side ruleset from
+// Alpine's legacy `iptables` package. See detectAndScript's doc comment in
+// egress.go for the full explanation. A single-backend independent check
+// would silently repeat that exact false negative on any nft-backed host.
 func dockerUserRuleActive(t *testing.T) bool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	script := "apk add --no-cache iptables >/dev/null 2>&1; iptables -C " + dockerUserChain + " -d " + MetadataCIDR + " -j DROP 2>/dev/null"
+	script := "apk add --no-cache iptables nftables >/dev/null 2>&1; " +
+		"if nft list chain ip filter " + dockerUserChain + " >/tmp/du.nft 2>/dev/null; then grep -qF " + MetadataCIDR + " /tmp/du.nft; " +
+		"elif iptables -S " + dockerUserChain + " >/dev/null 2>&1; then iptables -C " + dockerUserChain + " -d " + MetadataCIDR + " -j DROP >/dev/null 2>&1; " +
+		"else exit 3; fi"
 	// #nosec G204 -- every arg is a fixed literal or this file's own
 	// unexported package constants; nothing external/attacker-controlled
 	// reaches this argv.

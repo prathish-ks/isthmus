@@ -149,10 +149,52 @@ func TestCheck_Linux_NeverMutates(t *testing.T) {
 		t.Fatalf("Check: expected exactly one docker call, got %d", len(run.calls))
 	}
 	joined := strings.Join(run.calls[0].args, " ")
-	if strings.Contains(joined, "-I ") || strings.Contains(joined, "--cap-add") {
-		t.Fatalf("Check: must never mutate (no -I insert, no NET_ADMIN) — got argv %q", joined)
+	if strings.Contains(joined, "-I ") || strings.Contains(joined, "--cap-add") || strings.Contains(joined, "nft insert") {
+		t.Fatalf("Check: must never mutate (no -I insert, no nft insert, no NET_ADMIN) — got argv %q", joined)
 	}
 	if !strings.Contains(joined, "-C ") {
-		t.Fatalf("Check: expected a read-only -C (check) invocation, got argv %q", joined)
+		t.Fatalf("Check: expected a read-only legacy -C (check) invocation, got argv %q", joined)
+	}
+	if !strings.Contains(joined, "nft list chain") {
+		t.Fatalf("Check: expected a read-only nft list (check) invocation too — see TestScripts_DetectBothNftAndLegacyBackends, got argv %q", joined)
+	}
+}
+
+// TestScripts_DetectBothNftAndLegacyBackends locks in the fix for a real,
+// live-Docker-caught bug: an earlier version of this package's scripts used
+// only Alpine's default `iptables` (the legacy ip_tables backend), and
+// against a real Docker daemon on ubuntu-24.04 (GitHub Actions CI), an
+// Ensure() that reported success left a follow-up independent check unable
+// to find the rule — because Ubuntu's system `iptables` (and therefore the
+// DOCKER-USER chain Docker itself created) points at the nftables-compat
+// backend by default, a completely separate kernel-side ruleset from
+// Alpine's legacy `ip_tables`. See detectAndScript's own doc comment for
+// the full explanation and links. This test can't exercise the live
+// mismatch itself (that needs a real daemon — see live_docker_test.go's
+// NANOCLAW_EGRESS_LIVE_DOCKER=1-gated tests) but it does assert both
+// backends are actually referenced in both scripts, so a future edit can't
+// silently drop the fallback and reintroduce the exact bug that was caught.
+func TestScripts_DetectBothNftAndLegacyBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		script string
+	}{
+		{"checkScript", checkScript()},
+		{"ensureScript", ensureScript()},
+	} {
+		for _, want := range []string{"nft list chain ip filter " + dockerUserChain, "iptables -S " + dockerUserChain, "apk add --no-cache iptables nftables"} {
+			if !strings.Contains(tc.script, want) {
+				t.Errorf("%s: expected script to contain %q, got %q", tc.name, want, tc.script)
+			}
+		}
+	}
+	if !strings.Contains(ensureScript(), "nft insert rule ip filter "+dockerUserChain) {
+		t.Errorf("ensureScript: expected an nft insert fallback alongside the legacy -I insert, got %q", ensureScript())
+	}
+	if !strings.Contains(ensureScript(), "iptables -I "+dockerUserChain) {
+		t.Errorf("ensureScript: expected a legacy -I insert fallback alongside the nft insert, got %q", ensureScript())
+	}
+	if strings.Contains(checkScript(), "nft insert rule") || strings.Contains(checkScript(), "iptables -I ") {
+		t.Errorf("checkScript: must never mutate under either backend, got %q", checkScript())
 	}
 }

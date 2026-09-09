@@ -89,6 +89,8 @@ type Runner interface {
 // OSRunner is the production Runner: the real `docker` binary via os/exec.
 type OSRunner struct{}
 
+// Run executes name (always "docker") with args via the real OS and returns
+// its combined output, satisfying Runner.
 func (OSRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
 	// name is always the literal "docker" passed by this file's own callers
 	// (Ensure/Check above) and args are entirely fixed by this package
@@ -106,6 +108,9 @@ func (OSRunner) Run(ctx context.Context, name string, args ...string) (string, e
 // egress, not the other way around, avoiding an import cycle.
 type Level string
 
+// The three levels a Result can report — see doctor's identically-shaped
+// Level type for what each means; this block exists only so egress stays a
+// leaf package (see the Level doc comment above for why it isn't imported).
 const (
 	LevelPass Level = "pass"
 	LevelWarn Level = "warn"
@@ -134,18 +139,71 @@ func unsupportedPlatformResult(verb string) Result {
 	}
 }
 
+// detectAndScript builds the shell script the helper container runs to
+// interact with whichever backend actually owns the DOCKER-USER chain on
+// this host — mutate=false for a read-only presence check (Check), true to
+// also insert the rule when it's missing (Ensure).
+//
+// Why detection instead of one tool: Debian/Ubuntu — overwhelmingly the
+// most common real-world Docker host — has pointed its system `iptables`
+// command at the nftables-compat translation layer (iptables-nft) by
+// default since roughly Debian 10 / Ubuntu 20.04, so that's the backend
+// Docker itself used to create DOCKER-USER there. Alpine's `iptables` apk
+// package, by contrast, still defaults to the older, independent
+// `ip_tables` kernel-module backend (xtables-legacy) — Alpine's own
+// tracker (https://gitlab.alpinelinux.org/alpine/aports/-/issues/14058)
+// shows nf_tables still isn't the default as of this writing. Those two
+// backends keep separate kernel-side rule tables that don't see each
+// other's writes — exactly the "dind runs legacy while the host runs nft,
+// so nothing the container writes ever shows up on the host" class of bug
+// documented at https://github.com/docker-library/docker/issues/443 and
+// https://github.com/tailscale/tailscale/issues/14900. A prior version of
+// this package used only Alpine's default `iptables` (legacy) and, run
+// against a real Docker daemon in CI (ubuntu-24.04, GitHub Actions), the
+// insert reported success while an independent follow-up check could not
+// find the rule — this exact mismatch, caught live rather than assumed.
+//
+// `nft` (from Alpine's separate `nftables` package) always speaks the
+// kernel's nf_tables API directly — the same API iptables-nft translates
+// into — so checking there first, and falling back to legacy iptables only
+// when DOCKER-USER isn't visible via nft, follows whichever backend
+// actually created the chain instead of guessing one. iptables-nft's
+// compat layer preserves the traditional per-protocol table/chain naming,
+// so DOCKER-USER shows up under nft as `chain ip filter DOCKER-USER` (IPv4
+// "ip" family, not the newer dual-stack "inet" family, which the compat
+// translation doesn't use). If DOCKER-USER exists in neither backend, the
+// script exits 3 with a stderr message rather than silently reporting
+// success — an unexpected state deserves a loud failure, not a false pass.
+func detectAndScript(mutate bool) string {
+	nftList := fmt.Sprintf("nft list chain ip filter %s", dockerUserChain)
+	nftInsert := fmt.Sprintf("nft insert rule ip filter %s ip daddr %s drop", dockerUserChain, MetadataCIDR)
+	legacyProbe := fmt.Sprintf("iptables -S %s", dockerUserChain)
+	legacyCheck := fmt.Sprintf("iptables -C %s -d %s -j DROP", dockerUserChain, MetadataCIDR)
+	legacyInsert := fmt.Sprintf("iptables -I %s -d %s -j DROP", dockerUserChain, MetadataCIDR)
+	grepCIDR := fmt.Sprintf("grep -qF %s", MetadataCIDR)
+
+	nftBranch := grepCIDR + " /tmp/du.nft"
+	legacyBranch := legacyCheck + " >/dev/null 2>&1"
+	if mutate {
+		nftBranch = grepCIDR + " /tmp/du.nft && exit 0; " + nftInsert
+		legacyBranch = legacyCheck + " >/dev/null 2>&1 && exit 0; " + legacyInsert
+	}
+
+	// Installing both packages is idempotent (a no-op once present); `;`
+	// not `&&` so a failed install still lets detection run and surface its
+	// own real error rather than masking it behind an install-step failure.
+	return "apk add --no-cache iptables nftables >/dev/null 2>&1; " +
+		"if " + nftList + " >/tmp/du.nft 2>/dev/null; then " + nftBranch + "; " +
+		"elif " + legacyProbe + " >/dev/null 2>&1; then " + legacyBranch + "; " +
+		"else echo 'egress: no DOCKER-USER chain found via nft or legacy iptables' >&2; exit 3; fi"
+}
+
 func checkScript() string {
-	return fmt.Sprintf("iptables -C %s -d %s -j DROP 2>/dev/null", dockerUserChain, MetadataCIDR)
+	return detectAndScript(false)
 }
 
 func ensureScript() string {
-	check := checkScript()
-	insert := fmt.Sprintf("iptables -I %s -d %s -j DROP", dockerUserChain, MetadataCIDR)
-	// apk install first (idempotent itself — a no-op if already present);
-	// `;` not `&&` so a failed install still lets the two iptables calls
-	// run and surface their own real error (e.g. binary genuinely missing)
-	// rather than masking it behind an install-step failure.
-	return fmt.Sprintf("apk add --no-cache iptables >/dev/null 2>&1; %s && exit 0; %s", check, insert)
+	return detectAndScript(true)
 }
 
 // Ensure installs the DOCKER-USER rule blocking MetadataCIDR if it is not
