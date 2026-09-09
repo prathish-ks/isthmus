@@ -432,6 +432,40 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go-host/go.mod
+      # Diagnostic-only (never fails the job on its own — every command is
+      # best-effort, `|| true`): two live-Docker fix attempts based on
+      # externally-documented iptables-nft/legacy split theories both
+      # failed to resolve this job's real failure, which means the theory
+      # is missing something specific to this runner. Rather than guess a
+      # third time, this step prints ground truth directly from the host
+      # (not from inside any helper container, so it can't share whatever
+      # bug the container-side mechanism has) — which iptables/nft variant
+      # the host resolves by default, whether DOCKER-USER exists under
+      # either backend already, and Docker's own reported security/network
+      # configuration. Read this output first when this job fails again.
+      - name: Diagnose host firewall backend (ground truth, not a guess)
+        run: |
+          echo "--- iptables --version (host) ---"
+          iptables --version || true
+          echo "--- ip6tables --version (host) ---"
+          ip6tables --version || true
+          echo "--- nft --version (host) ---"
+          nft --version || true
+          echo "--- update-alternatives --display iptables (host) ---"
+          update-alternatives --display iptables || true
+          echo "--- host: iptables -S DOCKER-USER ---"
+          sudo iptables -S DOCKER-USER || true
+          echo "--- host: nft list chain ip filter DOCKER-USER ---"
+          sudo nft list chain ip filter DOCKER-USER || true
+          echo "--- host: nft list ruleset (ip filter table only) ---"
+          sudo nft list table ip filter || true
+          echo "--- docker info (security/network relevant fields) ---"
+          docker info --format 'SecurityOptions: {{.SecurityOptions}} | CgroupDriver: {{.CgroupDriver}}' || true
+          echo "--- docker version (server) ---"
+          docker version --format '{{.Server.Version}}' || true
+          echo "--- kernel ---"
+          uname -a || true
+        continue-on-error: true
       - name: egress live-Docker test (ADR-013 Decision 3)
         env:
           NANOCLAW_EGRESS_LIVE_DOCKER: "1"

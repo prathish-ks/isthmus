@@ -100,6 +100,46 @@ func dockerUserRuleActive(t *testing.T) bool {
 	return err == nil
 }
 
+// dumpContainerDiagnostics runs a single, best-effort diagnostic pass
+// inside a --network host helper container — the exact context Ensure and
+// Check themselves run in — and logs the full, unsuppressed output via
+// t.Logf so it shows up in `go test -v` regardless of whether the calling
+// test then passes or fails.
+//
+// Why this exists: two prior fix attempts for this test's failure were
+// each based on a plausible, externally-documented theory (first: Alpine's
+// legacy iptables vs Ubuntu's nft-compat default; then: detecting and
+// following whichever backend owns DOCKER-USER) and neither actually
+// resolved the failure on the real CI runner. Two theory-based fixes
+// failing in a row means the theory is missing something specific to this
+// environment — the responsible next step is ground truth from the actual
+// failing environment, not a third guess. This dumps exactly what
+// iptables/nft resolve to and what they can see, from inside the same
+// container context Ensure/Check use, so a real failure here carries the
+// evidence needed to diagnose it instead of just the bare assertion.
+func dumpContainerDiagnostics(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	script := "apk add --no-cache iptables nftables >/dev/null 2>&1; " +
+		"echo '== iptables --version =='; iptables --version 2>&1; " +
+		"echo '== nft --version =='; nft --version 2>&1; " +
+		"echo '== nft list chain ip filter " + dockerUserChain + " =='; nft list chain ip filter " + dockerUserChain + " 2>&1; " +
+		"echo '== iptables -S " + dockerUserChain + " =='; iptables -S " + dockerUserChain + " 2>&1; " +
+		"echo '== iptables -S (first 20 lines) =='; iptables -S 2>&1 | head -20; " +
+		"echo '== nft list ruleset (first 40 lines) =='; nft list ruleset 2>&1 | head -40; " +
+		"true"
+	// #nosec G204 -- every arg is a fixed literal or this file's own
+	// unexported package constants; nothing external/attacker-controlled
+	// reaches this argv.
+	out, err := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", "host", helperImage, "sh", "-c", script).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	if err != nil {
+		t.Logf("dumpContainerDiagnostics: the diagnostic container itself errored (%v) — output so far:\n%s", err, string(out))
+		return
+	}
+	t.Logf("container-side diagnostics (same --network host context as Ensure/Check):\n%s", string(out))
+}
+
 // TestLive_Ensure_InstallsRealDockerUserRule is this file's headline test:
 // proves Ensure actually mutates the real DOCKER-USER chain on a real
 // Docker daemon, confirmed by an independent check (not this package's own
@@ -116,6 +156,7 @@ func TestLive_Ensure_InstallsRealDockerUserRule(t *testing.T) {
 	}
 
 	if !dockerUserRuleActive(t) {
+		dumpContainerDiagnostics(t)
 		t.Fatal("FINDING NOT REPRODUCED (good, but re-check this test): after Ensure, an independent `iptables -C` check still does not see the DOCKER-USER DROP rule for " + MetadataCIDR)
 	}
 	t.Logf("CONFIRMED LIVE: Ensure installed a DOCKER-USER rule blocking %s, verified independently via iptables -C", MetadataCIDR)
@@ -140,6 +181,7 @@ func TestLive_Ensure_IsIdempotent(t *testing.T) {
 		t.Fatalf("Ensure (second call): expected idempotent no-error, got: %v", err)
 	}
 	if !dockerUserRuleActive(t) {
+		dumpContainerDiagnostics(t)
 		t.Fatal("expected the DOCKER-USER rule to still be active after two Ensure calls")
 	}
 }
