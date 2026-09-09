@@ -20,6 +20,7 @@ import (
 	"syscall"
 
 	"github.com/prathish-ks/isthmus/go-host/internal/config"
+	"github.com/prathish-ks/isthmus/go-host/internal/egress"
 	"github.com/prathish-ks/isthmus/go-host/internal/kernel"
 	"github.com/prathish-ks/isthmus/go-host/internal/mount"
 	"github.com/prathish-ks/isthmus/go-host/internal/session"
@@ -151,6 +152,7 @@ func runServeCmd(args []string) {
 	var surfaceRoots stringList
 	fs.Var(&surfaceRoots, "surface-root", "an install-surface root mounts may reference read-only (repeatable)")
 	dockerNetwork := fs.String("docker-network", "", "optional fixed Docker network every container.wake attaches to (EC-02; mirrors drivers/index.ts's dockerNetworkArgs — a per-install constant, not a per-request value)")
+	blockMetadataEgress := fs.Bool("block-metadata-egress", true, "install a DOCKER-USER firewall rule blocking 169.254.0.0/16 (cloud-metadata/link-local) from every agent container (ADR-013 Decision 3; Linux only today, see internal/egress's package doc comment). Set false to opt out.")
 	_ = fs.Parse(args)
 
 	cfg := mustLoadConfig(*configPath, "serve")
@@ -176,6 +178,19 @@ func runServeCmd(args []string) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// ADR-013 Decision 3: block cloud-metadata/link-local egress by
+	// default. Best-effort and non-fatal, same posture as the missing
+	// -allowlist warning above — an optional hardening layer that isn't
+	// the primary security boundary shouldn't refuse to start the host
+	// over. On non-Linux, egress.Ensure no-ops silently (a disclosed gap,
+	// not a failure); the warning below only fires on Linux when the
+	// helper container invocation itself genuinely failed.
+	if *blockMetadataEgress {
+		if err := egress.Ensure(ctx, egress.OSRunner{}); err != nil {
+			fmt.Fprintf(os.Stderr, "serve: warning: SECURITY: %v — an agent container may be able to reach cloud instance-metadata services. Run `nanogo doctor` for more detail.\n", err)
+		}
+	}
 
 	fmt.Printf("nanogo: kernel listening on %s (pid %d) — Ctrl-C or SIGTERM to stop\n", *socketPath, os.Getpid())
 	if err := k.Serve(ctx, *socketPath); err != nil {
