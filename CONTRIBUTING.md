@@ -141,6 +141,17 @@ Instructions here...
 
 Agent templates (reusable bundles of instructions + MCP servers + skills) ship in NanoClaw's own separate [`nanocoai/nanoclaw-templates`](https://github.com/nanocoai/nanoclaw-templates) repo, not this one — Isthmus doesn't fork or replace that ecosystem. Contribute them there via PR (its README has the anatomy and checklist). For how templates load and the OneCLI credential model, see [docs/templates.md](docs/templates.md).
 
+## Documentation Style
+
+This project's docs (`README.md`, `docs/*.md`, ADRs, `go-host/docs/*.md`) get read by security-conscious people deciding whether to trust and run this project — including on Show HN, where AI-sounding docs get called out directly. Whether you draft with an AI assistant or by hand, edit toward these two rules before opening a PR:
+
+1. **Don't reflexively pair every claim with its negated opposite.** "X, not Y" / "stated plainly, not implied away" / "disclosed, not hidden" is a well-known AI-writing tell once it shows up more than once or twice in a doc. Use that construction only when the negation *is* the actual technical or security distinction being made — e.g. "structurally, not by convention" (`internal/credentialbroker`'s `Token` type), "allowed, not denied" (a real finding in `mount-validation-fixtures-p5.md`), or ADR-013's Linux-vs-macOS disclosed gap. If the sentence is just as true and clear with the negated half deleted, delete it.
+2. **Don't stack 2+ em-dash asides, or independent claims joined by a semicolon, into one sentence.** Split them. Vary sentence length on purpose — uniform-length, uniformly-hedged sentences read as synthetic regardless of whether the content is accurate.
+
+What *not* to touch in the name of this: disclosed limitations, honest trade-offs, and "who this is for" / "known gaps" sections. Those are exactly what makes the docs credible, and trimming them to sound less AI-written would make the docs worse, not better.
+
+For a worked example of what to fix and what to deliberately leave alone (including in security-sensitive docs like the threat model and ADR-013), see the `docs/deai-style-pass` commit.
+
 ## Testing
 
 Test your contribution on a fresh clone before submitting. For skills, run the skill end-to-end and verify it works. For `go-host/` changes, see the verification bar above.
@@ -152,7 +163,8 @@ Test your contribution on a fresh clone before submitting. For skills, run the s
 1. **Link related issues.** If your PR resolves an open issue, include `Closes #123` in the description so it's auto-closed on merge.
 2. **Test thoroughly.** Run the feature yourself. For skills, test on a fresh clone. For `go-host/`, run the full Go verification bar.
 3. **Check for installation-specific files.** Before creating a PR, verify no installation-specific files are in your diff.
-4. **Check the right box** in the PR template. Labels are auto-applied based on your selection:
+4. **If your PR touches docs, check them against [Documentation Style](#documentation-style) above** — no reflexive "X, not Y" pairing beyond real technical distinctions, no sentences stacking 2+ em-dashes.
+5. **Check the right box** in the PR template. Labels are auto-applied based on your selection:
 
 | Checkbox | Label |
 |----------|-------|
