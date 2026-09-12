@@ -31,7 +31,7 @@ Four actor kinds recur throughout the codebase (mirrors `GuardActor` in
 `container-runner.ts` exports exactly three functions that touch Docker directly:
 `wakeContainer` (spawn), `buildAgentGroupImage` (image rebuild), `killContainer`
 (stop). Every call site in the codebase, found by text search across the full
-source tree (not sampling):
+source tree:
 
 | Function | Caller | Actor | Gated by `guard()`? |
 |---|---|---|---|
@@ -68,12 +68,13 @@ to answer it" is the core, highest-volume, every-message operation, and LAW-01/
 LAW-04 are explicit that ordinary use must never carry security friction. So the
 threat model's honest conclusion is: **the codebase already guards every
 Docker-facing action an agent can deliberately reach except the one action that,
-by design, must remain unconditional.** That sharpens — again — exactly what
+by design, must remain unconditional.** That sharpens, again, exactly what
 Phase 3's first Go-kernel milestone is for: not "add missing decisions" (there
 mostly aren't any missing), but "make session/runtime admission on the ordinary
-path the one deliberately-ungated case it's supposed to be, safely" (bounded
-invariants — allowed mounts, resource caps, rate limits — rather than a human
-approval step, consistent with the "Value check" discussion already on record).
+path the one deliberately-ungated case it's supposed to be, safely". This means
+bounded invariants — allowed mounts, resource caps, rate limits — rather than a
+human approval step, consistent with the "Value check" discussion already on
+record.
 
 ## A fifth grant-binding shape, missed by P1-03's audit: CLI-command-derived guards
 
@@ -116,7 +117,7 @@ assuming it matches one of the other four shapes.
 
 ## Existing kernel-invariant tests — already real, not hypothetical
 
-`src/guard/conformance.test.ts` (read in full, not summarized from memory) already
+`src/guard/conformance.test.ts` (read in full) already
 locks in four of the exact invariants this project would want preserved by any Go
 port:
 
@@ -177,7 +178,7 @@ guard.ts" or even "gate container spawn."
 
 **The decisions are mostly already there.** Of the two things a Go kernel could
 supply — decisions and exclusive execution — this task confirms the *decision*
-layer is in good shape: five of six hand-written actions plus the entire `ncl`
+layer is in good shape. Five of six hand-written actions plus the entire `ncl`
 command surface already consult `guard()`, with only the one deliberately-open
 ordinary-message path as an exception.
 
@@ -185,8 +186,8 @@ ordinary-message path as an exception.
 `wakeContainer`, `buildAgentGroupImage`, and `killContainer` are ordinary exported
 TypeScript functions, callable from anywhere in the same process. `guard()`
 returning `ALLOW` or `DENY` is a convention every *current* call site happens to
-respect — self-mod calls the guarded wrapper, the CLI dispatcher calls the guarded
-wrapper — but nothing stops a new module, a future refactor, or a compromised
+respect: self-mod calls the guarded wrapper, the CLI dispatcher calls the guarded
+wrapper. But nothing stops a new module, a future refactor, or a compromised
 dependency anywhere in that same Node process from importing
 `container-runner.js` directly and calling `buildAgentGroupImage` without ever
 touching `guard()`. This is the concrete, mechanical shape of "exclusive

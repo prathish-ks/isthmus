@@ -6,7 +6,7 @@
 
 ## 1. Executive summary
 
-This project did not begin as a "rewrite NanoClaw in Go" idea. The starting point was understanding why OpenClaw and NanoClaw became valuable — what product principles they embodied — and where the architecture could be improved without destroying the original philosophy.
+The starting point was understanding why OpenClaw and NanoClaw became valuable — what product principles they embodied — and where the architecture could be improved without destroying the original philosophy.
 
 OpenClaw highlighted a product principle: reduce interaction friction. Put AI where users already work and let it act rather than merely answer.
 
@@ -85,7 +85,7 @@ Agent/container side
 
 ## 8. What makes this project valuable
 
-It is not another NanoClaw feature fork; it is an experiment in reducing the trusted computing base of an agent host. It tests whether high-risk host semantics can be made language- and runtime-independent through explicit contracts. It preserves the original author's simplicity/customization philosophy rather than forcing users into a second programming language for normal work. If successful, the pattern could generalize beyond NanoClaw: large agent frameworks could retain flexible ecosystem layers while moving a tiny set of privileged invariants into a separately auditable kernel. It aims to be a credible security-engineering showcase — decomposition, threat-boundary reasoning, compatibility engineering, regression testing, and upgrade strategy — not merely a language port.
+This project is an experiment in reducing the trusted computing base of an agent host, not another NanoClaw feature fork. It tests whether high-risk host semantics can be made language- and runtime-independent through explicit contracts. It preserves the original author's simplicity/customization philosophy rather than forcing users into a second programming language for normal work. If successful, the pattern could generalize beyond NanoClaw: large agent frameworks could retain flexible ecosystem layers while moving a tiny set of privileged invariants into a separately auditable kernel. It aims to be a credible security-engineering showcase — decomposition, threat-boundary reasoning, compatibility engineering, regression testing, and upgrade strategy — not merely a language port.
 
 ## 9. Current project direction
 

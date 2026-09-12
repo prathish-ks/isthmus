@@ -6,7 +6,7 @@ Status: written 2026-09-02, as task P6-01. Prerequisite: P5-06 (satisfied — Ph
 
 LAW-02 says a normal user must be able to ask Claude/Codex to change workflows, prompts, channels, or integrations without touching the Go kernel. That's a design intention until it has executable acceptance criteria. This catalogue is those criteria: 20 concrete NanoClaw customizations, each classified by which layer changes and whether Go source is expected to change. The default, per the task's own instruction, is **No** — Go should not change for ordinary customization. P6-03 proves ≥10 of these with zero Go edits; P6-05 computes the resulting preservation percentage across all 20.
 
-A handful of scenarios below are marked "No — but exercises the Go boundary as data." These are deliberately included, not omitted for tidiness: they are the customizations most likely to *look* like they need a Go change (because they interact with mount classes, session ownership, or resource limits — Phase 5's own territory) but don't, because the boundary was designed exactly to let flexible data flow through fixed Go validation. Getting this distinction catalogued explicitly is what lets P6-05 tell a real architectural defect (an unexpected Go edit) apart from a customization that was never going to be Go-free in the naive sense but is still LAW-02-compliant.
+A handful of scenarios below are marked "No — but exercises the Go boundary as data." These are deliberately included: they are the customizations most likely to *look* like they need a Go change (because they interact with mount classes, session ownership, or resource limits — Phase 5's own territory) but don't, because the boundary was designed exactly to let flexible data flow through fixed Go validation. Getting this distinction catalogued explicitly is what lets P6-05 tell a real architectural defect (an unexpected Go edit) apart from a customization that was never going to be Go-free in the naive sense but is still LAW-02-compliant.
 
 ## The 20 scenarios
 
@@ -39,11 +39,11 @@ Five scenarios (5, 9, 15, 17, 20) are genuinely different from the other fifteen
 
 ## What would make a scenario **Yes**
 
-For contrast, since none of the 20 above are: a Go change would be expected only if a customization needed the *set of enforced invariants itself* to change — e.g., "allow a container to mount an arbitrary host path the operator names at runtime" would require touching `internal/mount`'s class/allowlist logic, because that is asking the kernel to validate a genuinely new rule, not to accept new data under an existing one. No such request appears in this catalogue because none of the twelve master-plan-named customization categories (trigger word, agent name, greeting, formatting, custom route, skill, MCP tool, scheduler, multiple agents, channel, prompts, workflows) are, by nature, requests to change what the kernel is willing to enforce.
+For contrast, since none of the 20 above are: a Go change would be expected only if a customization needed the *set of enforced invariants itself* to change. For example, "allow a container to mount an arbitrary host path the operator names at runtime" would require touching `internal/mount`'s class/allowlist logic, because that is asking the kernel to validate a genuinely new rule, not to accept new data under an existing one. No such request appears in this catalogue because none of the twelve master-plan-named customization categories (trigger word, agent name, greeting, formatting, custom route, skill, MCP tool, scheduler, multiple agents, channel, prompts, workflows) are, by nature, requests to change what the kernel is willing to enforce.
 
 ## Feeds
 
 - **P6-02** (this phase's other deliverable): scenarios 1, 5, 9, 14, 16, 17, 20 above are exactly the shapes `internal/kernel`'s `route.request` and `capability.request` ops were designed against — see `docs/ADR-008-p6-02-ts-go-enforcement-boundary.md`.
-- **P6-03**: selects 10 of the 20 above (favoring the "exercises the Go boundary as data" ones, since they're the ones worth demonstrating, not just asserting) and proves each concretely.
+- **P6-03**: selects 10 of the 20 above (favoring the "exercises the Go boundary as data" ones, since they're the ones worth demonstrating) and proves each concretely.
 - **P6-04**: scenario 15 (new provider) and scenario 17 (credential-stub mount) are tested against real, already-shipped NanoClaw extensions (OneCLI, the provider-container registry) for that report.
 - **P6-05**: computes the preservation percentage across all 20.

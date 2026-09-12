@@ -42,8 +42,8 @@ reinterpretation of it.
 That means your data directory (central DB, mailboxes, config) should be
 readable by a stock NanoClaw install without conversion. This has **not**
 been separately exercised as a "downgrade" scenario in this beta yet —
-treat the backup step below as required, not optional, until a tester
-confirms this in practice.
+treat the backup step below as required until a tester confirms this in
+practice.
 
 ## Rollback steps
 

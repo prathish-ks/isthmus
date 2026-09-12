@@ -49,13 +49,13 @@ each row's own note for why.
   phase (the pre-existing `guardpolicy/policy_test.go` lint finding, found
   and fixed) rather than resting on the P9-01 close-out's own claim.
 - Added a new crash/restart dimension to row 1's coverage (P9-03) and a new
-  malformed/corrupt-state dimension (P9-04) — both feed row 1 and row 7
-  (security regression's automated half), not a new numbered row of their
-  own (the master plan's 12 layers already anticipated both under existing
-  numbers 1/7/10, and this table follows that numbering rather than
-  inventing parallel rows).
+  malformed/corrupt-state dimension (P9-04). Both feed row 1 and row 7
+  (security regression's automated half) rather than becoming a new
+  numbered row of their own — the master plan's 12 layers already
+  anticipated both under existing numbers 1/7/10, and this table follows
+  that numbering.
 - **Did not, and could not, touch rows 5, 6, 7's adversarial half, or 11** —
   those need either a live running system, a real TS-side customization
   re-run, or the user's own adversarial-pass session (EC-05), none of which
   this autonomous hardening pass has access to. Naming that plainly here is
-  this checklist doing its job, not a shortfall in this phase's own scope.
+  this checklist doing its job.

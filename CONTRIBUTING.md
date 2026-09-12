@@ -33,7 +33,7 @@ Breaking changes are allowed; **silent** ones are not. Isthmus, like NanoClaw, d
 `go-host/` is held to a stricter bar than the rest of the codebase, because its entire point is to be small enough to independently audit. Before opening a PR against it:
 
 1. **Read [`docs/host-decomposition.md`](docs/host-decomposition.md) first.** It classifies every host module as a Go-kernel candidate, a permanently-TypeScript module, or undecided. A PR that moves something into `go-host/` without that classification already settled will be asked to establish it first.
-2. **Contracts before code.** Every candidate kernel slice needs an explicit behavioral contract and compatibility/regression tests — ideally against the differential-fixture harness (`src/differential/`) capturing NanoClaw's real current behavior — *before* the Go port lands, not after. A PR that ports behavior without a contract test proving parity with the pinned NanoClaw baseline will be asked for one.
+2. **Contracts before code.** Every candidate kernel slice needs an explicit behavioral contract and compatibility/regression tests before the Go port lands. Ideally that means testing against the differential-fixture harness (`src/differential/`), which captures NanoClaw's real current behavior. A PR that ports behavior without a contract test proving parity with the pinned NanoClaw baseline will be asked for one.
 3. **LAW-01 / LAW-02.** Ordinary customization must never require touching Go. If your change would force a normal user-facing customization into `go-host/`, it's very likely out of scope for the kernel — open an issue to discuss the boundary first.
 4. **Fail closed.** Any privileged/security decision in the kernel (guard, mount, egress) must fail closed on an unknown or error case. A PR that introduces a fail-open path in these areas needs explicit justification and will get extra scrutiny.
 5. **Verification bar:** `go build`, `go vet`, `go test -race ./...`, and `gofmt -l .` clean, plus a note on which document (host-decomposition, threat-model, or an ADR) the change is grounded in.
@@ -72,7 +72,7 @@ Add a messaging channel or an agent provider. The SKILL.md contains the install 
 3. Add a SKILL.md in `.claude/skills/<name>/` with the fetch-and-copy steps, and a REMOVE.md that reverses every change. Plain prose steps are all that's required. A skill with a credential prompt or an interactive step should include a `## Troubleshooting` section.
 4. Open a PR. We'll land the code on the registry branch from your work
 
-See `/add-slack` for a good example. See [docs/skills-model.md](docs/skills-model.md) for why install is a fetch, never a merge.
+See `/add-slack` for a good example. See [docs/skills-model.md](docs/skills-model.md) for why install works this way.
 
 #### 2. Utility skills (with code files)
 

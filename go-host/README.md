@@ -17,9 +17,9 @@ delivery, the CLI, the whole extensibility surface — stays TypeScript.
 Everything the boundary itself needs to physically enforce (mount
 validation, container-argv hardening, capability-gated
 wake/kill/build_image) moves into a small, separately-tested Go binary
-(`nanogo`) that the TypeScript host talks to over a local Unix socket, and
-that a compromised or buggy caller in the TypeScript process cannot bypass
-by construction rather than by convention.
+(`nanogo`) that the TypeScript host talks to over a local Unix socket. A
+compromised or buggy caller in the TypeScript process cannot bypass it —
+by construction, not by convention.
 
 See [`docs/design-laws.md`](../docs/design-laws.md) for the nine design
 laws this project holds itself to (in short: flexible above, rigid below;
@@ -52,17 +52,16 @@ decisions that phase is made of). As of this writing:
 - **Capability scoping and credential brokering
   (`internal/capability`, `internal/credentialbroker`) are prototyped and
   tested in isolation, not yet adopted** into any live request path — a
-  named v1.1 candidate, not a v1 claim (`docs/ADR-014-p9-ec01-phase8-disposition.md`).
+  named v1.1 candidate (`docs/ADR-014-p9-ec01-phase8-disposition.md`).
 - **Guard-catalog coverage is real for a narrow, Go-enforced subset**
   (the CLI-derived `restart` guard and the self-mod `install_packages`/
   `add_mcp_server` gate, independently re-verified by the kernel itself
   from its own database read — `internal/guardpolicy`,
-  `docs/ADR-015-p9-ec04-kernel-side-guard-verification.md`) and
-  intentionally TypeScript-only for the rest of the guard catalog — by
-  design, not because porting the rest was deferred.
+  `docs/ADR-015-p9-ec04-kernel-side-guard-verification.md`). The rest of
+  the guard catalog is intentionally TypeScript-only, by design, not
+  because porting it was deferred.
 - **No independent red-team pass has been run against the live boundary
-  yet** — that is the project's own next step (EC-05), not yet started as
-  of this README.
+  yet** — that is the project's own next step (EC-05).
 
 ## Building and testing
 

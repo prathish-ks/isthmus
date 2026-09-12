@@ -95,10 +95,10 @@ the OneCLI credential provider, and the kernel socket boundary. Run it
 any time something seems wrong; it changes nothing it inspects.
 
 A fresh install normally passes all five cleanly. `doctor` doesn't check
-the mount allowlist — that's deliberate: this project's kernel supervisor
+the mount allowlist; that's deliberate. This project's kernel supervisor
 (the code that starts `nanogo serve` for you) always passes `-allowlist`
 pointing at `~/.config/nanoclaw/mount-allowlist.json` (the same file
-NanoClaw's own `mount-security` module already manages), so out of the
+NanoClaw's own `mount-security` module already manages). So out of the
 box, before you've configured that file, every `allowlisted-extra` mount
 (things like a Docker-socket or credential-directory bind mount) is
 denied by default rather than trusted — the opposite of what you'd get

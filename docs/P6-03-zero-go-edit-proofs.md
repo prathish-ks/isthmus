@@ -9,7 +9,7 @@ For each selected scenario, this document states the concrete change a user/Clau
 - **Structural proof** — the change's location has no code path into `go-host/` at all (a skill directory, a registry-branch fetch, a container-side file). No test can strengthen this beyond citing the mechanism; the proof is architectural.
 - **Executable proof** — the change is a *value* fed into an existing, unmodified Go function. The proof is the exact already-passing test (in this repository, today, before and after this phase) that exercises that function with a *different* value than the scenario's own, demonstrating the function's behavior is driven entirely by its parameters, not by a recompile.
 
-`go vet ./... && go test ./...` was re-run against `go-host/` immediately before writing this document (see P6-02/ADR-008's own verification) with zero failures and zero files changed since P6-02's commit other than the origin-exemption fix P6-04 required (documented there, not counted as a P6-03 customization — see that report's "closed, not open" note). That is the empirical zero-Go-diff baseline every scenario below is measured against.
+`go vet ./... && go test ./...` was re-run against `go-host/` immediately before writing this document (see P6-02/ADR-008's own verification), with zero failures and zero files changed since P6-02's commit. The one exception is the origin-exemption fix P6-04 required; it is documented there and not counted as a P6-03 customization (see that report's closed finding). That is the empirical zero-Go-diff baseline every scenario below is measured against.
 
 ## The 10 scenarios (selected from `docs/customization-catalogue.md`)
 
@@ -31,7 +31,7 @@ For each selected scenario, this document states the concrete change a user/Clau
 ### 4. Run two agents in one group against the same channel (#9)
 
 **Change:** wire a second `agent_groups` row to the same messaging group.
-**Proof:** executable. Each agent gets its own `SessionKey.AgentGroupID`; `mount.ValidateSpec`'s group-scope pinning already has dedicated cross-group tests — `TestCrossGroupGroupsRootWithoutFolderLabelRejected` and `TestCrossGroupGroupsRootWrongFolderLabelRejected` (`internal/mount/mount_test.go:95,103`) prove one group's mount is rejected under another group's label, i.e. the isolation invariant already generalizes to N distinct `AgentGroupID` values without a code change — running two agents is exactly two calls into this same unmodified check with two different, correctly-scoped `AgentGroupID`s.
+**Proof:** executable. Each agent gets its own `SessionKey.AgentGroupID`; `mount.ValidateSpec`'s group-scope pinning already has dedicated cross-group tests. `TestCrossGroupGroupsRootWithoutFolderLabelRejected` and `TestCrossGroupGroupsRootWrongFolderLabelRejected` (`internal/mount/mount_test.go:95,103`) prove one group's mount is rejected under another group's label — the isolation invariant already generalizes to N distinct `AgentGroupID` values without a code change. Running two agents is exactly two calls into this same unmodified check with two different, correctly-scoped `AgentGroupID`s.
 
 ### 5. Add a new messaging channel (Discord) (#10)
 
@@ -46,7 +46,7 @@ For each selected scenario, this document states the concrete change a user/Clau
 ### 7. Add a new agent provider (OpenCode) (#15)
 
 **Change:** `/add-opencode`, registering `registerProviderContainerConfig` per `src/providers/provider-container-registry.ts`.
-**Proof:** structural, with one executable footnote. Provider registration itself never touches `go-host/`. Where a provider's config fn contributes a mount (the executable half), see scenario 9's cousin below — proven directly, not by analogy.
+**Proof:** structural, with one executable footnote. Provider registration itself never touches `go-host/`. Where a provider's config fn contributes a mount (the executable half), see scenario 9's cousin below, proven directly.
 
 ### 8. Set a per-wiring thread-policy override (#16)
 
@@ -65,4 +65,4 @@ For each selected scenario, this document states the concrete change a user/Clau
 
 ## Result
 
-10 of 10 selected scenarios verified with zero Go modification from this point forward (scenario 9's one-time, already-completed prerequisite fix is accounted for separately in P6-04, not charged against this count — see that report's "closed, not open" framing). This satisfies the master plan's "≥10 scenarios work with zero Go modification" done-when for P6-03.
+10 of 10 selected scenarios verified with zero Go modification from this point forward. Scenario 9's one-time, already-completed prerequisite fix is accounted for separately in P6-04 and not charged against this count (see that report's closed finding). This satisfies the master plan's "≥10 scenarios work with zero Go modification" done-when for P6-03.
