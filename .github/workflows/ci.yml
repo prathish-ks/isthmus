@@ -528,3 +528,47 @@ jobs:
           else
             echo "Up to date with the pinned baseline's tag — no review needed on tag alone. (This does not check unreleased commits on upstream main; see docs/baseline.md's own 'Upstream watch' section for that slower-moving, human-run check.)"
           fi
+
+  # egress-image-watch (maintenance follow-up to ADR-013's digest pin,
+  # go-host/docs/version-compatibility.md §5): the DOCKER-USER helper
+  # container (internal/egress's helperImage) is pinned by exact manifest
+  # digest, not a floating tag — deliberately, so every install runs
+  # exactly the reviewed bits on this project's single most privileged
+  # container. The trade-off that discipline accepts is that a pinned
+  # digest does NOT receive Alpine's routine security patches automatically
+  # the way a floating tag would. This job is the automated "detect" half
+  # of the policy that keeps that pin from silently going stale: same
+  # cadence and posture as upstream-watch above (weekly + on-demand,
+  # report-only, continue-on-error: true) — a mismatch here is not a
+  # failure of this project, it's a prompt for a human to run
+  # version-compatibility.md §5's review/decide/promote steps. Also meant
+  # to be triggered manually (workflow_dispatch) before cutting a nanogo
+  # release, per that same section, since a release is otherwise the one
+  # natural checkpoint nothing else would prompt someone to use.
+  egress-image-watch:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the live alpine:3.20 digest against the pinned helper-image digest
+        run: |
+          set -euo pipefail
+          pinned_digest="$(grep -oE 'sha256:[0-9a-f]{64}' go-host/internal/egress/egress.go | head -1)"
+          if [ -z "$pinned_digest" ]; then
+            echo "::error title=No pinned digest found::Could not find a sha256:... digest in go-host/internal/egress/egress.go's helperImage const. This job's own grep pattern may be out of sync with that file."
+            exit 1
+          fi
+
+          docker pull alpine:3.20 >/dev/null
+          live_digest="$(docker inspect --format='{{range .RepoDigests}}{{.}}{{"\n"}}{{end}}' alpine:3.20 \
+            | grep -oE 'sha256:[0-9a-f]{64}' | head -1)"
+
+          echo "Pinned digest (egress.go):      $pinned_digest"
+          echo "Live alpine:3.20 digest (Hub):  $live_digest"
+
+          if [ "$live_digest" != "$pinned_digest" ]; then
+            echo "::warning title=Egress helper image drift::alpine:3.20 on Docker Hub now resolves to $live_digest, but internal/egress/egress.go still pins $pinned_digest. This is not necessarily urgent (a pin intentionally does not auto-update) — run the review/decide/promote steps in go-host/docs/version-compatibility.md §5 before re-pinning."
+          else
+            echo "Up to date — the pinned digest still matches the live alpine:3.20 tag."
+          fi

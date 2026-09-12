@@ -121,3 +121,53 @@ change warranting its own ADR before being retrofitted onto this doc.
   of this document's scope entirely — `docs/baseline.md`'s "Toolchain"
   sections already track these for the TypeScript side, independent of
   anything Go-side.
+
+## 5. Egress helper base-image pin
+
+A second, unrelated pin lives in this codebase and follows the same
+detect/review/decide/promote shape as §3, applied to a different kind of
+dependency: `internal/egress`'s `helperImage` const (`egress.go`) pins the
+one Docker image this project runs with real host-level privilege
+(`--network host`, `--cap-add NET_ADMIN`) by exact digest, not a floating
+tag — see that const's own doc comment for why a privileged helper
+container is exactly the wrong place to trust "whatever a tag currently
+resolves to."
+
+Pinning by digest trades away something real, and this section exists so
+that trade doesn't go unnoticed: a floating tag gets the upstream image's
+routine security patches for free every time Alpine rebuilds it; a pinned
+digest gets none of that until someone deliberately re-pins. Silently
+going stale is the specific failure this policy exists to prevent — an
+old, unpatched base image is worse than the drift a floating tag would
+have introduced, if nobody is ever prompted to look again.
+
+1. **Detect.** `.github/workflows/ci.yml`'s `egress-image-watch` job
+   (weekly + on-demand, report-only — mirrors `upstream-watch`'s own
+   cadence and non-blocking posture from §3) pulls the live `alpine:3.20`
+   tag and compares its current manifest digest against the one pinned in
+   `egress.go`. A mismatch does not mean the pinned image is broken or
+   insecure — only that a newer build of the same tag now exists.
+2. **Review.** On a mismatch, check Alpine's own release notes/security
+   advisories for what changed between the pinned digest and the new one
+   before assuming an update is warranted — same discipline as §3's
+   review step, scaled to a much smaller surface (one base image, not a
+   whole upstream project).
+3. **Decide.** If the new build fixes something worth having (a real CVE,
+   a meaningful base-package update) or enough time has simply passed that
+   staying current is the safer default: re-pin. If not: leave the pin as
+   is and note why in the commit that acknowledges the watch job's
+   finding, so the next person (or the next scheduled run) isn't left
+   wondering whether the drift was ever actually looked at.
+4. **Promote.** Update `egress.go`'s `helperImage` const (new digest, new
+   verification date in its doc comment) in its own small, reviewable
+   commit — never bundled silently into an unrelated change, so `git log`
+   on that one line stays a legible history of when and why the pin moved.
+
+**Tied to the release cadence, not just the weekly schedule**: before
+cutting a `nanogo` release (`.github/workflows/nanogo-release.yml`),
+manually trigger `egress-image-watch` via `workflow_dispatch` (or check its
+most recent scheduled run) and resolve any flagged drift first, rather than
+relying solely on the next Monday's cron to catch it. A release is a
+natural, memorable checkpoint for this kind of maintenance that has no
+other forcing function — the whole reason this policy exists is that
+nothing else would ever prompt someone to look.

@@ -67,15 +67,30 @@ const MetadataCIDR = "169.254.0.0/16"
 // restart — the documented, correct extension point for exactly this case.
 const dockerUserChain = "DOCKER-USER"
 
-// helperImage is a small, official base image used only to run `iptables`
-// inside the Docker daemon's own network namespace (see the package doc
-// comment). Pinned to a specific release, not `latest`.
+// helperImage is a small, official base image used only to run `iptables`/
+// `nft` inside the Docker daemon's own network namespace (see the package
+// doc comment) — the single most privileged container this project runs
+// (--network host, plus --cap-add NET_ADMIN on Ensure's and Check's
+// invocations both — see Check's own doc comment for why the read path
+// needs it too). Pinned by digest, not just a floating tag: a tag can be
+// repointed at different bytes at any time without this project's own code
+// or CI changing at all, and this is exactly the container where that
+// would matter most. The trailing comment records which tag this digest
+// corresponded to at pin time, for humans; Docker itself only ever
+// resolves the digest.
 //
-// TODO(security): pin by digest, not just tag, once run somewhere with
-// registry access — this was written in a sandboxed environment whose
-// egress policy blocks the Docker Hub registry API, so a verified digest
-// could not be looked up while authoring this.
-const helperImage = "alpine:3.20"
+// This resolves a TODO left open when the mechanism was first written in a
+// sandboxed environment whose egress policy blocks the Docker Hub registry
+// API — no verified digest could be looked up at the time. Verified
+// 2026-09-12 against Docker Hub's real manifest for alpine:3.20, from a
+// machine with real registry access.
+//
+// This pin does not update itself, and going unnoticed is exactly the
+// failure mode it's meant to avoid — see
+// go-host/docs/version-compatibility.md §5 for the detect/review/decide/
+// promote policy that keeps it current, and .github/workflows/ci.yml's
+// egress-image-watch job for the automated "detect" half.
+const helperImage = "alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc" // alpine:3.20
 
 // Runner is the narrow seam this package's Docker calls go through, so
 // tests can fake the one external dependency (what `docker` prints, what
