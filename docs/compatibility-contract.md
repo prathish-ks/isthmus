@@ -27,8 +27,7 @@ confirmed the container-side file directly, that phrasing overstates the risk.
   parsers; the container's copy is mechanically produced from it and checked in only
   because the two packages build and ship independently (Node host vs. Bun
   container image). A developer cannot accidentally let the two drift by editing
-  the wrong file and forgetting the other — there's a `generate` step, not two
-  independent things to remember.
+  the wrong file and forgetting the other — there's a single `generate` step to run.
 - This is good news for a future Go component: the "BOUNDARY" contract flagged in
   P1-01 already has a working single-source-of-truth precedent in this codebase. A
   Go implementation would most plausibly hand-port `model.ts`'s parsing rules once
@@ -195,14 +194,14 @@ Envelope" idea, taken literally, would hash/compare the *entire* approved action
 In practice this is fine for the two cases that use it: `create_agent`'s only
 attacker-relevant field is the name being created, and `a2a.send`'s only
 attacker-relevant field is the destination. But it is a deliberately narrow,
-per-action judgment call each time, not a generic mechanism — a future guarded
+per-action judgment call each time, not a generic mechanism. A future guarded
 action with more than one attacker-relevant field in its payload would need its own
 `grantCoversRequest` to think through which fields actually need binding, and
-nothing in `guard-actions.ts` forces that thinking to happen (there's no lint or
+nothing in `guard-actions.ts` forces that thinking to happen. There's no lint or
 type-level requirement that a `grantActionName`-bearing action also define
 `grantCoversRequest`; case 1 above shows an action can validly and safely omit it,
-so its absence elsewhere can't be treated as a code smell by itself — it has to be
-reasoned about per action, the way this audit just did for five of them).
+so its absence elsewhere can't be treated as a code smell by itself. It has to be
+reasoned about per action, the way this audit just did for five of them.
 
 ## Part C — one privileged action traced end to end: `install_packages`
 
@@ -299,7 +298,7 @@ or a bug in an unrelated one, from importing `buildAgentGroupImage` or
 `killContainer` directly and calling it without ever touching `guard()`. In other
 words: `guard()` and the approvals primitive make the *decision* layer excellent —
 but the *execution* layer (the actual Docker-facing functions in
-`container-runner.ts`) still has no boundary of its own, guarded or not. This is a
+`container-runner.ts`) still has no boundary of its own. This is a
 second, independent concrete example of exactly the "decision vs. execution
 authority" gap the second-opinion review raised and P1-02 first evidenced at the
 container-spawn site — now shown to apply to image-build and container-kill as
@@ -308,12 +307,12 @@ well, all of which live behind the same unguarded `container-runner.ts` surface.
 ## What this means for Phase 3 (non-committal, for P1-04/design later)
 
 The "must move behind Go to be exclusively enforced" boundary is broader than P1-02
-alone suggested. It isn't just "container spawn on the ordinary path" — it's every
+alone suggested. It isn't just "container spawn on the ordinary path." It's every
 call site that can reach `container-runner.ts`'s Docker-facing functions
 (`wakeContainer`, `buildAgentGroupImage`, `killContainer`), of which this task found
 at least two independent ones (ordinary wake, self-mod's approved-install path), with
-more likely elsewhere (not surveyed this pass — a good candidate for P1-04's threat
-model to enumerate exhaustively). A Go kernel that took over only the ordinary
+more likely elsewhere. That wasn't surveyed this pass — a good candidate for P1-04's
+threat model to enumerate exhaustively. A Go kernel that took over only the ordinary
 spawn path would leave the self-mod path's image-build/kill calls just as
 unguarded as they are today. This doesn't change the conclusion that session/runtime
 admission is the right *first* milestone — it just means "session/runtime admission"

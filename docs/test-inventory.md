@@ -20,7 +20,7 @@ Every `*.test.ts` file under `src/`, `container/`, `scripts/`, and `setup/` was 
 
 ## Two test runners, not one
 
-NanoClaw's own `vitest.config.ts` deliberately excludes `container/agent-runner/**` from the vitest run, with an explicit comment: those tests depend on `bun:sqlite` and run under `bun test` instead (see `container/agent-runner/package.json`'s own `"test": "bun test"` script). This split matters for Phase 2 because it means the compatibility harness will eventually need to speak to two different test runners, not one, if agent-runner-side behavior is ever in scope — though today it isn't: Phase 1 classified all of `container/agent-runner/` as KEEP TYPESCRIPT (Bun), unaffected by the Go-kernel work.
+NanoClaw's own `vitest.config.ts` deliberately excludes `container/agent-runner/**` from the vitest run, with an explicit comment: those tests depend on `bun:sqlite` and run under `bun test` instead (see `container/agent-runner/package.json`'s own `"test": "bun test"` script). This split matters for Phase 2 because it means the compatibility harness will eventually need to speak to two different test runners if agent-runner-side behavior is ever in scope — though today it isn't: Phase 1 classified all of `container/agent-runner/` as KEEP TYPESCRIPT (Bun), unaffected by the Go-kernel work.
 
 | Runner | Include pattern | Files | Approx. static test cases |
 |---|---|---|---|
@@ -28,7 +28,7 @@ NanoClaw's own `vitest.config.ts` deliberately excludes `container/agent-runner/
 | **bun test** (`container/agent-runner`) | `container/agent-runner/src/**/*.test.ts` | 39 | ~329 |
 | **Total** | | **199** | **~2013** |
 
-**Reconciliation against the recorded baseline**: `docs/baseline.md` records the vitest run at **161 files / 2006 tests** (99.25% pass, 15 known failures in 2 files) as of 2026-08-29. This inventory finds 160 vitest-tracked files as of 2026-08-31 — a one-file difference, most likely a test file added or removed between the two snapshots (several files carry mtimes from 2026-08-30, after the baseline was recorded, consistent with the mount-security hardening work and other small edits landing on the branch since). This is noted, not chased further — it's a rounding-level discrepancy, not a regression signal. The gap between this inventory's static ~1684 and the baseline's runtime-collected 2006 is the `it.each`/table-driven-test undercount described above, not a missing-file problem.
+**Reconciliation against the recorded baseline**: `docs/baseline.md` records the vitest run at **161 files / 2006 tests** (99.25% pass, 15 known failures in 2 files) as of 2026-08-29. This inventory finds 160 vitest-tracked files as of 2026-08-31 — a one-file difference, most likely a test file added or removed between the two snapshots. Several files carry mtimes from 2026-08-30, after the baseline was recorded, consistent with the mount-security hardening work and other small edits landing on the branch since. This is noted as a rounding-level discrepancy, not a regression signal. The gap between this inventory's static ~1684 and the baseline's runtime-collected 2006 is the `it.each`/table-driven-test undercount described above, not a missing-file problem.
 
 ## Inventory by category
 
@@ -89,7 +89,7 @@ Collapsing the categories above into the set Phase 1 identified as needing to mo
 
 This is a **compact, tractable set — 15 files, well under 200 static test cases** — which is itself a useful, reassuring finding for Phase 2's scoping: the differential-testing harness doesn't need to wrap the whole 199-file suite to start proving out Go/TypeScript behavioral parity. It needs these 15 files' worth of behavior (plus, per the design-laws annotation, the actual `mountAllowed`/`validateSpec` logic these tests exercise) to hold once the corresponding logic moves. Everything else in the 199-file inventory is a regression backstop for code that Phase 1 already confirmed is staying exactly where it is.
 
-`src/drivers/conformance.test.ts` is worth a specific callout: at 31.7KB it's one of the larger test files in the repo by byte size, but only ~8 static test-case call sites — most of its bulk is the `FIXTURE_POLICY`/`fixtureSpecWithAux` fixture-building helpers this file (and the mount-security hardening patch's new tests) share. Byte size is not a proxy for test-case count anywhere in this inventory; treat the "cases" column, not file size, as the sizing signal for harness-design effort.
+`src/drivers/conformance.test.ts` is worth a specific callout: at 31.7KB it's one of the larger test files in the repo by byte size, but only ~8 static test-case call sites — most of its bulk is the `FIXTURE_POLICY`/`fixtureSpecWithAux` fixture-building helpers this file (and the mount-security hardening patch's new tests) share. Byte size is not a proxy for test-case count anywhere in this inventory; treat the "cases" column as the sizing signal for harness-design effort.
 
 ## Coverage gap worth flagging
 

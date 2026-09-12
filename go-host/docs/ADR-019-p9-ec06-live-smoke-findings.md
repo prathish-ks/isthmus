@@ -11,10 +11,10 @@ release, distinct from EC-05's adversarial/security pass:
   outbound end to end." The closest existing evidence before this work was
   `scripts/p3-04-launch.sh` (P3-04, one manual round trip against a real
   Claude reply) and `scripts/p3-06-e2e.sh` (P3-06, a deterministic,
-  repeatable version of the same round trip) — both written **before EC-02
-  existed**, so both still issue `docker create`/`docker start` themselves,
+  repeatable version of the same round trip). Both were written **before EC-02
+  existed**, so both still issue `docker create`/`docker start` themselves —
   exactly the enforcement gap EC-02 closed in the running system.
-  `container-runner.ts` no longer calls Docker directly at all; a proof
+  `container-runner.ts` no longer calls Docker directly at all. A proof
   harness that still does is no longer proving what the system actually
   does.
 - **Row 11 (live smoke tests)** — "no CI job stands up a real container +
@@ -39,10 +39,10 @@ real session, end to end, for real.
   generalized so a shell harness can drive it from outside the process.
 - **`scripts/ec06-live-smoke.sh`** — starts a real, long-lived `nanogo
   serve` process (real Unix socket, real `-allowlist`, real
-  `-surface-root`), then for each of 2 repeats: prepares the mailbox
+  `-surface-root`). For each of 2 repeats, it prepares the mailbox
   (`-prepare-outbound`, `-write-chat`, both unchanged from P3-03/P3-06),
   builds a full, realistic `mount.Session` (the same mount classes and
-  fields a production session actually carries — `group-state` for the
+  fields a production session actually carries: `group-state` for the
   workspace/group/context/`.claude-shared` mounts, `install-surface` for
   `plugins`/agent-runner `src`/`skills`/`CLAUDE.md`), and dispatches
   `container.wake` through the real kernel socket via `livesmoke`. It never
@@ -105,7 +105,7 @@ pass itself surfaced rather than only what it set out to prove:
 1. **A `set -e` trap that would have turned an expected denial into a fatal
    script abort.** Bash aborts immediately on a bare `VAR="$(cmd)"` whose
    command fails, even though the very next line was meant to inspect that
-   failure — caught and fixed during self-testing (before any Mac run) by
+   failure. This was caught and fixed during self-testing (before any Mac run) by
    empirically confirming the behavior with a throwaway repro, then
    rewriting both the `container.wake` and `container.kill` response
    captures as the condition of an `if`, which correctly exempts them from
@@ -114,25 +114,25 @@ pass itself surfaced rather than only what it set out to prove:
    `trap - EXIT` clears a trap slot entirely rather than restoring
    whatever was active before it, so the run-loop's per-iteration
    `cleanup_run` trap would have permanently shadowed the outer
-   `cleanup_all` trap (the one that actually stops the kernel process) —
+   `cleanup_all` trap (the one that actually stops the kernel process). This was
    caught during self-testing by tracing the trap-swap sequence and
-   confirmed with a standalone repro before delivery; fixed by explicitly
+   confirmed with a standalone repro before delivery, then fixed by explicitly
    re-arming `cleanup_all` once the run loop finishes.
 3. **A live bug that only surfaced on the real Mac.** The
    `container.kill` envelope's `EC06_SESSION_ID="$SESSION_ID"` assignment
    was placed *after* the `python3 -c '...'` invocation instead of before
-   it — bash only exports an assignment as an environment variable for a
+   it. Bash only exports an assignment as an environment variable for a
    command when it precedes that command; placed after, it becomes a
    positional argument instead, and `os.environ` never saw it
    (`KeyError: 'EC06_SESSION_ID'`). This one was **not** caught in the
    cloud sandbox, because the sandbox has no real Docker daemon: the
    `container.wake` request there gets validated correctly and reaches a
    real `docker create` call, but fails at that final step for lack of a
-   daemon — so the harness never got far enough to also exercise the
+   daemon. So the harness never got far enough to also exercise the
    `container.kill` path against a real, live container the way a real Mac
    run does. This is worth naming as a small methodological finding of its
    own: sandbox self-testing caught 2 of 3 bugs before ever reaching a
-   real machine, but the one bug whose own trigger condition depends on a
+   real machine. The one bug whose own trigger condition depends on a
    real Docker daemon genuinely could not be caught there — which is
    exactly the gap live smoke testing exists to close, not a shortfall in
    the self-testing discipline itself.
@@ -148,12 +148,12 @@ pass itself surfaced rather than only what it set out to prove:
   P3-04 already proved real-Claude interop once, manually, pre-EC-02; this
   proof's point is exact repeatability of the kernel-mediated lifecycle
   itself, which a real (non-deterministic) LLM reply cannot cleanly assert
-  on. The two proofs are complementary, not redundant.
+  on. The two proofs are complementary.
 - **Not (yet) wired into CI.** Unlike EC-05's two live-Docker tests (which
   run on GitHub-hosted runners' pre-installed Docker daemon with no other
   dependencies), this proof needs the `ping_test` group's real, previously
   built agent-runner image and its scaffolding to exist on the machine
-  running it — infrastructure a CI runner does not have and building it
+  running it. That is infrastructure a CI runner does not have, and building it
   fresh in CI is a materially larger, separate task. This matches
   `release-gate-checklist.md`'s own existing language for both rows 5 and
   11 ("must be re-run manually before each release" / "must be run against
@@ -166,7 +166,7 @@ pass itself surfaced rather than only what it set out to prove:
 BLOCKER to closed-with-evidence, citing this ADR and `scripts/
 ec06-live-smoke.sh` as the concrete artifact to re-run before each future
 release. With this closed, no named blocker remains from Phase 9's revised
-scope (EC-01 through EC-05, ADR-018's own follow-up, and this EC-06 work)
-— every gap the Phase 5 readiness review and the Phase 6/7/8 close-outs
+scope (EC-01 through EC-05, ADR-018's own follow-up, and this EC-06 work).
+Every gap the Phase 5 readiness review and the Phase 6/7/8 close-outs
 named for the enforcement boundary itself is now closed, live-verified, or
 explicitly and honestly scoped as a documented v1 limit.

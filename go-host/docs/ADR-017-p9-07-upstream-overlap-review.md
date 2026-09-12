@@ -24,11 +24,11 @@ containers was actively being merged into NanoClaw core, "identical from
 Phase 9/10 is a hardening pass over this project's OWN Go code (fuzzing, CI,
 crash/restart tests, docs) — it does not itself add a new Go-side admission
 capability. But P9-07 exists precisely so that decision is made deliberately
-once per phase, not skipped by default: before this project's roadmap moves
+once per phase, not skipped by default. Before this project's roadmap moves
 into any phase that WOULD add new Go-side capability surface (v1.1's
 capability/credential-broker work named in `docs/ADR-014`, or anything
 building on EC-04's guard-catalog independence), a fresh check of what
-upstream has actually shipped since the pin is due diligence, not busywork.
+upstream has actually shipped since the pin is due diligence.
 
 ## What this review found (2026-09-03, via public GitHub pages — no
 authenticated API access, no repository clone; see Method below)
@@ -57,7 +57,7 @@ framing for the seam this project's ADR-003/ADR-016 already targeted — an
 independent confirmation that this project picked the right layer, not a
 sign it picked the wrong one.
 
-**One new, concrete compatibility fact worth recording, not acted on yet:**
+**One new, concrete compatibility fact worth recording:**
 v2.3.0's release notes state plainly that *"SQLite remains the default and
 existing `data/v2.db` files are unchanged"* despite the `DbDriver`
 abstraction — direct, first-party confirmation that this project's core
@@ -68,7 +68,7 @@ the upgraded `better-sqlite3` release"** — a newer native sqlite3 binding
 writing files this project's pure-Go `modernc.org/sqlite` (v1.57.0, vendored)
 must keep reading correctly. Recorded as a compatibility-matrix watch item
 (see `docs/compatibility-matrix.md`'s SQLite row) rather than a finding this
-ADR can resolve — verifying it needs a real file written by the upgraded
+ADR can resolve. Verifying it needs a real file written by the upgraded
 `better-sqlite3` on the user's Mac, not something checkable from this
 sandbox.
 
@@ -85,8 +85,8 @@ until it lands in a tag.
 9/10 adds no new differentiated Go-side feature, so there is nothing here to
 weigh against upstream's own direction. The applicable decision is **Defer**:
 this review clears Phase 9/10's own hardening work to proceed exactly as
-planned (nothing found here changes any of P9-01 through P9-06/P9-08/P9-09),
-but any FUTURE phase that adds new Go-side admission/capability surface
+planned (nothing found here changes any of P9-01 through P9-06/P9-08/P9-09).
+Any FUTURE phase that adds new Go-side admission/capability surface
 (the v1.1 candidate work in `docs/ADR-014`) must re-run this same review
 against whatever upstream tag is current at that time before assuming
 `DockerSessionDriver.prepare(spec)` and `drivers/types.ts`'s contract shape
@@ -109,11 +109,11 @@ sandbox has no network path to `github.com` (see `go-host/README.md`'s CI
 caveats), so this review ran from a session with broader, tool-mediated web
 access. GitHub's search UI over commits/PRs was not usable this way (returns
 a static default listing, not a real filtered search — the same limitation
-`docs/baseline.md` already noted); release notes and the repo's own
+`docs/baseline.md` already noted). Release notes and the repo's own
 description page were usable and are what this ADR's findings are drawn
 from. A `CHANGELOG.md` fetch returned only entries up to v2.1.0 despite
 v2.3.0 being tagged — apparently the file lags actual releases rather than
-being kept in lockstep — so this review treats the GitHub Releases page as
+being kept in lockstep. This review treats the GitHub Releases page as
 authoritative over `CHANGELOG.md` for "what shipped," and future re-runs
 should do the same.
 

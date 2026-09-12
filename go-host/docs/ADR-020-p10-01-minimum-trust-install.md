@@ -10,7 +10,7 @@ made `nanogo serve` (the Go security kernel EC-02/EC-03 put in the request
 path) *start*. Every real run of it so far — EC-05's live-Docker tests,
 EC-06's live smoke test (`scripts/ec06-live-smoke.sh`) — started it by hand,
 in a separate terminal, before the TS host ever ran. That is a fine harness
-convention for testing; it is not an install a beginner can be expected to
+convention for testing. It is not an install a beginner can be expected to
 follow (the master plan's own P10-01 instruction: "package Go host...
 detect prerequisites rather than silently sudo/install privileged
 software... done when a fresh-user install path is documented and
@@ -52,7 +52,7 @@ available for wiring `nanogo serve` into that same install:
   cli.ts`'s `realCli.start()` already spawns and supervises helper
   processes (`docker start --attach`) with `detached: true` specifically so
   a signal delivered to the host's process group does not also blindly hit
-  the child — this ADR's new `src/modules/kernel-supervisor/index.ts`
+  the child. This ADR's new `src/modules/kernel-supervisor/index.ts`
   reuses that exact reasoning and that exact flag, rather than inventing a
   second convention for "a supervised child process" in one codebase.
 
@@ -60,7 +60,7 @@ available for wiring `nanogo serve` into that same install:
 running either — there is no independent "start the kernel without the
 host" path in a normal install. This is judged acceptable because nothing
 in this project's architecture calls the kernel except the TS host itself
-(EC-02's whole point is that `container-runner.ts` is the sole caller); a
+(EC-02's whole point is that `container-runner.ts` is the sole caller). A
 kernel with no caller running has nothing to do.
 
 **Failure mode, by design**: if the `nanogo` binary can't be found, or the
@@ -72,7 +72,7 @@ error, handled as a runtime-unavailable failure, not an admission
 decision). A host running without a supervised kernel behaves exactly as
 it always has when nobody happened to start `nanogo serve` by hand:
 container wake/kill simply cannot succeed. This module only removes the
-"by hand" part for the common case; it adds no new way for a privileged
+"by hand" part for the common case. It adds no new way for a privileged
 action to slip through unenforced.
 
 ## Decision 2 — binary provisioning: build-from-source preferred, checksummed download as fallback, both rootless
@@ -110,13 +110,13 @@ called function does internally, not just its own top-level statement.
 Against a genuinely broken build, the script printed `built $DEST` and
 returned success with no binary ever produced. Found by actually running
 the script against a real failing build (not just `shellcheck`, which does
-not model cross-function `set -e` suspension) — fixed by checking the
+not model cross-function `set -e` suspension). Fixed by checking the
 subshell's own exit status explicitly with `if (...); then ... fi`,
 without depending on implicit `errexit` propagation through a call chain
 that might, from some caller, be evaluated as a tested condition. See the
 script's own comment at that point for the same account, and
 `claude/nanoclaw-go-host-roadmap-to-v1.md`'s EC-06 entry for this project's
-prior, similar `set -e` findings — this is now the third time a `set -e`-in-
+prior, similar `set -e` findings. This is now the third time a `set -e`-in-
 a-conditional-context subtlety has produced a real bug in this project's
 own scripts, which is worth naming as a recurring, specific hazard to keep
 checking for, not a one-off.
@@ -138,7 +138,7 @@ config, carrying three fields whose only purpose is to make a validator
 that was never updated for this new caller stop complaining. A cleaner fix
 — splitting `serve`'s actual config needs (`DataDir`/`GroupsDir` only) from
 P3-02's original single-session proof struct — is straightforward but
-out of scope for this ADR; recorded here so it isn't rediscovered as a
+out of scope for this ADR. It is recorded here so it isn't rediscovered as a
 mystery later, the same way ADR-004/ADR-015 have recorded similar
 scope-boundary findings from earlier phases.
 
@@ -150,8 +150,8 @@ account. `install.sh` clears the resulting quarantine flag itself, but
 only *after* verifying the binary's checksum against the release's own
 `SHA256SUMS` (see that script's header comment and `release-verification
 .md`). This is judged acceptable for a project explicitly framed as
-security-conscious open source rather than a signed commercial product,
-and is stated here plainly rather than glossed over — matching P10-04's
+security-conscious open source rather than a signed commercial product.
+It matches P10-04's
 own instruction to distinguish "100% of defined tests pass" from
 "bug-free," applied here to "verified download" vs. "Apple-notarized."
 

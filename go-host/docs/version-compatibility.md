@@ -57,8 +57,8 @@ The wire protocol between the TypeScript host and this kernel (EC-02;
 `ProtocolVersion`) is a SEPARATE version axis from upstream NanoClaw's own
 version — it only needs to change when THIS project changes the TS↔Go
 contract, never as a direct consequence of an upstream nanoclaw release. Do
-not conflate a `ProtocolVersion` bump with a compatibility-pin promotion;
-they are independent and typically won't happen in the same change.
+not conflate a `ProtocolVersion` bump with a compatibility-pin promotion.
+They are independent and typically won't happen in the same change.
 
 ## 3. Deprecation / drift policy
 
@@ -70,7 +70,7 @@ they are independent and typically won't happen in the same change.
    release's notes specifically against §1's table above. Most releases will
    touch none of these rows (v2.3.0 itself shipped a Slack UX rework,
    scheduled-task cascade-delete semantics, and an OneCLI version bump
-   alongside the driver-seam/DbDriver work this table does care about) — a
+   alongside the driver-seam/DbDriver work this table does care about). A
    clean review is a normal, expected, and still-worth-recording outcome
    ("the following upstream changes were checked and found not to touch any
    consumed contract"), not a signal something is broken.
@@ -88,7 +88,7 @@ they are independent and typically won't happen in the same change.
 
 There is deliberately no automatic "adapter versioning" scheme (no
 `v1`/`v2` suffix on Go package names, no runtime negotiation of which
-upstream shape a request matches) — this project has exactly one pinned
+upstream shape a request matches). This project has exactly one pinned
 upstream baseline at a time, per LAW-09's "decoupled from active upstream
 churn" posture, so there is nothing to negotiate between. If this project
 ever needs to support two upstream baselines concurrently (e.g. mid-
@@ -114,7 +114,7 @@ change warranting its own ADR before being retrofitted onto this doc.
   part in and cannot control the timing of. **Action item, not yet done**:
   verify `modernc.org/sqlite` v1.57.0 (vendored) can read a `data/v2.db`
   actually written by the Node-22-era `better-sqlite3` on the user's real
-  Mac — this needs the real file, not something this project's development
+  Mac. This needs the real file, not something this project's development
   sandbox can produce or check. Tracked in `docs/compatibility-matrix.md`'s
   SQLite row as Preview/Pending until that check runs.
 - **Node.js / pnpm / Bun** (the TS/Bun side's own toolchain versions): out

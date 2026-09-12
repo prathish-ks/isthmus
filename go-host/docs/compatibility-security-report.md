@@ -73,8 +73,8 @@ bind-mounted into a container under this condition. The allowlist hook
 itself works correctly once an operator configures it (confirmed by the
 paired control test, in-process and live). **Follow-up, done**: `nanogo
 serve` and the standalone `security-check` subcommand each emit a loud,
-specific warning when invoked without `-allowlist` (commit `56a4c8f1`)
-— `doctor` has no allowlist-related check at all (its five checks are
+specific warning when invoked without `-allowlist` (commit `56a4c8f1`).
+`doctor` has no allowlist-related check at all (its five checks are
 container runtime, agent image, central DB/mailboxes, credential
 provider, and the kernel socket boundary; confirmed by reading
 `internal/doctor/doctor.go` and by a live `doctor` run showing exactly
@@ -82,7 +82,7 @@ those five, none of them about mounts). **Superseded for the normal
 install path by Phase 11**: `src/modules/kernel-supervisor/index.ts`
 (P10-01) always launches `nanogo serve` with `-allowlist` pointing at
 `MOUNT_ALLOWLIST_PATH`, so this warning never fires for a host started
-the sanctioned way — instead, `mount.CheckAllowlistedExtra` fails closed
+the sanctioned way. Instead, `mount.CheckAllowlistedExtra` fails closed
 against a missing or unconfigured allowlist file (denies every
 `allowlisted-extra` mount, per its own doc comment), which is a
 *stricter* out-of-the-box default than this report originally described.
@@ -110,17 +110,17 @@ on the real Mac (2M+ executions with zero failures for the four run
 locally; `FuzzDispatch` written blind in the sandbox and confirmed on its
 first real execution). **One real, confirmed, fixed security bug found
 this way**: `ownership.SafeMailboxPath` did not validate its `side`
-parameter before joining it into a path, allowing traversal — confirmed
-exploitable in an isolated module, confirmed zero production callers,
-fixed with a validation check plus a regression test (`internal/ownership
-/ownership.go`, part of commit `f32f890a`).
+parameter before joining it into a path, allowing traversal. This was
+confirmed exploitable in an isolated module, confirmed zero production
+callers, and fixed with a validation check plus a regression test
+(`internal/ownership/ownership.go`, part of commit `f32f890a`).
 
 **Crash/restart and malformed-state tests** (P9-03/P9-04): a kernel
 restart loses its in-memory session registry by design (`internal/
 lifecycle.Registry` is purely in-memory) — this is what makes the TS
 client's `unknown-session` local-fallback path (EC-02) reachable in
-practice, not theoretical; a duplicate `kill` after a session is already
-finished fails closed rather than double-executing; a DB lookup failure
+practice, not theoretical. A duplicate `kill` after a session is already
+finished fails closed rather than double-executing. A DB lookup failure
 during guard evaluation surfaces as an explicit error, never a silent
 allow. All confirmed on the real Mac with zero fixes needed once run for
 real.
@@ -139,7 +139,7 @@ real.
   `docker create`/`stop`+`rm`/`build` only. Discovery (`listSessions`/
   `watchSessions`/`reapResidue`), attach-based supervision, and `exec` stay
   TypeScript-only by design, because none of them make an admission
-  decision — not because they were overlooked.
+  decision.
 - **Guard-catalog coverage is intentionally partial** (EC-04, `ADR-015-p9-
   ec04-kernel-side-guard-verification.md`): only the self-mod `install_
   packages`/`add_mcp_server` checks and the CLI-derived `restart` guard are

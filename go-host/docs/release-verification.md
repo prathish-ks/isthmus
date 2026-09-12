@@ -11,7 +11,7 @@ repo triggers `.github/workflows/nanogo-release.yml`, which cross-compiles
   [Sigstore/cosign](https://docs.sigstore.dev/) keyless signature over
   `SHA256SUMS` and the short-lived certificate that signature was made
   with. This is the step up from a checksum: a checksum proves a file
-  matches what *some* SHA256SUMS says; the signature proves that
+  matches what *some* SHA256SUMS says. The signature proves that
   `SHA256SUMS` itself was produced by *this repository's own release
   workflow*, not by anyone who could edit a webpage or a release's file
   list after the fact.
@@ -27,8 +27,8 @@ This project has no private signing key sitting in a GitHub secret for
 anyone to steal or for a compromised CI run to misuse. Instead, cosign's
 keyless mode has the release workflow prove its own identity to Sigstore's
 public Fulcio certificate authority via GitHub's own OIDC token for that
-specific run, gets a certificate scoped to `prathish-ks/isthmus`'s
-`.github/workflows/nanogo-release.yml` valid for a few minutes, signs with that,
+specific run, and gets a certificate scoped to `prathish-ks/isthmus`'s
+`.github/workflows/nanogo-release.yml`, valid for a few minutes. It signs with that certificate,
 and the certificate is published alongside the signature. Verifying later
 means checking the signature was made with a certificate that really was
 issued to *this repo's release workflow* — not trusting a key that could
@@ -92,7 +92,7 @@ have leaked or been rotated without anyone noticing.
 Checksum + signature together prove: "this exact file is what
 `prathish-ks/isthmus`'s own `nanogo-release.yml` workflow produced for
 this tag, unmodified since." They do **not** prove the source code itself
-is free of bugs or vulnerabilities — that is what `go-host/docs/
+is free of bugs or vulnerabilities. That is what `go-host/docs/
 compatibility-security-report.md`'s test results and known-limitations
 section are for, and what the published SBOM lets a separate vulnerability
 scanner check independently.

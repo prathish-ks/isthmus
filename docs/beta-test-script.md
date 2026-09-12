@@ -88,9 +88,9 @@ point we're testing.
 ## If something doesn't work
 
 Before reporting a bug, it's worth trying to self-resolve it with Claude
-first — this isn't a cop-out, it's the same model NanoClaw's own
-maintainers expect of *their* users ("fork it and have Claude Code modify
-it to match your needs"). Isthmus's own tooling is built for exactly this:
+first — the same model NanoClaw's own maintainers expect of *their* users
+("fork it and have Claude Code modify it to match your needs"). Isthmus's
+own tooling is built for exactly this:
 
 1. Run `nanogo doctor` and copy its full output.
 2. Open the repo in Claude Code (or paste the output into any Claude
