@@ -89,12 +89,18 @@ go-host/bin/nanogo doctor -config <path> -kernel-socket data/nanogo-kernel.sock
 automatically at `data/nanogo-serve-config.json` — pass that path; you never
 need to write one by hand.) `doctor` reports one line per check —
 `[PASS]`/`[WARN]`/`[FAIL]` — with a remediation line under anything that
-isn't a clean pass. It checks five things: the container runtime, the
-agent image (only if you pass `-agent-image`), the central DB/mailboxes,
-the OneCLI credential provider, and the kernel socket boundary. Run it
-any time something seems wrong; it changes nothing it inspects.
+isn't a clean pass. It checks seven things: the container runtime, the
+container runtime class (whether this daemon runs containers under a
+hardened runtime like gVisor or Kata, or the ordinary shared-kernel
+`runc`), the agent image (only if you pass `-agent-image`), the central
+DB/mailboxes, the OneCLI credential provider, the kernel socket boundary,
+and the cloud-metadata/link-local egress block. Run it any time something
+seems wrong; it changes nothing it inspects.
 
-A fresh install normally passes all five cleanly. `doctor` doesn't check
+A fresh install normally passes all seven cleanly — including the runtime
+class, which passes on a stock Docker install and says plainly in its
+detail line that containers share the host kernel, since Isthmus provides
+no isolation of that kind itself. `doctor` doesn't check
 the mount allowlist; that's deliberate. This project's kernel supervisor
 (the code that starts `nanogo serve` for you) always passes `-allowlist`
 pointing at `~/.config/nanoclaw/mount-allowlist.json` (the same file
