@@ -86,6 +86,48 @@ They are independent and typically won't happen in the same change.
    should silently track upstream churn" discipline `docs/upstream-pin.json`
    itself documents (LAW-09).
 
+### 3.1 Sibling-branch drift (`channels` / `providers`)
+
+§1–§3 treat upstream as one pinned release tag. The `channels` and
+`providers` branches are a second, independent drift axis: this fork mirrors
+them, `registry-skills.yml` composes each `/add-*` skill against whatever
+`origin/channels` points at, and the skills copy adapter code onto a core
+that stays pinned at the baseline release. So adapter code can move ahead of
+the core contract it consumes without any release tag changing.
+
+**First observed instance, 2026-09-14.** Refreshing the mirror from
+`c3f900f4` to upstream's `6d5c1d08` (the delta: the whole `local-web`
+channel plus `slack-raw-text`) failed the `add-slack` composition with two
+errors: `Cannot find module './slack-raw-text.js'` — this fork's `add-slack`
+SKILL.md did not copy the two new files — and
+`'extractRawText' does not exist in type 'ChatSdkBridgeConfig'`, a genuine
+core-contract addition upstream made to `src/channels/chat-sdk-bridge.ts`
+after the v2.3.0 pin. The second one is the point: a *core* file this fork
+owns had drifted behind what the newer adapter code requires. Resolved by
+porting the seam (`RawTextExtractor`, the optional `extractRawText` config
+field, the exported `appendRawText` helper and its single call site before
+`raw` is dropped) plus upstream's own
+`chat-sdk-bridge-raw-text.test.ts`, and adding the two skill copy lines.
+
+**Procedure, for next time.** Before moving either mirror, compose against
+the candidate SHAs without touching the mirror at all:
+
+```sh
+git fetch upstream channels providers
+pnpm exec tsx scripts/test-registry-skills.ts --all add-slack add-telegram add-mattermost   # control: current mirror
+NANOCLAW_REGISTRY_REMOTE=upstream pnpm exec tsx scripts/test-registry-skills.ts --all add-slack add-telegram add-mattermost
+```
+
+A failure there is the signal to port a core contract first, in its own
+commit, and only then move the mirror — the reverse order turns CI red on
+the next PR to `main`, because the workflow reads `origin/channels` at run
+time. Note also what this check does *not* prove: each skill's `test` effect
+mostly runs only `<channel>-registration.test.ts`, so a green run means "the
+skill applies and the composed tree builds," not that any adapter behaves
+correctly. Static import-existence checks are weaker still — the
+`extractRawText` failure was a config-object shape mismatch, invisible to
+grep and caught only by `tsc`.
+
 There is deliberately no automatic "adapter versioning" scheme (no
 `v1`/`v2` suffix on Go package names, no runtime negotiation of which
 upstream shape a request matches). This project has exactly one pinned
