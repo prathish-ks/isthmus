@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/prathish-ks/isthmus/go-host/internal/config"
@@ -85,6 +86,108 @@ func TestCheckContainerRuntime_Healthy(t *testing.T) {
 	})
 	if r.Level != LevelPass {
 		t.Fatalf("Level = %q, want pass", r.Level)
+	}
+}
+
+// runtimeClassRunner returns out/err for the single `docker info` call
+// checkRuntimeClass makes. It exists alongside fakeRunner because that
+// runner's map is keyed by binary name alone, so it cannot give two
+// different answers to the two `docker info` calls a full RunAll makes —
+// which is exactly the condition
+// TestCheckRuntimeClass_UnparseableOutputIsNotDetermined below pins down.
+type runtimeClassRunner struct {
+	out string
+	err error
+}
+
+func (runtimeClassRunner) LookPath(name string) (string, error) { return "/usr/bin/" + name, nil }
+
+func (r runtimeClassRunner) Run(context.Context, string, ...string) (string, error) {
+	return r.out, r.err
+}
+
+func TestCheckRuntimeClass_HardenedDefaultPasses(t *testing.T) {
+	for _, tc := range []struct {
+		name, out, wantMention string
+	}{
+		{"gvisor", "runsc;runc runsc ", "gVisor"},
+		{"kata containerd shim", "io.containerd.kata.v2;runc io.containerd.kata.v2 ", "Kata Containers"},
+		{"sysbox", "sysbox-runc;runc sysbox-runc ", "Sysbox"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := checkRuntimeClass(context.Background(), Options{Runner: runtimeClassRunner{out: tc.out}})
+			if r.Level != LevelPass {
+				t.Fatalf("Level = %q, want pass", r.Level)
+			}
+			if !strings.Contains(r.Detail, tc.wantMention) {
+				t.Fatalf("Detail = %q, want it to name %q", r.Detail, tc.wantMention)
+			}
+		})
+	}
+}
+
+func TestCheckRuntimeClass_HardenedInstalledButNotDefaultWarns(t *testing.T) {
+	// The one case worth an operator's attention: they installed gVisor,
+	// and containers are not getting it. See checkRuntimeClass's own doc
+	// comment for why this, and not the absence of a hardened runtime, is
+	// what warns.
+	r := checkRuntimeClass(context.Background(), Options{
+		Runner: runtimeClassRunner{out: "runc;io.containerd.runc.v2 runc runsc "},
+	})
+	if r.Level != LevelWarn {
+		t.Fatalf("Level = %q, want warn", r.Level)
+	}
+	if r.Remediation == "" {
+		t.Fatal("Remediation must not be empty on a non-pass Result")
+	}
+	if !strings.Contains(r.Detail, "runsc") {
+		t.Fatalf("Detail = %q, want it to name the installed-but-unused runtime", r.Detail)
+	}
+}
+
+func TestCheckRuntimeClass_NoHardenedRuntimePassesWithHonestDetail(t *testing.T) {
+	// A stock Docker install is the expected case for a personal host, so
+	// it passes — but the Detail has to say plainly that containers share
+	// the host kernel rather than implying an isolation guarantee Isthmus
+	// does not provide (ADR-021).
+	r := checkRuntimeClass(context.Background(), Options{
+		Runner: runtimeClassRunner{out: "runc;io.containerd.runc.v2 runc "},
+	})
+	if r.Level != LevelPass {
+		t.Fatalf("Level = %q, want pass", r.Level)
+	}
+	if r.Remediation != "" {
+		t.Fatalf("Remediation = %q, want empty on a pass", r.Remediation)
+	}
+	if !strings.Contains(r.Detail, "share the host kernel") {
+		t.Fatalf("Detail = %q, want it to state the shared-kernel posture plainly", r.Detail)
+	}
+}
+
+func TestCheckRuntimeClass_DaemonErrorIsNotDetermined(t *testing.T) {
+	r := checkRuntimeClass(context.Background(), Options{
+		Runner: runtimeClassRunner{err: errors.New("cannot connect to the Docker daemon")},
+	})
+	if r.Level != LevelPass {
+		t.Fatalf("Level = %q, want pass (not determined, not failed — that is checkContainerRuntime's question)", r.Level)
+	}
+	if !strings.Contains(r.Detail, "not determined") {
+		t.Fatalf("Detail = %q, want it to say the runtime class was not determined", r.Detail)
+	}
+}
+
+func TestCheckRuntimeClass_UnparseableOutputIsNotDetermined(t *testing.T) {
+	// Any answer without the format string's own ";" separator — an older
+	// daemon, a Podman shim answering `docker info` differently, or (as in
+	// this file's RunAll tests) a fake runner keyed only by binary name
+	// that hands every `docker info` call the same canned server version.
+	// None of those are a failure this check can honestly report on.
+	r := checkRuntimeClass(context.Background(), Options{Runner: runtimeClassRunner{out: "27.0.0"}})
+	if r.Level != LevelPass {
+		t.Fatalf("Level = %q, want pass", r.Level)
+	}
+	if !strings.Contains(r.Detail, "not determined") {
+		t.Fatalf("Detail = %q, want it to say the runtime class was not determined", r.Detail)
 	}
 }
 
@@ -190,18 +293,18 @@ func TestCheckKernelBoundary_ReachablePasses(t *testing.T) {
 	}
 }
 
-func TestRunAll_ReturnsAllSixNamedChecksInFixedOrder(t *testing.T) {
+func TestRunAll_ReturnsAllSevenNamedChecksInFixedOrder(t *testing.T) {
 	results := RunAll(context.Background(), Options{
 		Config: config.Config{DataDir: t.TempDir()},
 		Runner: fakeRunner{
 			lookPath: map[string]error{"docker": errors.New("nope"), "onecli": errors.New("nope")},
 		},
 	})
-	if len(results) != 6 {
-		t.Fatalf("len(results) = %d, want 6", len(results))
+	if len(results) != 7 {
+		t.Fatalf("len(results) = %d, want 7", len(results))
 	}
 	for _, name := range []string{
-		"container runtime", "agent image", "central db / mailboxes",
+		"container runtime", runtimeClassCheckName, "agent image", "central db / mailboxes",
 		"credential provider (OneCLI)", "kernel boundary (Unix socket)",
 		egressCheckName,
 	} {
@@ -299,7 +402,7 @@ func TestRunAll_DefaultsToRealRunnerWhenNil(t *testing.T) {
 	// sandbox's actual answer is. CheckEgressBlock is left false, so this
 	// still makes zero real Docker calls for that check specifically.
 	results := RunAll(context.Background(), Options{Config: config.Config{DataDir: t.TempDir()}})
-	if len(results) != 6 {
-		t.Fatalf("len(results) = %d, want 6", len(results))
+	if len(results) != 7 {
+		t.Fatalf("len(results) = %d, want 7", len(results))
 	}
 }

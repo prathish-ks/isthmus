@@ -74,11 +74,12 @@ itself works correctly once an operator configures it (confirmed by the
 paired control test, in-process and live). **Follow-up, done**: `nanogo
 serve` and the standalone `security-check` subcommand each emit a loud,
 specific warning when invoked without `-allowlist` (commit `56a4c8f1`).
-`doctor` has no allowlist-related check at all (its five checks are
-container runtime, agent image, central DB/mailboxes, credential
-provider, and the kernel socket boundary; confirmed by reading
+`doctor` has no allowlist-related check at all (its checks are container
+runtime, container runtime class (ADR-021), agent image, central
+DB/mailboxes, credential provider, the kernel socket boundary and the
+cloud-metadata/link-local egress block; confirmed by reading
 `internal/doctor/doctor.go` and by a live `doctor` run showing exactly
-those five, none of them about mounts). **Superseded for the normal
+those checks, none of them about mounts). **Superseded for the normal
 install path by Phase 11**: `src/modules/kernel-supervisor/index.ts`
 (P10-01) always launches `nanogo serve` with `-allowlist` pointing at
 `MOUNT_ALLOWLIST_PATH`, so this warning never fires for a host started

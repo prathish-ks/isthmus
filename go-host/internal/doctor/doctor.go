@@ -1,9 +1,10 @@
 // Package doctor implements P7-02 (Phase 7 — UX & Operations): a set of
 // independent, named, read-only checks over the pieces a NanoClaw Go host
-// depends on — container runtime, agent image, central DB/mailboxes,
-// credential-provider connectivity, the kernel socket boundary, and (ADR-013
-// Decision 3) the cloud-metadata/link-local egress block — each returning a
-// Result a person or a script can act on. Per the task's own instruction,
+// depends on — container runtime, container runtime class (ADR-021), agent
+// image, central DB/mailboxes, credential-provider connectivity, the kernel
+// socket boundary, and (ADR-013 Decision 3) the cloud-metadata/link-local
+// egress block — each returning a Result a person or a script can act on.
+// Per the task's own instruction,
 // doctor never auto-fixes anything it finds wrong; every Result with
 // Level != LevelPass carries a Remediation string describing the manual
 // next step instead.
@@ -104,6 +105,7 @@ func RunAll(ctx context.Context, opts Options) []Result {
 	}
 	return []Result{
 		checkContainerRuntime(ctx, opts),
+		checkRuntimeClass(ctx, opts),
 		checkAgentImage(ctx, opts),
 		checkCentralDB(opts),
 		checkCredentialProvider(opts),
@@ -151,6 +153,110 @@ func checkContainerRuntime(ctx context.Context, opts Options) Result {
 			Remediation: "start Docker (e.g. open Docker Desktop, or `sudo systemctl start docker`) and re-run doctor"}
 	}
 	return Result{Name: name, Level: LevelPass, Detail: "docker daemon reachable, server version " + out}
+}
+
+// runtimeClassCheckName is this check's single reported name, shared by
+// every branch below so `nanogo doctor`'s output is stable whatever the
+// daemon answers.
+const runtimeClassCheckName = "container runtime class (hardened isolation)"
+
+// runtimeClassFormat asks the daemon, in one `docker info` call, for its
+// default runtime and the name of every runtime it knows about:
+// "<default>;<name> <name> ". Deliberately a second call rather than
+// widening checkContainerRuntime's own format string — RunAll's checks are
+// independent by design (one broken check never silently changes another's
+// answer), and `docker info` spawns nothing.
+const runtimeClassFormat = "{{.DefaultRuntime}};{{range $name, $_ := .Runtimes}}{{$name}} {{end}}"
+
+// hardenedRuntimeClasses maps a lowercase substring of a runtime's name to
+// the name this check reports it under. Matching is by substring because the
+// same runtime shows up under several spellings depending on how it was
+// installed — gVisor is `runsc` as a Docker runtime but
+// `io.containerd.runsc.v1` as a containerd shim; Kata is `kata`,
+// `kata-runtime` or `io.containerd.kata.v2`. Anything not on this list
+// (`runc`, `crun`, `io.containerd.runc.v2`, `nvidia`) shares the host kernel
+// and is reported as exactly that, never guessed about.
+var hardenedRuntimeClasses = []struct{ match, name string }{
+	{"runsc", "gVisor"},
+	{"gvisor", "gVisor"},
+	{"kata", "Kata Containers"},
+	{"sysbox", "Sysbox"},
+}
+
+// hardenedRuntimeName returns the display name of the hardened runtime class
+// a runtime name belongs to, or "" when it is an ordinary shared-kernel
+// runtime.
+func hardenedRuntimeName(name string) string {
+	lower := strings.ToLower(name)
+	for _, h := range hardenedRuntimeClasses {
+		if strings.Contains(lower, h.match) {
+			return h.name
+		}
+	}
+	return ""
+}
+
+// checkRuntimeClass reports whether agent containers get a hardened runtime
+// class (gVisor/Kata/Sysbox) instead of the shared-host-kernel default
+// (ADR-021).
+//
+// Scope, deliberately: this check REPORTS, it does not demand. Isthmus does
+// not implement microVM or user-space-kernel isolation of its own — which
+// runtimes a daemon offers is a deployment decision an operator makes
+// outside this host — so "no hardened runtime available" is a LevelPass with
+// a plainly-worded Detail, not a LevelWarn. Warning every personal install
+// about a gap it was never promised would be noise an operator cannot
+// honestly act on, and this project's standing rule is to state what it
+// enforces rather than imply more. The one case that IS worth an operator's
+// attention, and so warns, is a hardened runtime that is installed but not
+// the one containers actually get.
+//
+// It lives in internal/doctor rather than internal/securitycheck for the
+// reason that package's own doc comment gives: this answers a live Docker
+// daemon, and securitycheck inspects configuration/policy only. Unlike
+// checkMetadataEgressBlock it needs no opt-in — `docker info` spawns no
+// container and changes nothing, the same cost as checkContainerRuntime's
+// own call.
+func checkRuntimeClass(ctx context.Context, opts Options) Result {
+	out, err := opts.Runner.Run(ctx, "docker", "info", "--format", runtimeClassFormat)
+	defaultRuntime, list, parsed := strings.Cut(out, ";")
+	defaultRuntime = strings.TrimSpace(defaultRuntime)
+	if err != nil || !parsed || defaultRuntime == "" {
+		// Not determined — deliberately a pass, not a fail: whether the
+		// daemon is reachable at all is checkContainerRuntime's question,
+		// already answered one line above in the same output, and this
+		// check has nothing of its own to report when it cannot see the
+		// runtime list.
+		return Result{Name: runtimeClassCheckName, Level: LevelPass,
+			Detail: "not determined — the daemon did not answer `docker info` with a parseable runtime list " +
+				"(see the 'container runtime' check for whether it is reachable at all)"}
+	}
+
+	if hardened := hardenedRuntimeName(defaultRuntime); hardened != "" {
+		return Result{Name: runtimeClassCheckName, Level: LevelPass,
+			Detail: "the daemon's default runtime is " + defaultRuntime + " (" + hardened +
+				"), a hardened runtime class — agent containers do not share the host kernel"}
+	}
+
+	var availableHardened []string
+	for _, name := range strings.Fields(list) {
+		if hardened := hardenedRuntimeName(name); hardened != "" {
+			availableHardened = append(availableHardened, name+" ("+hardened+")")
+		}
+	}
+	if len(availableHardened) > 0 {
+		return Result{Name: runtimeClassCheckName, Level: LevelWarn,
+			Detail: "this daemon has a hardened runtime installed — " + strings.Join(availableHardened, ", ") +
+				" — but its default runtime is " + defaultRuntime +
+				", so agent containers still share the host kernel",
+			Remediation: "set that runtime as the daemon's `default-runtime` in daemon.json (or run agent containers with `--runtime`) " +
+				"if the hardened one was installed for this host — Isthmus reports the runtime class, it never selects one for you"}
+	}
+
+	return Result{Name: runtimeClassCheckName, Level: LevelPass,
+		Detail: "no hardened runtime class (gVisor, Kata Containers, Sysbox) is available to this daemon — agent containers run under " +
+			defaultRuntime + " and share the host kernel. That is the expected default for a personal install: Isthmus provides " +
+			"no microVM or user-space-kernel isolation of its own and does not claim any (see ADR-021)"}
 }
 
 func checkAgentImage(ctx context.Context, opts Options) Result {

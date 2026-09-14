@@ -97,7 +97,7 @@ own tooling is built for exactly this:
    session) along with `docs/quickstart.md` and whatever error you saw.
 3. Ask it to diagnose the failure and propose a fix.
 
-`doctor`'s five checks, `security-check`'s read-only invariant checks, and
+`doctor`'s seven checks, `security-check`'s read-only invariant checks, and
 `nanogo trace <id>` are all designed to produce structured, specific
 output (which check failed, why, and what to do about it) rather than a
 raw stack trace, specifically so this works. If Claude can't resolve it,
