@@ -471,6 +471,78 @@ jobs:
           NANOCLAW_EGRESS_LIVE_DOCKER: "1"
         run: go test -mod=vendor ./internal/egress/... -run TestLive -v
 
+  # live-host-docker (EC-07, ADR-023): the live-Docker leg with the
+  # TypeScript host in front of it — a line typed at the real CLI adapter's
+  # Unix socket, routed by the real router, waking a real container through
+  # the real KernelClient → real `nanogo serve` → real Docker daemon, with
+  # the reply coming back out of the same socket through the real delivery
+  # poll. Runs scripts/ec07-live-host-smoke.sh; see that script and
+  # scripts/ec07-live-host-smoke.ts for what is real and what is
+  # substituted (a deterministic provider, for the same reason EC-06 used
+  # one).
+  #
+  # Why this is NOT on pull_request, unlike every other report-only job in
+  # this file: it builds the agent image from container/Dockerfile, which is
+  # apt + chromium + bun + pnpm globals — minutes of runner time on every
+  # PR, for drift detection the cheap jobs already provide. The host half of
+  # this path is covered on every PR by src/cli-channel-kernel-smoke.test.ts
+  # inside the required `test` job, and the kernel half by
+  # go-ec05-live-docker above. What neither covers, and what this job exists
+  # for, is that nobody ever ran the JOINED path automatically — EC-06 was
+  # always a manual re-run on someone's Mac. Weekly, plus on demand against
+  # a release candidate (workflow_dispatch), closes that without taxing
+  # every PR. docs/release-gate-checklist.md row 11 names this job as the
+  # thing to dispatch before a release.
+  #
+  # Report-only, like its neighbours: `continue-on-error: true` and outside
+  # the `ci` gate's needs:. A shared runner's Docker environment is more
+  # failure-prone than an in-process test, and this job's own timing has not
+  # yet been observed on real CI infrastructure — the first scheduled run is
+  # its first measurement, which is why it carries a generous timeout rather
+  # than a guessed-tight one.
+  live-host-docker:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-host/go.mod
+      - run: pnpm install --frozen-lockfile
+
+      # The agent-runner's own dependencies are installed INSIDE the image
+      # (the Dockerfile COPYs package.json + bun.lock and runs bun install),
+      # so no host-side bun setup is needed here — unlike the `test` job,
+      # which runs the container test suite on the runner itself.
+      #
+      # The tag is derived from the checkout path by setup/lib/install-slug.sh,
+      # and src/config.ts's CONTAINER_IMAGE derives it the same way, so the
+      # harness finds this image without being told where it is.
+      - name: Build the agent image
+        run: ./container/build.sh
+
+      - name: EC-07 live host + kernel + Docker smoke
+        run: scripts/ec07-live-host-smoke.sh
+
+      # The harness tears its own containers down through the kernel and its
+      # wrapper removes the scratch install, but a run that died between the
+      # two leaves a container behind. Named here so a failed run's diagnosis
+      # starts from ground truth rather than from an empty `docker ps`.
+      - name: What Docker still holds (diagnostic only)
+        if: always()
+        run: |
+          echo "--- containers ---"
+          docker ps -a || true
+          echo "--- images ---"
+          docker images || true
+
   # upstream-watch (P9-05, Phase 9/10 hardening): "CI obtains a pinned/
   # current NanoClaw upstream revision, runs baseline contracts and
   # compares Go behavior; alert on schema/contract drift" — the automated
