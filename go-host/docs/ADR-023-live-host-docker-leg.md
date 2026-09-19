@@ -1,7 +1,8 @@
 # ADR-023: EC-07 — the live-Docker leg, with the TypeScript host in front
 
-Status: accepted, 2026-09-19. Verified live on the user's Mac the same day
-(2/2 repeats — see Evidence below).
+Status: accepted, 2026-09-19. Verified live the same day, twice: 2/2 repeats
+on the author's Mac against Docker Desktop, and 2/2 on a GitHub-hosted
+runner from the `live-host-docker` job itself (see Evidence below).
 
 ## Context
 
@@ -57,7 +58,7 @@ job that runs the harness.
   scratch install on every exit path.
 - **`live-host-docker`** in `.github/workflows/ci.yml` — report-only
   (`continue-on-error: true`, outside the `ci` gate's `needs:`), on
-  `schedule` + `workflow_dispatch`.
+  `pull_request` + `schedule` + `workflow_dispatch`.
 
 ## Evidence
 
@@ -96,6 +97,14 @@ therefore have to produce one stable kernel name and two different host
 names — a much harder thing to satisfy by accident than "these two strings
 differ", and a shape a host that had smuggled its own name through could not
 produce. The harness now asserts it.
+
+The same harness then ran on a GitHub-hosted `ubuntu-latest` runner, from
+the `live-host-docker` job, on 2026-09-19: **2/2 repeats passed**, against an
+image built fresh on that runner (`nanoclaw-agent-v2-40a040ae`, a different
+install slug, since the slug is derived from the checkout path). Both round
+trips finished inside two seconds there — faster than on the Mac — and the
+job's own diagnostic step found no containers left behind. That run is what
+produced the cost measurement recorded below.
 
 ## Bugs found during this work
 
@@ -216,25 +225,29 @@ this run, and a future EC-07b that seeds a destination row would close that.
 non-deterministic reply cannot be asserted on, and P3-04 already proved
 real-Claude interop once, manually. The two proofs stay complementary.
 
-**It does not run on every PR.** The image build is apt + chromium + bun +
-pnpm globals. The host half of this path is already covered per-PR by
-`src/cli-channel-kernel-smoke.test.ts` inside the required `test` job, and
-the kernel half by `go-ec05-live-docker`; what was missing was that the
-joined path had no automation at all, and weekly plus on-demand closes that
-without taxing every PR. If the drift this job catches turns out to be
-frequent enough to want per-PR coverage, the honest fix is a cached image
-build, not a quieter job.
+**Its per-PR cost was overestimated, and the trigger was corrected.** This
+job was first written as `schedule` + `workflow_dispatch` only, on the
+explicit argument that the image build — apt, chromium, bun, the pnpm global
+CLI tools — would cost minutes of runner time on every PR and buy drift
+detection the cheap jobs already provide. The estimate came from a cold
+`./container/build.sh` on an M-series MacBook Air: **757 seconds**, two
+thirds of it in export and unpack.
 
-**Its CI timing is unmeasured.** The one real data point is local: a cold
-`./container/build.sh` on an M-series MacBook Air took **757 seconds**, of
-which 367 was the image export and unpack alone. The round trips themselves
-are cheap by comparison — thirteen seconds for both repeats. So the job's
-cost is the image, as predicted, and a GitHub-hosted runner is not a
-MacBook; the first scheduled run is the first real measurement. The job
-carries a deliberately generous `timeout-minutes: 45` rather than a
-guessed-tight one, in the same "correct by careful reading, confirmed on
-real infrastructure" posture this file's neighbours already take for
-`govulncheck`, `semgrep` and `upstream-watch`.
+The first dispatched CI run measured the real thing: **69 seconds** for the
+image, 24 for the smoke itself, **105 for the whole job**, with no layer
+caching at all. Off by an order of magnitude, and with it the only argument
+for keeping the joined path off PRs. The job now runs on `pull_request` as
+well, and this paragraph stands rather than being quietly edited away,
+because the original comment in `ci.yml` made the cost claim explicitly and
+a reader deserves to know which claims here were measured and which were
+guessed.
+
+What remains honest about the original caution: a shared runner's Docker
+environment is more failure-prone than an in-process test, so this stays
+report-only (`continue-on-error: true`, outside the `ci` gate's `needs:`),
+and `timeout-minutes: 45` stays deliberately generous against a measured
+105s — the cost is one image build on a runner whose disk and network
+throughput this project does not control.
 
 **It does not replace `ec06-live-smoke.sh`.** That harness drives the kernel
 directly, with no host in the way, which is what makes it the right tool

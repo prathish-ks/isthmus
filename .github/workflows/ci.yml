@@ -481,27 +481,33 @@ jobs:
   # substituted (a deterministic provider, for the same reason EC-06 used
   # one).
   #
-  # Why this is NOT on pull_request, unlike every other report-only job in
-  # this file: it builds the agent image from container/Dockerfile, which is
-  # apt + chromium + bun + pnpm globals — minutes of runner time on every
-  # PR, for drift detection the cheap jobs already provide. The host half of
-  # this path is covered on every PR by src/cli-channel-kernel-smoke.test.ts
-  # inside the required `test` job, and the kernel half by
-  # go-ec05-live-docker above. What neither covers, and what this job exists
-  # for, is that nobody ever ran the JOINED path automatically — EC-06 was
-  # always a manual re-run on someone's Mac. Weekly, plus on demand against
-  # a release candidate (workflow_dispatch), closes that without taxing
-  # every PR. docs/release-gate-checklist.md row 11 names this job as the
-  # thing to dispatch before a release.
+  # Runs on every PR, plus weekly and on demand. That was NOT the original
+  # decision. This job was first written as schedule + workflow_dispatch
+  # only, on the stated assumption that building the agent image (apt +
+  # chromium + bun + pnpm globals) would cost minutes of runner time on
+  # every PR. The first dispatched run measured it instead: 69s for the
+  # image, 24s for the smoke itself, 105s for the whole job — with no layer
+  # caching at all. The estimate had come from the author's laptop, where
+  # the same build takes 757s, two thirds of it in export and unpack. Off by
+  # an order of magnitude, so the argument for keeping this off PRs went
+  # with it. Recorded here rather than quietly corrected, because the
+  # original comment made the cost claim explicitly.
+  #
+  # What this covers that the per-PR jobs do not: the host half of this path
+  # is already covered by src/cli-channel-kernel-smoke.test.ts inside the
+  # required `test` job, and the kernel half by go-ec05-live-docker above —
+  # but until EC-07 nobody ever ran the JOINED path automatically, and EC-06
+  # was always a manual re-run on someone's Mac. docs/release-gate-checklist
+  # .md rows 5 and 11 also name this job as the thing to dispatch
+  # (workflow_dispatch) against an actual release candidate.
   #
   # Report-only, like its neighbours: `continue-on-error: true` and outside
   # the `ci` gate's needs:. A shared runner's Docker environment is more
-  # failure-prone than an in-process test, and this job's own timing has not
-  # yet been observed on real CI infrastructure — the first scheduled run is
-  # its first measurement, which is why it carries a generous timeout rather
-  # than a guessed-tight one.
+  # failure-prone than an in-process test, and a flake here should never
+  # block an unrelated PR. `timeout-minutes: 45` stays deliberately generous
+  # against the measured 105s — the cost is one image build on a runner
+  # whose disk and network throughput this project does not control.
   live-host-docker:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 45
