@@ -89,6 +89,8 @@ Identical 2 files, identical 15 failures. The folder name is therefore **not** t
 
 Both exclusions have been removed from `vitest.config.ci.ts` (see its own header comment for the same detail) and CI's "Host tests" step now runs the full suite. `docs/test-inventory.md`'s reference to these 15 "known baseline noise" failures is stale as of this update.
 
+The same pass added 138 new test files (commit `f146390e`) raising host-side coverage from ~54% to ~80% lines (~51% to ~77% branches; go-host is separately at 76.4% of statements, blended repo-wide ~79.6%). Real behavior the new tests surfaced — bugs, dead code, narrow-window edge cases — is tracked, prioritized, in [docs/coverage-uplift-findings-backlog.md](coverage-uplift-findings-backlog.md).
+
 **This is now the recorded baseline against which future Go-host work should be compared** — any new failure beyond these 15 (or beyond the 5 pre-existing lint errors) is a real regression to investigate, not baseline noise.
 
 ## User background (context for pacing, not upstream-relevant)
