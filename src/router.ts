@@ -17,6 +17,8 @@
  * drops (no agent wired, no trigger match); the access gate writes rows
  * for policy refusals.
  */
+import vm from 'node:vm';
+
 import { getChannelAdapter, getChannelDefaults } from './channels/channel-registry.js';
 import { resolveThreadPolicy, resolveUnknownSenderPolicy } from './channels/channel-defaults.js';
 import { gateCommand } from './command-gate.js';
@@ -454,6 +456,51 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   }
 }
 
+const ENGAGE_PATTERN_TIMEOUT_MS = 200;
+
+// Reused across calls — vm.createContext is the expensive part; only the
+// pattern/text properties change per test. Safe to share because router.ts
+// runs single-threaded and vm.runInContext is synchronous: nothing else can
+// touch this sandbox mid-call.
+const engagePatternSandbox = vm.createContext({ pattern: '', text: '', result: false });
+
+/**
+ * `engage_pattern` is operator/admin-set (approval-gated, see
+ * src/cli/guard.ts), but nothing validates it's backtracking-safe — a
+ * catastrophic regex (e.g. `(a+)+$`) would otherwise hang this single-
+ * threaded host indefinitely on `.test()`, freezing every agent group's
+ * message processing, not just this wiring. Run it inside a vm context with
+ * a hard wall-clock timeout so a runaway pattern is interrupted instead of
+ * blocking the process.
+ */
+function safeEngagePatternTest(pattern: string, text: string, agentGroupId: string): boolean {
+  engagePatternSandbox.pattern = pattern;
+  engagePatternSandbox.text = text;
+  try {
+    vm.runInContext('result = new RegExp(pattern).test(text)', engagePatternSandbox, {
+      timeout: ENGAGE_PATTERN_TIMEOUT_MS,
+    });
+    return engagePatternSandbox.result as boolean;
+  } catch (err) {
+    // The vm context is a separate V8 realm — its errors are NOT instances
+    // of this realm's `Error` (cross-realm instanceof always fails), so
+    // check duck-typed shape rather than `instanceof Error`.
+    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : '';
+    if (/timed out/i.test(message)) {
+      // Runaway backtracking: fail closed. Unlike a syntax error, an admin
+      // can't "see the agent responding" here — it just stalls — so
+      // always-on-by-default would silently mask the problem instead.
+      log.warn('engage_pattern exceeded time budget — treating as no-match', {
+        agent_group_id: agentGroupId,
+        engage_pattern: pattern,
+      });
+      return false;
+    }
+    // Bad regex syntax: fail open so admin sees the agent responding + can fix.
+    return true;
+  }
+}
+
 /**
  * Decide whether a given wired agent should engage on this message.
  *
@@ -485,12 +532,7 @@ async function evaluateEngage(
     case 'pattern': {
       const pat = agent.engage_pattern ?? '.';
       if (pat === '.') return true;
-      try {
-        return new RegExp(pat).test(text);
-      } catch {
-        // Bad regex: fail open so admin sees the agent responding + can fix.
-        return true;
-      }
+      return safeEngagePatternTest(pat, text, agent.agent_group_id);
     }
     case 'mention':
       return isMention;
