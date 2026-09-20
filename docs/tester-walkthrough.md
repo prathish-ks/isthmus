@@ -1,4 +1,4 @@
-# Isthmus Beta Test Script
+# Isthmus Tester Walkthrough
 
 Thanks for helping test Isthmus. This should take 20-40 minutes on a NanoClaw
 setup you're comfortable experimenting with — not a production-critical
@@ -36,10 +36,11 @@ point we're testing.
 ## Step 2 — Run `doctor`
 
 1. Run `nanogo doctor`.
-2. **Expected:** 5 checks, all `[PASS]` (container runtime, agent image,
-   central DB/mailboxes, credential provider, kernel boundary). There is
-   **no** mount-allowlist warning on a normal install — if you see one,
-   that's worth reporting, not expected behavior.
+2. **Expected:** 7 checks, all `[PASS]` (container runtime, container
+   runtime class, agent image, central DB/mailboxes, credential provider,
+   kernel boundary, and the cloud-metadata/link-local egress block).
+   There is **no** mount-allowlist warning on a normal install — if you
+   see one, that's worth reporting, not expected behavior.
 3. **Record:** the full output, pass/fail per check, and how long it took.
 
 ## Step 3 — Send a message
@@ -83,7 +84,7 @@ point we're testing.
    standpoint — a permission that seemed too broad, a mount that looked
    unexpected, credentials appearing somewhere they shouldn't — flag that
    specifically and separately from ordinary bugs; it's the single most
-   valuable kind of feedback for this beta.
+   valuable kind of feedback you can give right now.
 
 ## If something doesn't work
 

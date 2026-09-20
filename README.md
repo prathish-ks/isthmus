@@ -13,7 +13,7 @@
 
 > **Independent, unofficial companion project.** Isthmus is not affiliated with, endorsed by, or an official artifact of NanoClaw or its maintainers ([nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw), [nanoclaw.dev](https://nanoclaw.dev)). It is a derivative work, built and published under its own name per NanoClaw's own MIT license, which preserves NanoClaw's entire ecosystem (channels, skills, customization model) untouched and re-implements a small set of security- and liveness-critical host decisions in Go. See [License](#license) for attribution.
 
-**Status:** pre-beta / experiment. The Go trust-kernel (guard decisions, mount security, egress verification, and a handful of liveness/lifecycle decisions) is implemented and tested — behaviorally pinned against NanoClaw `v2.3.0` — alongside NanoClaw's untouched TypeScript ecosystem. A full solo dry run (install stock NanoClaw → pair a real Telegram bot → upgrade to Isthmus in place → round trip → roll back to stock → round trip again, same data directory throughout, zero data loss) is done and documented in [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — but that's one operator, one machine, one channel. Still early, and still seeking outside testers across more channels and machines before any broader claim; see [Current status](#current-status-and-whats-not-changed) below for exactly what that does and doesn't mean.
+**Status:** The Go trust-kernel (guard decisions, mount security, egress verification, and a handful of liveness/lifecycle decisions) is implemented, fuzzed, and race-detector-clean — behaviorally pinned against NanoClaw `v2.3.0` — alongside NanoClaw's untouched TypeScript ecosystem. A full solo dry run (install stock NanoClaw → pair a real Telegram bot → upgrade to Isthmus in place → round trip → roll back to stock → round trip again, same data directory throughout, zero data loss) is done and documented in [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — that's one operator, one machine, one channel so far. Looking for outside testers across more channels and machines next; see [Current status](#current-status-and-whats-not-changed) below for exactly what's verified and what isn't yet.
 
 ## Why
 
@@ -67,17 +67,17 @@ Everything above the compatibility boundary — channels, skills, templates, cus
 
 - NanoClaw's channels, skills, templates, customization model, and agent-container runtime are unmodified. Installing and using Isthmus looks the same as using NanoClaw day to day.
 - The Go kernel is pinned against and tested for behavioral parity with NanoClaw `v2.3.0`; an upstream-watch job flags new upstream releases for re-validation rather than tracking upstream continuously.
-- This is a pre-beta experiment. It's open for outside install-and-report testing before any broader claim is made; see [`docs/baseline.md`](docs/baseline.md) and the phase-closure docs under `docs/` for exact scope and what's been verified where (sandbox vs. real hardware). One real end-to-end lifecycle dry run (install → upgrade → rollback, real Telegram channel, real Mac) is done — see [`docs/rollback-runbook.md`](docs/rollback-runbook.md). But the outside-tester pass itself (multiple people, multiple channels and machines) hasn't started yet; that's what actually moves this from pre-beta to beta.
+- Open for outside install-and-report testing; see [`docs/baseline.md`](docs/baseline.md) and the phase-closure docs under `docs/` for exact scope and what's been verified where (sandbox vs. real hardware). One real end-to-end lifecycle dry run (install → upgrade → rollback, real Telegram channel, real Mac) is done — see [`docs/rollback-runbook.md`](docs/rollback-runbook.md). The outside-tester pass itself (multiple people, multiple channels and machines) hasn't started yet — that's the next concrete thing this needs.
 - Known open gaps are named, not implied away — see [`docs/threat-model-addendum-p5.md`](docs/threat-model-addendum-p5.md) for the current list.
 - **Supported hosts: macOS and Linux.** Native Windows is not supported and isn't expected to work — the mount-security layer requires POSIX host paths by design (a faithful port of NanoClaw's own upstream behavior, which has never targeted native Windows hosts either). Windows users should run under WSL2, a real POSIX environment, the same way plain NanoClaw would require.
 
 ## Trying it out
 
 - [`docs/quickstart.md`](docs/quickstart.md) — install `nanogo` and start the host.
-- [`docs/beta-test-script.md`](docs/beta-test-script.md) — a ~20-40 minute walkthrough if you want to actually put it through its paces and report back.
+- [`docs/tester-walkthrough.md`](docs/tester-walkthrough.md) — a ~20-40 minute walkthrough if you want to actually put it through its paces and report back.
 - [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — read before you install, not after something breaks.
 
-If something doesn't work, `nanogo doctor`'s output is written to be handed to Claude Code (or any Claude session) for a first diagnosis before filing a bug — see the "If something doesn't work" section of the test script.
+If something doesn't work, `nanogo doctor`'s output is written to be handed to Claude Code (or any Claude session) for a first diagnosis before filing a bug — see the "If something doesn't work" section of the walkthrough.
 
 ## Relationship to NanoClaw
 
