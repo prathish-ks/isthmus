@@ -73,6 +73,7 @@ Everything above the compatibility boundary — channels, skills, templates, cus
 
 ## Trying it out
 
+- **[`isthmus-scan`](https://github.com/prathish-ks/isthmus-scan)** — a free, read-only CLI (`npx isthmus-scan`) that checks a NanoClaw install's mount-allowlist config, container non-root posture, and egress exposure in under a second, no install required. Works against plain NanoClaw too — run it *before* installing Isthmus to see your current exposure, and again after to confirm the kernel is actually enforcing (it detects Isthmus's kernel liveness specifically and reports whether each check is kernel-enforced or just this install's own configuration).
 - [`docs/quickstart.md`](docs/quickstart.md) — install `nanogo` and start the host.
 - [`docs/tester-walkthrough.md`](docs/tester-walkthrough.md) — a ~20-40 minute walkthrough if you want to actually put it through its paces and report back.
 - [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — read before you install, not after something breaks.
