@@ -141,29 +141,47 @@ jobs:
   # it's one green checkmark among many, easy to miss if the assertion
   # itself is loosened in the same PR that regresses it.
   #
-  # Scoped to the whole project, not just that one test: rather than
-  # hardcoding a file list (which silently stops covering new
-  # performance-bounding tests the moment someone forgets to also edit this
-  # workflow), this job greps both test trees — src/ (host, vitest) and
-  # container/agent-runner/src/ (container, bun) — for a `PERF-GATE:`
-  # marker in the file's own doc comment, and runs whatever it finds. Any
-  # test asserting a wall-clock upper bound to guard against a hang/DoS
-  # class of regression should carry that tag; see
-  # src/router-engage-pattern-redos.test.ts for the convention — tag a new
-  # one and it's picked up automatically, no workflow edit needed.
+  # Scoped to the whole project — TypeScript host, Bun container, and the Go
+  # kernel — not just that one test: rather than hardcoding a file list
+  # (which silently stops covering new performance-bounding tests the
+  # moment someone forgets to also edit this workflow), this job greps all
+  # three trees — src/ (host, vitest), container/agent-runner/src/
+  # (container, bun), and go-host/ (kernel, go test) — for a `PERF-GATE:`
+  # marker in the test's own doc comment, and runs whatever it finds. Any
+  # test asserting a wall-clock upper bound — to guard against a hang/DoS
+  # class of regression, OR to catch a genuine latency regression on a hot
+  # path — should carry that tag; see src/router-engage-pattern-redos.test.ts
+  # for the original convention, and router-happy-path-perf.test.ts (host),
+  # write-poll-perf.test.ts (container), dispatch_perf_test.go (kernel
+  # dispatch), and spawn_perf_test.go (real Docker container spawn/teardown
+  # via dockerExecutor — the actual code path every session container is
+  # launched through, since TS no longer builds docker create/start argv
+  # at all) for the current examples covering "did maintaining this fork
+  # make it slower" on each layer's hottest path. Tag a new one and it's
+  # picked up automatically, no workflow edit needed.
   #
   # Each tree's discovery step logs the files it found and degrades to a
-  # no-op (not a failure) when a tree has zero tagged files today — true
-  # right now for container/agent-runner/src/, which has no perf-bounding
-  # test yet. That is a real, visible gap (the step's own log line says so
-  # on every run), not a silent one; failing the whole job over an empty
-  # tree would only teach people to delete this job the first time someone
-  # legitimately has nothing to tag there yet.
+  # no-op (not a failure) when a tree has zero tagged files — a real,
+  # visible gap (the step's own log line says so on every run), not a
+  # silent one; failing the whole job over an empty tree would only teach
+  # people to delete this job the first time a tree legitimately has
+  # nothing to tag yet.
   #
   # Required (part of the `ci` gate's needs below), not report-only: the
   # underlying risk class — an unbounded operation freezing the
-  # single-threaded host, or a container hang — is a host-wide DoS, not a
-  # cosmetic slowdown.
+  # single-threaded host, a container hang, or an unnoticed hot-path
+  # regression on the layer every message pays for — is worth blocking a
+  # merge over, not just reporting.
+  #
+  # Every PERF-GATE-tagged test also logs a `PERF-RESULT: name="..."
+  # elapsed_ms=N budget_ms=N` marker (before its own budget assertion, so
+  # it's logged even on a failing run — see each test file's own comment).
+  # This job's three test-running steps tee their output into
+  # $RUNNER_TEMP/perf-{host,container,kernel}.log, and the final
+  # "Performance-gate report" step (if: always(), so it runs even after an
+  # earlier failure) greps those markers out and writes a results-vs-budget
+  # table to the run's own summary page — no digging through raw step logs
+  # needed to see what actually ran and by how much margin.
   performance-gate:
     runs-on: ubuntu-latest
     steps:
@@ -176,6 +194,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.12
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-host/go.mod
       - run: pnpm install --frozen-lockfile
       - name: Install agent-runner deps (Bun)
         working-directory: container/agent-runner
@@ -191,7 +212,26 @@ jobs:
           fi
           echo "Tagged host test files:"
           echo "$files"
-          echo "$files" | xargs pnpm exec vitest run --config vitest.config.ci.ts
+          # --reporter=verbose (not the default reporter) so the
+          # PERF-RESULT console.log lines actually show up in captured
+          # output on a PASSING run — vitest's default reporter only
+          # surfaces a test's console output when it fails, which would
+          # silently break the report step below for the common case.
+          #
+          # --no-file-parallelism: vitest's default pool runs each test
+          # file in its own forked process, in parallel, sharing whatever
+          # CPU the runner has. For ordinary correctness tests that's a
+          # pure speed win with no downside — but for a WALL-CLOCK TIMING
+          # assertion, two files genuinely competing for CPU at the same
+          # moment is real, uncontrolled noise on top of whatever the
+          # test is trying to measure. Confirmed locally: running these
+          # two files in parallel gave a 383-546ms range (43% spread);
+          # sequential gave 306-330ms (8% spread) for the exact same
+          # test. A real CI run hit 3350ms against a 1500ms budget before
+          # this flag was added — root-caused to this contention, not a
+          # real regression, and not something a bigger budget number
+          # actually fixes at the source.
+          echo "$files" | xargs pnpm exec vitest run --config vitest.config.ci.ts --reporter=verbose --no-file-parallelism | tee "${RUNNER_TEMP}/perf-host.log"
 
       - name: Container performance-bounding regression tests
         working-directory: container/agent-runner
@@ -204,7 +244,99 @@ jobs:
           fi
           echo "Tagged container test files:"
           echo "$files"
-          echo "$files" | xargs bun test
+          echo "$files" | xargs bun test | tee "${RUNNER_TEMP}/perf-container.log"
+
+      # Go tests don't run "by file" from the command line the way
+      # vitest/bun do — `go test` matches by function name (`-run`) within
+      # a package. So this step greps for tagged files same as the other
+      # two, then extracts each file's exported Test* function names to
+      # build the -run pattern, scoped to that file's own package
+      # directory (a tagged file's untagged sibling tests in the same
+      # package are deliberately excluded from the pattern, not just left
+      # to also run for free — keeps this job's runtime independent of
+      # how many ordinary tests happen to share the same package).
+      # NANOCLAW_PERF_LIVE_DOCKER=1 opts spawn_perf_test.go's
+      # TestContainerSpawnPerfBudget into actually running (it skips
+      # cleanly without this, same convention as EC-05's/egress's own
+      # live-Docker opt-ins) — set here, not globally, so a plain
+      # `go test ./...` never spins up a real container outside this one
+      # CI step. GitHub-hosted ubuntu-latest runners ship Docker
+      # pre-installed and running already (see this file's go-ec05-live-docker
+      # job comment for the same fact), so no extra Docker setup step is
+      # needed before this.
+      - name: Kernel (Go) performance-bounding regression tests
+        working-directory: go-host
+        env:
+          NANOCLAW_PERF_LIVE_DOCKER: "1"
+        run: |
+          set -eo pipefail
+          files="$(grep -rl --include='*_test.go' 'PERF-GATE:' . | grep -v '^\./vendor/' || true)"
+          if [ -z "$files" ]; then
+            echo "No PERF-GATE-tagged test files found under go-host/ — nothing to run yet."
+            exit 0
+          fi
+          echo "Tagged kernel test files:"
+          echo "$files"
+          # `while read` line-at-a-time, not an unquoted `for f in $files`
+          # word-split loop — the latter only reliably splits on newlines
+          # under bash's default IFS; this way is correct regardless of
+          # the invoking shell's word-splitting behavior.
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            dir="$(dirname "$f")"
+            names="$(grep -oE '^func (Test[A-Za-z0-9_]+)' "$f" | awk '{print $2}' | paste -sd'|' -)"
+            if [ -z "$names" ]; then
+              echo "::error::$f carries the PERF-GATE: tag but no exported Test* function was found in it"
+              exit 1
+            fi
+            echo "=== $dir: $names ==="
+            go test -mod=vendor "./$dir" -run "^($names)\$" -v | tee -a "${RUNNER_TEMP}/perf-kernel.log"
+          done <<< "$files"
+
+      # Runs regardless of whether the three steps above passed, failed, or
+      # were no-ops (each only writes its own log file if it actually ran
+      # something — a tree with zero tagged files never reaches its `tee`,
+      # so that log file legitimately won't exist, handled below) — a
+      # failing PERF-GATE test still logs its PERF-RESULT line before the
+      # assertion that fails it (see each test file's own comment on why),
+      # so the report reflects what actually happened even on a red run,
+      # not just the last thing that happened before a failure stopped a
+      # step early.
+      - name: Performance-gate report
+        if: always()
+        run: |
+          set -eo pipefail
+          {
+            echo "## Performance gate results"
+            echo
+            echo "| Layer | Check | Elapsed | Budget | Margin |"
+            echo "|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          found_any=0
+          for log in "${RUNNER_TEMP}/perf-host.log" "${RUNNER_TEMP}/perf-container.log" "${RUNNER_TEMP}/perf-kernel.log"; do
+            [ -f "$log" ] || continue
+            while IFS= read -r line; do
+              found_any=1
+              name="$(echo "$line" | sed -E 's/.*name="([^"]+)".*/\1/')"
+              elapsed="$(echo "$line" | sed -E 's/.*elapsed_ms=([0-9]+).*/\1/')"
+              budget="$(echo "$line" | sed -E 's/.*budget_ms=([0-9]+).*/\1/')"
+              if [ "$elapsed" -gt 0 ] 2>/dev/null; then
+                margin="$(awk "BEGIN{printf \"%.1fx\", $budget/$elapsed}")"
+              else
+                margin="n/a"
+              fi
+              gate_status="✅"
+              [ "$elapsed" -gt "$budget" ] 2>/dev/null && gate_status="❌"
+              echo "| $gate_status | $name | ${elapsed}ms | ${budget}ms | $margin |" >> "$GITHUB_STEP_SUMMARY"
+            done < <(grep -oE 'PERF-RESULT:.*' "$log" || true)
+          done
+
+          if [ "$found_any" -eq 0 ]; then
+            echo "| — | *(no PERF-GATE-tagged tests ran)* | — | — | — |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "Budgets are fixed ceilings tuned against real GitHub Actions runner measurements, not a %-vs-baseline comparison — see each test file's own comment for the baseline this was set against." >> "$GITHUB_STEP_SUMMARY"
 
   # Repository rules require exact `ci`; always run it so matrix, go-host,
   # pnpm-audit, and performance-gate failures all remain blocking.
