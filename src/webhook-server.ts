@@ -113,6 +113,17 @@ function ensureServer(): void {
   const port = parseInt(process.env.WEBHOOK_PORT || String(DEFAULT_PORT), 10);
 
   server = http.createServer((req, res) => {
+    // Defense-in-depth: this server reflects unescaped, attacker-controlled
+    // input into a couple of plain-text response bodies (e.g. the 404's
+    // "Unknown adapter: <name>", parsed straight from the URL). Content-Type
+    // is already explicit text/plain everywhere that happens, which is the
+    // real mitigation — this closes the theoretical residual gap where a
+    // legacy/aggressively-sniffing client ignores the declared type. Set
+    // once, before any routing decision, so it covers every response path
+    // uniformly (raw handlers included — Node merges prior setHeader calls
+    // into a later writeHead() rather than dropping them, provided the raw
+    // handler doesn't set this same header itself).
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     void (async () => {
       const url = req.url || '/';
 

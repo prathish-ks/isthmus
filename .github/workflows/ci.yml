@@ -293,6 +293,36 @@ jobs:
       - name: govulncheck
         run: govulncheck ./...
 
+  # pnpm-audit: govulncheck's counterpart for the npm/TypeScript side — this
+  # project had no dependency-vulnerability scan at all for src/ until this
+  # job (found via a manual `pnpm audit` pass, 2026-09-20: 23 advisories,
+  # all in devDependencies only — eslint/vitest/vite/tsx's own transitive
+  # tree, confirmed via `pnpm audit --prod` returning zero — and all
+  # DoS-class, CWE-400/407/770/835/190, never code-execution; see that
+  # session's findings for the full triage). --audit-level=high matches
+  # isthmus-scan's own CI convention (that project's ci.yml) rather than
+  # inventing a second standard. Report-only like go-vulncheck/go-lint/
+  # semgrep above: this WILL show existing findings on day one rather than
+  # picking a threshold that happens to pass — disclosed, not implied away,
+  # same standing decision named in the report-only-jobs comment below.
+  # Bump the flagged devDependencies to their patched versions to clear it;
+  # nothing here is urgent (all dev-tooling-only, non-RCE) but leaving known-
+  # vulnerable versions pinned indefinitely once a scan exists to see them
+  # is its own kind of drift.
+  pnpm-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: pnpm audit
+        run: pnpm audit --audit-level=high
+
   # semgrep scope (2026-09-04): narrowed to go-host/ — the code this project
   # actually owns and ports — dropping src/ from the scan target. src/ is
   # the largely upstream-inherited TypeScript host (see go-host/README.md's
