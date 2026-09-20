@@ -1,0 +1,37 @@
+# Accepted high/critical pnpm-audit advisories, checked by
+# scripts/check-pnpm-audit-baseline.ts (see that file for how this is
+# used). All 12 are devDependency-only — eslint/vitest/vite/tsx's own
+# transitive tree — confirmed via `pnpm audit --prod` returning zero
+# findings at any severity (2026-09-20). A finding NOT in this list fails
+# the pnpm-audit CI job; one already listed here does not, even if it's
+# still present on a later run.
+#
+# To clear an entry: bump the flagged package. To accept a genuinely new
+# one: add its GHSA id below with a one-line reason (ideally after
+# confirming it's non-prod, same way as the rest of this list).
+#
+# module           GHSA id              title
+# brace-expansion  GHSA-3jxr-9vmj-r5cp  DoS via exponential-time expansion of consecutive non-expanding {} groups
+GHSA-3jxr-9vmj-r5cp
+# brace-expansion  GHSA-mh99-v99m-4gvg  DoS via unbounded expansion length causing an out-of-memory process crash
+GHSA-mh99-v99m-4gvg
+# brace-expansion  GHSA-rgw5-rvv9-x895  DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation
+GHSA-rgw5-rvv9-x895
+# js-yaml          GHSA-52cp-r559-cp3m  YAML merge-key chains can force quadratic CPU consumption
+GHSA-52cp-r559-cp3m
+# js-yaml          GHSA-5p4m-2wfm-xmqj  Quadratic CPU consumption in !!omap resolution (3.x and 4.x)
+GHSA-5p4m-2wfm-xmqj
+# js-yaml          GHSA-2883-xcg3-v3hh  maxTotalMergeKeys does not limit CPU use for empty merge sources
+GHSA-2883-xcg3-v3hh
+# nanoid           GHSA-28wg-ghj8-5hjv  non-secure generators can loop indefinitely with negative size
+GHSA-28wg-ghj8-5hjv
+# nanoid           GHSA-2v37-7h3g-55p8  custom generators can loop indefinitely when size is zero
+GHSA-2v37-7h3g-55p8
+# nanoid           GHSA-xwg4-73v4-xw9w  Integer Overflow or Wraparound
+GHSA-xwg4-73v4-xw9w
+# postcss          GHSA-6g55-p6wh-862q  Arbitrary file read via attacker-controlled sourceMappingURL in CSS comments
+GHSA-6g55-p6wh-862q
+# postcss          GHSA-r28c-9q8g-f849  Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL)
+GHSA-r28c-9q8g-f849
+# vite             GHSA-fx2h-pf6j-xcff  server.fs.deny bypass on Windows alternate paths
+GHSA-fx2h-pf6j-xcff

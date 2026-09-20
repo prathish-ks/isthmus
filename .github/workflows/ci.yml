@@ -142,23 +142,27 @@ jobs:
   # go-host failures both remain blocking.
   ci:
     if: always()
-    needs: [test, go-host]
+    needs: [test, go-host, pnpm-audit]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
       - run: |
           test "${{ needs.test.result }}" = success
           test "${{ needs.go-host.result }}" = success
+          test "${{ needs.pnpm-audit.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
-  # every PR and their results are visible on the PR, but none of them is
-  # in the `ci` gate's `needs:` list above, so a finding here never blocks
-  # a merge — matching this project's own standing decision ("running a
-  # check and requiring a check to pass before merge are different
-  # things... branch protection stays deferred to Milestone E/F"). Promote
-  # any of these to `needs: [test, go-host, <job>]` above once that
-  # decision changes.
+  # every PR and their results are visible on the PR, but (pnpm-audit
+  # excepted — promoted into the gate 2026-09-20, see its own comment
+  # below) none of the rest is in the `ci` gate's `needs:` list above, so
+  # a finding there never blocks a merge — matching this project's own
+  # standing decision ("running a check and requiring a check to pass
+  # before merge are different things... branch protection stays deferred
+  # to Milestone E/F"). Promote any of these to
+  # `needs: [test, go-host, <job>]` above once that decision changes —
+  # pnpm-audit is the precedent: only worth doing once a job fails on
+  # genuine regressions rather than permanently-known noise.
   # ---------------------------------------------------------------------
 
   # go-host-os-matrix (Phase 13 pre-launch validation): the required
@@ -293,25 +297,28 @@ jobs:
       - name: govulncheck
         run: govulncheck ./...
 
-  # pnpm-audit: govulncheck's counterpart for the npm/TypeScript side — this
-  # project had no dependency-vulnerability scan at all for src/ until this
-  # job (found via a manual `pnpm audit` pass, 2026-09-20: 23 advisories,
-  # all in devDependencies only — eslint/vitest/vite/tsx's own transitive
-  # tree, confirmed via `pnpm audit --prod` returning zero — and all
-  # DoS-class, CWE-400/407/770/835/190, never code-execution; see that
-  # session's findings for the full triage). --audit-level=high matches
-  # isthmus-scan's own CI convention (that project's ci.yml) rather than
-  # inventing a second standard. Report-only like go-vulncheck/go-lint/
-  # semgrep above: this WILL show existing findings on day one rather than
-  # picking a threshold that happens to pass — disclosed, not implied away,
-  # same standing decision named in the report-only-jobs comment below.
-  # Bump the flagged devDependencies to their patched versions to clear it;
-  # nothing here is urgent (all dev-tooling-only, non-RCE) but leaving known-
-  # vulnerable versions pinned indefinitely once a scan exists to see them
-  # is its own kind of drift.
+  # pnpm-audit: govulncheck's counterpart for the npm/TypeScript side (found
+  # via a manual `pnpm audit` pass, 2026-09-20: 12 unique high/critical
+  # advisories — all in devDependencies only, eslint/vitest/vite/tsx's own
+  # transitive tree, confirmed via `pnpm audit --prod` returning zero — and
+  # all DoS-class, never code-execution).
+  #
+  # A plain `pnpm audit --audit-level=high` fails on every single run as
+  # long as ANY of those 12 known findings exist — permanently red, which
+  # buries a genuinely new advisory in noise nobody has a reason to read
+  # closely, and makes "just merge, pnpm-audit is always red" the only
+  # sane response. scripts/check-pnpm-audit-baseline.ts fixes that: it
+  # diffs the current high/critical advisory set against the checked-in
+  # .github/pnpm-audit-baseline.txt and fails ONLY on advisories not
+  # already accepted there (including a known advisory's severity later
+  # getting rescored up — it isn't in the high+ baseline yet, so that's
+  # correctly treated as new). That makes this job meaningful again, so
+  # — unlike go-vulncheck/go-lint/semgrep above — it's NOT continue-on-error
+  # and IS in the `ci` gate's `needs:` list below: a real regression here
+  # blocks merge. See that script's own header for the exact mechanics, and
+  # the baseline file's header for how to clear or accept an entry.
   pnpm-audit:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -320,8 +327,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: pnpm audit
-        run: pnpm audit --audit-level=high
+      - name: pnpm audit (new findings only — see comment above)
+        run: pnpm exec tsx scripts/check-pnpm-audit-baseline.ts
 
   # semgrep scope (2026-09-20): src/ promoted back into scope after a full
   # triage of the 149 findings a first pass surfaced here (2026-09-04 note
