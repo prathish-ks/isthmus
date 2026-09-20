@@ -277,7 +277,7 @@ describe('requestApproval', () => {
     expect(lastNotifyText()).toBe('test_action failed: could not deliver approval request to slack:first.');
   });
 
-  it('records the row without delivering when no delivery adapter is bound yet', async () => {
+  it('records the row without delivering when no delivery adapter is bound yet, then delivers once one is', async () => {
     await seedDmUser('slack:first', 'slack', 'D-first', 'mg-first');
     await grantRole({
       user_id: 'slack:first',
@@ -291,5 +291,14 @@ describe('requestApproval', () => {
     expect(delivered).toHaveLength(0);
     expect(await getPendingApprovalsByAction('test_action')).toHaveLength(1);
     expect(vi.mocked(writeSessionMessage)).not.toHaveBeenCalled();
+
+    // Regression test for a fixed bug: the row used to be stranded forever
+    // here — nothing retried delivery once an adapter came up later. It must
+    // now be delivered as soon as setDeliveryAdapter runs.
+    setDeliveryAdapter(okAdapter);
+    await vi.waitFor(() => {
+      expect(delivered).toHaveLength(1);
+    });
+    expect(delivered[0]).toMatchObject({ channelType: 'slack', platformId: 'D-first' });
   });
 });

@@ -27,6 +27,7 @@ import {
   createPendingApproval,
   deletePendingApproval,
   getPendingApprovalsByAction,
+  setPendingApprovalPlatformMessageId,
   transitionPendingApprovalStatus,
 } from '../../db/sessions.js';
 import type { ChannelDeliveryAdapter } from '../../delivery.js';
@@ -112,6 +113,10 @@ export function stopOneCLIApprovalHandler(): void {
   handle = null;
   for (const state of pending.values()) {
     clearTimeout(state.timer);
+    // Resolve any in-flight handleRequest promise so its awaiting gateway
+    // callback returns instead of hanging forever — the HTTP side may already
+    // be gone, but the caller still needs a decision to unblock.
+    state.resolve('deny');
   }
   pending.clear();
   adapterRef = null;
@@ -157,6 +162,38 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
     { label: 'Approve', selectedLabel: '✅ Approved', value: 'approve', style: 'primary' as const },
     { label: 'Reject', selectedLabel: '❌ Rejected', value: 'reject', style: 'danger' as const },
   ];
+
+  // Row created BEFORE delivery: if the insert itself throws, no card has
+  // gone out yet, so nothing is left live with buttons that resolve nothing.
+  // The platform message id is only known once delivery returns, so it's
+  // patched in afterward (see setPendingApprovalPlatformMessageId below).
+  await createPendingApproval({
+    approval_id: approvalId,
+    session_id: null,
+    request_id: request.id,
+    action: ONECLI_ACTION,
+    payload: JSON.stringify({
+      oneCliRequestId: request.id,
+      method: request.method,
+      host: request.host,
+      path: request.path,
+      bodyPreview: request.bodyPreview,
+      agent: request.agent,
+      approver: target.userId,
+    }),
+    created_at: new Date().toISOString(),
+    agent_group_id: agentGroupId,
+    channel_type: target.messagingGroup.channel_type,
+    platform_id: target.messagingGroup.platform_id,
+    instance: target.messagingGroup.instance ?? null,
+    platform_message_id: null,
+    expires_at: request.expiresAt,
+    status: 'pending',
+    title: onecliTitle,
+    question,
+    options_json: JSON.stringify(onecliOptions),
+  });
+
   let platformMessageId: string | undefined;
   try {
     platformMessageId = await adapterRef.deliver(
@@ -180,35 +217,15 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
     );
   } catch (err) {
     log.error('Failed to deliver OneCLI approval card', { approvalId, oneCliRequestId: request.id, err });
+    // The row exists but nobody ever saw the card — remove it so it can't
+    // linger as a pending approval nothing will ever resolve.
+    await deletePendingApproval(approvalId);
     return 'deny';
   }
 
-  await createPendingApproval({
-    approval_id: approvalId,
-    session_id: null,
-    request_id: request.id,
-    action: ONECLI_ACTION,
-    payload: JSON.stringify({
-      oneCliRequestId: request.id,
-      method: request.method,
-      host: request.host,
-      path: request.path,
-      bodyPreview: request.bodyPreview,
-      agent: request.agent,
-      approver: target.userId,
-    }),
-    created_at: new Date().toISOString(),
-    agent_group_id: agentGroupId,
-    channel_type: target.messagingGroup.channel_type,
-    platform_id: target.messagingGroup.platform_id,
-    instance: target.messagingGroup.instance ?? null,
-    platform_message_id: platformMessageId ?? null,
-    expires_at: request.expiresAt,
-    status: 'pending',
-    title: onecliTitle,
-    question,
-    options_json: JSON.stringify(onecliOptions),
-  });
+  if (platformMessageId) {
+    await setPendingApprovalPlatformMessageId(approvalId, platformMessageId);
+  }
 
   // Expiry timer fires just before the gateway's own TTL so our decision lands
   // in time to be recorded, even though the HTTP side will already be closing.

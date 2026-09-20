@@ -293,14 +293,6 @@ describe('migrate-v2/sessions.ts', () => {
     const claudeDir = path.join(v1, 'data', 'sessions', 'sales', '.claude');
     const v1ProjectDir = path.join(claudeDir, 'projects', '-workspace-group');
     fs.mkdirSync(v1ProjectDir, { recursive: true });
-    // NOTE: sessions.ts picks the "most recent" v1 session by re-statting
-    // mtime from the just-copied v2 destination files (sourceDir prefers
-    // v2ProjectDir once it exists), not the original v1 files — copying
-    // resets mtime to copy time, so with multiple .jsonl files the "most
-    // recent" pick is effectively readdir order, not real v1 recency (see
-    // final report). Two files here exercise the sort/pick code path
-    // itself without asserting which one wins (that outcome isn't
-    // meaningfully deterministic given the above).
     fs.writeFileSync(path.join(v1ProjectDir, 'session-a.jsonl'), '{}');
     fs.writeFileSync(path.join(v1ProjectDir, 'session-b.jsonl'), '{}');
     await seed({ folder: 'sales', agentGroupId: 'ag-sales', wireMessagingGroup: true });
@@ -326,6 +318,46 @@ describe('migrate-v2/sessions.ts', () => {
       value: string;
     };
     expect(['session-a', 'session-b']).toContain(row.value);
+    ob.close();
+    db.close();
+  });
+
+  // Regression test for a fixed bug: the "most recent" v1 session used to be
+  // picked by re-statting mtime from the just-copied v2 destination files
+  // (sourceDir preferred v2ProjectDir once it existed) instead of the
+  // original v1 files — copyFileSync resets mtime to copy time, so with
+  // multiple .jsonl files the pick was effectively readdir order, not real
+  // v1 recency. Distinct, deliberately-set mtimes on the v1 source files
+  // prove the pick is now driven by actual v1 recency.
+  it('picks the v1 session with the newest v1 mtime, not directory-read order after the copy', async () => {
+    const v1 = tempDir('nanoclaw-sess-v1-');
+    const v2 = tempDir('nanoclaw-sess-v2-');
+    dbPath = path.join(v2, 'v2.db');
+    dataDir = v2;
+    process.chdir(v2);
+    const claudeDir = path.join(v1, 'data', 'sessions', 'sales', '.claude');
+    const v1ProjectDir = path.join(claudeDir, 'projects', '-workspace-group');
+    fs.mkdirSync(v1ProjectDir, { recursive: true });
+    // Write "z-older" after "a-newer" so directory-read order (typically
+    // alphabetical/insertion order) picks the wrong one unless real v1
+    // mtimes are honored.
+    fs.writeFileSync(path.join(v1ProjectDir, 'a-newer.jsonl'), '{}');
+    fs.writeFileSync(path.join(v1ProjectDir, 'z-older.jsonl'), '{}');
+    const now = Date.now();
+    fs.utimesSync(path.join(v1ProjectDir, 'a-newer.jsonl'), now / 1000, now / 1000);
+    fs.utimesSync(path.join(v1ProjectDir, 'z-older.jsonl'), (now - 60_000) / 1000, (now - 60_000) / 1000);
+    await seed({ folder: 'sales', agentGroupId: 'ag-sales', wireMessagingGroup: true });
+
+    await run([v1]);
+
+    const db = new Database(dbPath, { readonly: true });
+    const session = db.prepare('SELECT id FROM sessions WHERE agent_group_id = ?').get('ag-sales') as { id: string };
+    const obPath = path.join(dataDir, 'v2-sessions', 'ag-sales', session.id, 'outbound.db');
+    const ob = new Database(obPath, { readonly: true });
+    const row = ob.prepare("SELECT value FROM session_state WHERE key = 'continuation:claude'").get() as {
+      value: string;
+    };
+    expect(row.value).toBe('a-newer');
     ob.close();
     db.close();
   });

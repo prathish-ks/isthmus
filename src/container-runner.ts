@@ -158,8 +158,11 @@ export function wakeContainer(session: Session): Promise<boolean> {
 async function spawnContainer(session: Session): Promise<void> {
   const agentGroup = await getAgentGroup(session.agent_group_id);
   if (!agentGroup) {
-    log.error('Agent group not found', { agentGroupId: session.agent_group_id });
-    return;
+    // Throw rather than log-and-return: wakeContainer's caller believes a
+    // resolved promise means the container spawned. Throwing routes this
+    // through wakeContainer's .catch (log + return false), so the caller
+    // knows the wake failed and the inbound message stays pending for retry.
+    throw new Error(`Agent group not found: ${session.agent_group_id}`);
   }
 
   // Refresh the destination map and current-thread routing so any admin

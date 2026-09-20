@@ -228,6 +228,23 @@ export async function createPendingApproval(
   return result.changes > 0;
 }
 
+/**
+ * Record the platform message id of an already-delivered approval card.
+ * Used when the card must be delivered after the row is created (so a DB
+ * insert failure never leaves a live, unresolvable card behind) but the
+ * platform's message id is only known once delivery itself returns.
+ */
+export async function setPendingApprovalPlatformMessageId(
+  approvalId: string,
+  platformMessageId: string,
+): Promise<void> {
+  await getDb().run(
+    'UPDATE pending_approvals SET platform_message_id = ? WHERE approval_id = ?',
+    platformMessageId,
+    approvalId,
+  );
+}
+
 export async function getPendingApproval(approvalId: string): Promise<PendingApproval | undefined> {
   return getDb().get<PendingApproval>('SELECT * FROM pending_approvals WHERE approval_id = ?', approvalId);
 }

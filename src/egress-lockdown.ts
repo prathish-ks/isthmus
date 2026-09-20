@@ -41,12 +41,17 @@ function dockerOk(args: string[]): boolean {
 /** Is the OneCLI gateway currently attached to the egress network? */
 function gatewayAttached(): boolean {
   try {
+    // Newline-delimited, one name per line, compared with an exact match —
+    // not space-joined + word-split. This is security-boundary code (a miss
+    // here is a lockdown bypass): a container name containing a space would
+    // mis-tokenize a space-joined list, splitting one name into several
+    // tokens or merging adjacent ones into a false match.
     const out = execFileSync(
       CONTAINER_RUNTIME_BIN,
-      ['network', 'inspect', EGRESS_NETWORK, '--format', '{{range .Containers}}{{.Name}} {{end}}'],
+      ['network', 'inspect', EGRESS_NETWORK, '--format', '{{range .Containers}}{{.Name}}\n{{end}}'],
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 15000 },
     );
-    return out.split(/\s+/).includes(ONECLI_GATEWAY_CONTAINER);
+    return out.split('\n').some((name) => name.trim() === ONECLI_GATEWAY_CONTAINER);
   } catch {
     return false;
   }

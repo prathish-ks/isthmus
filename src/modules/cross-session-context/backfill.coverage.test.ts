@@ -4,8 +4,8 @@
  *  - parseContent's JSON.parse failure fallback (falsy c.text -> the row is
  *    skipped, both for the root candidate and for outbound candidates)
  *  - each leg of the root-row admission guard (text present, senderId
- *    !== 'system', sender !== 'system', and the "System instruction:" prefix
- *    filter) exercised in isolation
+ *    !== 'system', sender !== 'system', and the `internal` structural marker)
+ *    exercised in isolation
  *  - the `??` fallbacks for a root row's sender/senderId when absent
  *  - thread_id === null short-circuiting the task-session check
  *  - zero eligible rows across all siblings (newest.length === 0 -> no write)
@@ -104,12 +104,34 @@ describe('backfillNewSession — root-row admission guard, isolated legs', () =>
     expect(written).toHaveLength(0);
   });
 
-  it('excludes a root whose text starts with "System instruction:" even from a normal sender', async () => {
+  it('excludes a root marked internal (the host-injected welcome trigger), even attributed to the real owner', async () => {
+    inboundRows = [
+      {
+        timestamp: '2026-08-01T19:10:00Z',
+        content: JSON.stringify({
+          text: 'System instruction: run /welcome',
+          sender: 'Owner',
+          senderId: 'owner-1',
+          internal: true,
+        }),
+      },
+    ];
+    await backfillNewSession(AG, NEW_SESSION, DM_MG);
+    expect(written).toHaveLength(0);
+  });
+
+  // Regression test for a fixed bug: exclusion used to key off a literal
+  // "System instruction:" text prefix, which would have silently dropped a
+  // genuine user's own message starting with that exact text from backfill.
+  // The structural `internal` marker (set only by the CLI channel's
+  // host-injected routed transport) must be what gates exclusion now — not
+  // the text a message happens to contain.
+  it('admits a root whose text merely resembles the trigger text but carries no internal marker', async () => {
     inboundRows = [
       { timestamp: '2026-08-01T19:10:00Z', content: chat('System instruction: run /welcome', 'Owner', 'owner-1') },
     ];
     await backfillNewSession(AG, NEW_SESSION, DM_MG);
-    expect(written).toHaveLength(0);
+    expect(written).toHaveLength(1);
   });
 
   it('admits a normal root and fills sender/senderId defaults when absent from the payload', async () => {

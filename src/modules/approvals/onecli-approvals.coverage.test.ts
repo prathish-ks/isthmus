@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ApprovalRequest } from '@onecli-sh/sdk';
 
+import { getDb } from '../../db/connection.js';
 import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
 import { createAgentGroup } from '../../db/agent-groups.js';
 import { createMessagingGroup } from '../../db/messaging-groups.js';
@@ -238,6 +239,30 @@ describe('start / stop lifecycle', () => {
     });
     errorSpy.mockRestore();
   });
+
+  // Regression test for a fixed bug: stopping the handler while a request is
+  // still in flight (awaiting an admin click or its expiry timer) used to
+  // clear the timer and the pending map without ever resolving the promise
+  // handleRequest returned to the gateway callback — leaving that callback
+  // (and the gateway's HTTP connection behind it) hanging forever instead of
+  // just until the request's own timeout.
+  it('stop resolves any in-flight request promise instead of leaving it hanging forever', async () => {
+    await seedApprover();
+    startOneCLIApprovalHandler(fakeAdapter);
+    const decision = fire(makeRequest());
+    await awaitCard();
+
+    let settled = false;
+    void decision.then(() => {
+      settled = true;
+    });
+    expect(settled).toBe(false);
+
+    stopOneCLIApprovalHandler();
+
+    await expect(decision).resolves.toBe('deny');
+    expect(settled).toBe(true);
+  });
 });
 
 describe('gateway callback → approval card', () => {
@@ -280,6 +305,23 @@ describe('gateway callback → approval card', () => {
     expect(await fire(makeRequest())).toBe('deny');
     expect(delivered).toHaveLength(1);
     expect(await getPendingApprovalsByAction(ONECLI_ACTION)).toHaveLength(0);
+  });
+
+  // Regression test for a fixed bug: the card used to be delivered BEFORE
+  // createPendingApproval wrote its row, so a DB failure there left a live
+  // card with Approve/Reject buttons that couldn't resolve anything. The row
+  // is now written first — a DB failure specifically at that insert must mean
+  // no card ever goes out. Only the pending_approvals table is dropped so
+  // pickApprover/pickApprovalDelivery (which query other tables) still
+  // succeed and reach createPendingApproval, isolating the failure to it.
+  it('never delivers the card when persisting the pending-approval row fails', async () => {
+    await seedApprover();
+    const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
+    await getDb().run('DROP TABLE pending_approvals');
+    startOneCLIApprovalHandler(fakeAdapter);
+    expect(await fire(makeRequest())).toBe('deny');
+    expect(delivered).toHaveLength(0);
+    errorSpy.mockRestore();
   });
 
   it('denies (fail closed) when the handler throws on a malformed request', async () => {

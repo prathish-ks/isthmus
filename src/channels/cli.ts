@@ -207,6 +207,7 @@ function createAdapter(): ChannelAdapter {
       reply_to?: unknown;
       sender?: unknown;
       senderId?: unknown;
+      internal?: unknown;
     };
     try {
       payload = JSON.parse(line);
@@ -236,6 +237,12 @@ function createAdapter(): ChannelAdapter {
             text: payload.text,
             sender: typeof payload.sender === 'string' ? payload.sender : 'cli',
             senderId: typeof payload.senderId === 'string' ? payload.senderId : `cli:${PLATFORM_ID}`,
+            // Host-injected trigger (e.g. the welcome hand-off), sent under
+            // the paired user's own identity for sender-gating — `internal`
+            // is the structural marker that lets consumers (cross-session
+            // backfill) exclude it from user-facing timelines without
+            // resorting to matching on message text.
+            ...(payload.internal === true ? { internal: true } : {}),
           }),
         },
         replyTo: replyTo ?? undefined,

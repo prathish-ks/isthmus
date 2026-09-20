@@ -171,9 +171,20 @@ describe('backfillContainerConfigs', () => {
     expect(h.log.info).toHaveBeenCalledWith('Backfilled container_configs from disk', { count: 1 });
   });
 
-  it('propagates a createContainerConfig failure (startup must not swallow a broken seed)', async () => {
+  it('propagates a createContainerConfig failure (startup must not swallow a broken seed), logging which group failed', async () => {
     h.getAllAgentGroups.mockResolvedValue([group('g-err', 'err')]);
     h.createContainerConfig.mockRejectedValue(new Error('constraint failed'));
     await expect(backfillContainerConfigs()).rejects.toThrow('constraint failed');
+    // Regression test for a fixed bug: the abort used to carry no group
+    // identity at all, so an operator debugging a broken startup had no way
+    // to tell which of potentially many groups caused it.
+    expect(h.log.error).toHaveBeenCalledWith(
+      'Backfill: failed to create container_configs row',
+      expect.objectContaining({
+        agentGroupId: 'g-err',
+        folder: 'err',
+        err: expect.stringContaining('constraint failed'),
+      }),
+    );
   });
 });

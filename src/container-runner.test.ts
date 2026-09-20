@@ -22,7 +22,9 @@ import {
   resolveProviderName,
   syncSkillSymlinks,
   toMountSpecs,
+  wakeContainer,
 } from './container-runner.js';
+import { getAgentGroup } from './db/agent-groups.js';
 import type { SupervisedHandle } from './drivers/session-events.js';
 import { log } from './log.js';
 import type { VolumeMount } from './providers/provider-container-registry.js';
@@ -31,6 +33,8 @@ import type { AgentGroup, Session } from './types.js';
 vi.mock('./log.js', () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
 }));
+
+vi.mock('./db/agent-groups.js', () => ({ getAgentGroup: vi.fn(async () => undefined) }));
 
 describe('resolveProviderName', () => {
   it('prefers session over container config', () => {
@@ -489,6 +493,35 @@ describe('syncSkillSymlinks', () => {
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringContaining('Shared skill not symlinked'),
       expect.objectContaining({ skill: 'welcome' }),
+    );
+  });
+});
+
+describe('wakeContainer', () => {
+  const session: Session = {
+    id: 'sess-missing-group',
+    agent_group_id: 'ag-does-not-exist',
+    messaging_group_id: null,
+    thread_id: null,
+    agent_provider: null,
+    status: 'active',
+    container_status: 'idle',
+    last_active: null,
+    created_at: new Date().toISOString(),
+  };
+
+  // Regression test for a fixed bug: a missing agent group used to be
+  // logged and swallowed inside spawnContainer, so wakeContainer's `.then(()
+  // => true)` resolved true regardless — the caller believed the container
+  // had spawned and the inbound message was never retried. It must now
+  // resolve false so callers (and host-sweep) know to retry.
+  it('resolves false, not true, when the session references a missing agent group', async () => {
+    vi.mocked(getAgentGroup).mockResolvedValueOnce(undefined as unknown as AgentGroup);
+
+    await expect(wakeContainer(session)).resolves.toBe(false);
+    expect(log.warn).toHaveBeenCalledWith(
+      'wakeContainer failed — host-sweep will retry',
+      expect.objectContaining({ sessionId: session.id }),
     );
   });
 });

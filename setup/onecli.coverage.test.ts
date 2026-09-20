@@ -471,20 +471,15 @@ describe('run() — default install mode', () => {
     expect(emitted.at(-1)).toMatchObject({ ERROR: 'onecli_not_on_path_after_install' });
   });
 
-  // NOTE ("could_not_resolve_api_host" is effectively unreachable in
-  // practice, and is a real observed bug): the combined stdout that
-  // extractUrlFromOutput() scans is cleanup-output + gateway-install-output +
-  // CLI-install-output, and installOnecliCliDirect() unconditionally logs
-  // `Downloading https://github.com/<repo>/releases/download/...` on its
-  // success path (the only path that reaches url resolution at all — a
-  // failed CLI install exits earlier via ERROR: install_failed). So whenever
-  // the *gateway* installer's own output happens not to contain a URL, the
-  // code does not fall into the intended failure branch — instead the
-  // regex's first match becomes the CLI's own GitHub download host
-  // (truncated to "https://github.com"), which gets silently treated as the
-  // resolved onecli api-host and handed to `onecli config set api-host`.
-  // Demonstrated here instead of testing the (unreachable) intended branch.
-  it('BUG: silently resolves the wrong "api-host" (the CLI download URL) when the gateway installer output has none', async () => {
+  // Regression test for a fixed bug: url resolution now scans only the
+  // *gateway* installer's own stdout, not the combined cleanup +
+  // gateway-install + CLI-install output. installOnecliCliDirect()
+  // unconditionally logs `Downloading https://github.com/<repo>/releases/...`
+  // on its success path, so scanning the combined output let that URL be
+  // mistaken for the gateway's api-host whenever the gateway installer's own
+  // output happened not to contain a URL. It must now correctly fail with
+  // could_not_resolve_api_host instead.
+  it('fails could_not_resolve_api_host (not the CLI download URL) when the gateway installer output has no URL', async () => {
     const { execSync } = await import('child_process');
     vi.mocked(execSync).mockImplementationOnce((...args: unknown[]) => {
       cliState.execCalls.push(String(args[0]));
@@ -495,10 +490,8 @@ describe('run() — default install mode', () => {
       return 'Installed, but no URL printed here.\n'; // gateway install: no URL
     });
     const { exits } = await runOnecli([]);
-    // Not the intended failure — the wrong host is "resolved" and reported
-    // as a success instead.
-    expect(exits).toEqual([]);
-    expect(emitted.at(-1)).toMatchObject({ INSTALLED: true, STATUS: 'success', ONECLI_URL: 'https://github.com' });
+    expect(exits).toEqual([1]);
+    expect(emitted.at(-1)).toMatchObject({ INSTALLED: true, STATUS: 'failed', ERROR: 'could_not_resolve_api_host' });
   });
 
   it('installs, configures api-host, writes .env, and reports success with no HEALTH_HINT when healthy', async () => {

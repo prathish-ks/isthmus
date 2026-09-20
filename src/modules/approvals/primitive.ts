@@ -24,7 +24,7 @@
 import { normalizeOptions, type RawOption } from '../../channels/ask-question.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { createPendingApproval, deletePendingApproval, getSession } from '../../db/sessions.js';
-import { getDeliveryAdapter } from '../../delivery.js';
+import { getDeliveryAdapter, onDeliveryAdapterReady, type ChannelDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
@@ -262,8 +262,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
     approver_user_id: approverUserId ?? null,
   });
 
-  const adapter = getDeliveryAdapter();
-  if (adapter) {
+  const deliverCard = async (adapter: ChannelDeliveryAdapter): Promise<void> => {
     try {
       await adapter.deliver(
         target.messagingGroup.channel_type,
@@ -288,7 +287,16 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
       await notifyAgent(session, `${action} failed: could not deliver approval request to ${target.userId}.`);
       return;
     }
-  }
+    log.info('Approval requested', { action, approvalId, agentName, approver: target.userId });
+  };
 
-  log.info('Approval requested', { action, approvalId, agentName, approver: target.userId });
+  const adapter = getDeliveryAdapter();
+  if (adapter) {
+    await deliverCard(adapter);
+  } else {
+    // No adapter bound yet (narrow boot-time window). Don't strand the row —
+    // deliver as soon as one comes up instead of silently doing nothing.
+    log.warn('Approval requested before a delivery adapter was bound — deferring delivery', { action, approvalId });
+    onDeliveryAdapterReady((readyAdapter) => deliverCard(readyAdapter));
+  }
 }

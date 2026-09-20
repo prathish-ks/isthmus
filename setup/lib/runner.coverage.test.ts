@@ -122,10 +122,11 @@ afterEach(() => {
 // Cleanup deliberately deferred to afterAll rather than afterEach: the raw
 // log is written through fs.createWriteStream, whose actual disk flush is
 // async and not awaited by spawnStep/spawnQuiet's resolve() — removing a raw
-// log's tmp dir right after its own test can race a still-in-flight write
-// and throw an unhandled 'error' on the stream (no listener attached in the
-// source), which crashes the whole worker. Deleting once at the very end
-// gives every stream from every test time to settle first.
+// log's tmp dir right after its own test can race a still-in-flight write.
+// The source now attaches an 'error' listener (see "raw log write errors"
+// below) so a race here only logs a warning instead of crashing the worker,
+// but deleting once at the very end still avoids spurious warnings and gives
+// every stream from every test time to settle first.
 afterAll(() => {
   for (const f of tmpFiles.splice(0)) {
     try {
@@ -333,6 +334,33 @@ describe('spawnStep', () => {
     expect(seen).toEqual(['FIRST']);
     child.emit('close', 0);
     await p;
+  });
+
+  // Regression test for a fixed bug: an unwritable raw-log path (disk full,
+  // permissions, directory deleted mid-run) used to throw an uncaught
+  // exception from the write stream's 'error' event, crashing the whole
+  // setup process. It must now degrade to a logged warning and let the step
+  // finish normally.
+  it('a raw log write stream error is caught and logged, not thrown, and the step still resolves', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const child = nextChild();
+    // A path through a file (not a directory) as a parent is guaranteed to
+    // fail with ENOTDIR on open, regardless of platform permission quirks.
+    const parentFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runner-cov-')), 'not-a-dir');
+    fs.writeFileSync(parentFile, '');
+    const rawLog = path.join(parentFile, 'raw.log');
+    tmpFiles.push(parentFile);
+    let p: ReturnType<typeof spawnStep>;
+    expect(() => {
+      p = spawnStep('container', [], () => {}, rawLog);
+    }).not.toThrow();
+    child.emit('close', 0);
+    await expect(p!).resolves.toMatchObject({ exitCode: 0 });
+    await vi.waitFor(() => {
+      if (errorSpy.mock.calls.length === 0) throw new Error('error not logged yet');
+    });
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(rawLog));
+    errorSpy.mockRestore();
   });
 });
 

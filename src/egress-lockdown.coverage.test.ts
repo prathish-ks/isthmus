@@ -75,7 +75,7 @@ describe('ensureEgressNetwork', () => {
 
   it('returns true when the network exists and the gateway is already attached', async () => {
     const { ensureEgressNetwork } = await load(true);
-    scriptDocker({ inspect: true, members: [`other ${GATEWAY} `] });
+    scriptDocker({ inspect: true, members: [`other\n${GATEWAY}\n`] });
 
     expect(ensureEgressNetwork()).toBe(true);
     expect(verbs()).toEqual(['inspect', 'inspect']);
@@ -86,7 +86,7 @@ describe('ensureEgressNetwork', () => {
     expect(mocks.execFileSync).toHaveBeenNthCalledWith(
       2,
       'docker-test',
-      ['network', 'inspect', NETWORK, '--format', '{{range .Containers}}{{.Name}} {{end}}'],
+      ['network', 'inspect', NETWORK, '--format', '{{range .Containers}}{{.Name}}\n{{end}}'],
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 15000 },
     );
     // Already attached: nothing to connect, nothing to announce.
@@ -96,7 +96,7 @@ describe('ensureEgressNetwork', () => {
   it('creates the internal network when missing, then attaches the gateway with the host alias', async () => {
     const { ensureEgressNetwork } = await load(true);
     // First format-inspect: nobody attached; after connect: gateway present.
-    scriptDocker({ inspect: false, create: true, connect: true, members: ['', `${GATEWAY} `] });
+    scriptDocker({ inspect: false, create: true, connect: true, members: ['', `${GATEWAY}\n`] });
 
     expect(ensureEgressNetwork()).toBe(true);
     expect(verbs()).toEqual(['inspect', 'create', 'inspect', 'connect', 'inspect']);
@@ -149,7 +149,7 @@ describe('ensureEgressNetwork', () => {
 
   it('throws when connect "succeeds" but the gateway still is not a member (no silent open egress)', async () => {
     const { ensureEgressNetwork, EgressLockdownError } = await load(true);
-    scriptDocker({ inspect: true, connect: true, members: ['someone-else '] });
+    scriptDocker({ inspect: true, connect: true, members: ['someone-else\n'] });
 
     expect(() => ensureEgressNetwork()).toThrow(EgressLockdownError);
     expect(verbs()).toEqual(['inspect', 'inspect', 'connect', 'inspect']);
@@ -165,8 +165,29 @@ describe('ensureEgressNetwork', () => {
 
   it('does not match the gateway name as a substring of another member', async () => {
     const { ensureEgressNetwork } = await load(true);
-    scriptDocker({ inspect: true, connect: false, members: [`${GATEWAY}-shadow `] });
+    scriptDocker({ inspect: true, connect: false, members: [`${GATEWAY}-shadow\n`] });
     expect(() => ensureEgressNetwork()).toThrow(/could not be attached/);
+  });
+
+  // Regression test for a fixed bug: membership used to be checked by
+  // space-joining names and splitting the result back apart on whitespace —
+  // a container name containing a space would mis-tokenize into several
+  // pieces, none of which match the full name, so the (fully attached)
+  // gateway was wrongly reported as not attached. Matching is now
+  // newline-delimited with an exact per-line comparison, so a name
+  // containing a space is never split apart.
+  it('matches a gateway container name that contains an embedded space', async () => {
+    vi.resetModules();
+    const gatewayWithSpace = 'onecli gw special';
+    vi.doMock('./config.js', () => ({
+      EGRESS_LOCKDOWN: true,
+      EGRESS_NETWORK: NETWORK,
+      ONECLI_GATEWAY_CONTAINER: gatewayWithSpace,
+    }));
+    const { ensureEgressNetwork } = await import('./egress-lockdown.js');
+    scriptDocker({ inspect: true, members: [`${gatewayWithSpace}\n`] });
+
+    expect(ensureEgressNetwork()).toBe(true);
   });
 });
 

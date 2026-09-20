@@ -292,6 +292,29 @@ describe('routed (`to`-bearing) lines', () => {
     });
   });
 
+  it('passes internal:true through to message content, and omits it entirely otherwise', async () => {
+    const client = await client1();
+    const withFlag = await routed(client, {
+      text: 'welcome',
+      to: { channelType: 'discord', platformId: 'discord:@me:1', threadId: null },
+      sender: 'Owner',
+      senderId: 'discord:owner-1',
+      internal: true,
+    });
+    expect(JSON.parse(withFlag.message.content as string)).toEqual({
+      text: 'welcome',
+      sender: 'Owner',
+      senderId: 'discord:owner-1',
+      internal: true,
+    });
+
+    const withoutFlag = await routed(client, {
+      text: 'hi',
+      to: { channelType: 'discord', platformId: 'discord:@me:2', threadId: null },
+    });
+    expect(JSON.parse(withoutFlag.message.content as string)).not.toHaveProperty('internal');
+  });
+
   it('defaults sender/senderId, nulls a non-string threadId and omits an invalid reply_to', async () => {
     const client = await client1();
     const event = await routed(client, {

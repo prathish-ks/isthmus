@@ -61,13 +61,14 @@ describe('v2PlatformId', () => {
     expect(v2PlatformId('whatsapp', '1234@g.us')).toBe('1234@g.us');
   });
 
-  // The docstring on v2PlatformId claims it strips a v1 "wa:"/"whatsapp:"
-  // prefix, but isWhatsappJid() classifies by the JID's @-host alone: any
-  // leading "wa:"/"whatsapp:" text is part of `id` (== `raw`) and is NOT
-  // stripped when the JID already carries a recognized WA host. Documented
-  // here as observed behavior, not fixed (see final report).
-  it('does not actually strip a leading "wa:"/"whatsapp:" text when the JID has a WA host', () => {
-    expect(v2PlatformId('whatsapp', 'wa:1234@s.whatsapp.net')).toBe('wa:1234@s.whatsapp.net');
+  // Regression test for a fixed bug: isWhatsappJid() classifies by the JID's
+  // @-host alone, so a raw JID that already carries a recognized WA host used
+  // to reach parseJid's whatsapp branch with any leading "wa:"/"whatsapp:"
+  // text still attached to `id` (== `raw`), unstripped — contradicting this
+  // function's own docstring. It must now be stripped like the docstring says.
+  it('strips a leading "wa:"/"whatsapp:" prefix even when the JID has a WA host', () => {
+    expect(v2PlatformId('whatsapp', 'wa:1234@s.whatsapp.net')).toBe('1234@s.whatsapp.net');
+    expect(v2PlatformId('whatsapp', 'whatsapp:1234@g.us')).toBe('1234@g.us');
   });
 
   it('falls back to the raw jid for whatsapp when parseJid cannot classify it', () => {
