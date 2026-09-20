@@ -97,7 +97,7 @@ This is a **compact, tractable set — 15 files, well under 200 static test case
 
 ## Known baseline failures don't touch the Go-kernel-relevant subset
 
-`docs/baseline.md` records 15 known, pre-existing, unrelated-to-this-project test failures, in exactly two files: `scripts/add-dial-tool-scope.test.ts` (11 failures) and `scripts/update/transaction.e2e.test.ts` (4 failures). Both classify in this inventory as **KEEP TS: scripts/tooling** — neither is in the Go-kernel-relevant subset above. This is a useful cross-check: the known baseline noise sits entirely outside the files Phase 2/3 will actually be building differential tests against, so it can keep being safely ignored throughout the rest of this project without needing to be reconciled against Go-kernel work.
+`docs/baseline.md` originally recorded 15 known, pre-existing test failures in exactly two files: `scripts/add-dial-tool-scope.test.ts` (11 failures) and `scripts/update/transaction.e2e.test.ts` (4 failures). Both classify in this inventory as **KEEP TS: scripts/tooling** — neither is in the Go-kernel-relevant subset above, so this was never a Go-kernel-work concern either way. **Update, 2026-09-20: both are now root-caused and resolved on this fork** — see `docs/baseline.md`'s own "Update" note for the detail (a symlink-unaware path check in `transaction.ts`, since fixed, and an environment-specific `jq` issue on the original recording machine that doesn't reproduce here). `vitest.config.ci.ts` no longer excludes either file.
 
 ## Largest test files (by byte size, for context)
 
