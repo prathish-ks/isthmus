@@ -181,6 +181,8 @@ func respond(requestID string, payload any, errInfo *ErrorInfo) ResponseEnvelope
 // Kind/Detail split already applies to security denials.
 const maxSocketPathLen = 104
 
+// acquireServeLock is implemented per-OS — see lock_unix.go / lock_windows.go.
+
 // Serve listens on a Unix domain socket at socketPath and dispatches one
 // newline-delimited JSON envelope per line, one response per line, until
 // ctx is cancelled. socketPath is removed first if it already exists (a
@@ -188,10 +190,19 @@ const maxSocketPathLen = 104
 // see doc.go's non-capabilities section on why this, not TLS/a token, is
 // the whole auth story: a single-user personal-agent host has exactly one
 // legitimate local peer, and file permissions already exclude everyone else.
+// An exclusive lock (acquireServeLock) is taken first so that guarantee
+// can't be silently violated by a second serve process racing to bind the
+// same path — see that function's doc comment.
 func (k *Kernel) Serve(ctx context.Context, socketPath string) error {
 	if len(socketPath) > maxSocketPathLen {
 		return fmt.Errorf("kernel: socket path %q is %d bytes, over the %d-byte portable limit (macOS sockaddr_un) — use a shorter path, e.g. under /tmp or a dedicated run directory", socketPath, len(socketPath), maxSocketPathLen)
 	}
+	lockFile, err := acquireServeLock(socketPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lockFile.Close() }()
+
 	_ = os.Remove(socketPath)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
