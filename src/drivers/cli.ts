@@ -41,7 +41,8 @@ export function realCli(bin: string): Cli {
     start(args, opts) {
       // Array-form spawn (bin, args[]) — no shell, so no shell-injection surface;
       // the rule below flags any child_process call regardless of shell involvement.
-      const child = spawn(bin, args, { // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+      // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+      const child = spawn(bin, args, {
         stdio: ['ignore', opts?.captureStdout ? 'pipe' : 'ignore', 'pipe'],
         // Own process group. A service manager restarting the host signals the
         // host's WHOLE group, and `docker start --attach` forwards signals into

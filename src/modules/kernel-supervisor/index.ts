@@ -218,7 +218,8 @@ async function spawnKernel(nanogoPath: string): Promise<boolean> {
 
   // Array-form spawn (nanogoPath, args[]) — no shell, so no shell-injection surface;
   // the rule below flags any child_process call regardless of shell involvement.
-  const proc = spawn(nanogoPath, args, { // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+  // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+  const proc = spawn(nanogoPath, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     // Own process group — same reasoning as drivers/cli.ts's realCli: a
     // service manager (or an interactive Ctrl-C) signaling the host's whole
