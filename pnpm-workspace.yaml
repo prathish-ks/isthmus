@@ -2,8 +2,6 @@ onlyBuiltDependencies:
   - esbuild
   - protobufjs
   - sharp
-patchedDependencies:
-  '@chat-adapter/discord@4.29.0': patches/@chat-adapter__discord@4.29.0.patch
 
 pnpm:
   minimumReleaseAge: 4320
