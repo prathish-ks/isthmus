@@ -138,11 +138,86 @@ jobs:
       - name: go test -race
         run: go test -mod=vendor -race ./...
 
-  # Repository rules require exact `ci`; always run it so matrix and
-  # go-host failures both remain blocking.
+  # performance-gate: follow-up from commit 8cbf15db (fix(router): bound
+  # engage_pattern regex test against ReDoS) — that fix's own regression
+  # test (src/router-engage-pattern-redos.test.ts) already runs inside the
+  # `test` job above, mixed in with ~3,900 other tests. That's enough to
+  # catch a straight revert, but a genuine latency regression (the vm
+  # timeout budget creeping up, or a new call path bypassing
+  # safeEngagePatternTest entirely) has no clearly-labeled signal on a PR —
+  # it's one green checkmark among many, easy to miss if the assertion
+  # itself is loosened in the same PR that regresses it.
+  #
+  # Scoped to the whole project, not just that one test: rather than
+  # hardcoding a file list (which silently stops covering new
+  # performance-bounding tests the moment someone forgets to also edit this
+  # workflow), this job greps both test trees — src/ (host, vitest) and
+  # container/agent-runner/src/ (container, bun) — for a `PERF-GATE:`
+  # marker in the file's own doc comment, and runs whatever it finds. Any
+  # test asserting a wall-clock upper bound to guard against a hang/DoS
+  # class of regression should carry that tag; see
+  # src/router-engage-pattern-redos.test.ts for the convention — tag a new
+  # one and it's picked up automatically, no workflow edit needed.
+  #
+  # Each tree's discovery step logs the files it found and degrades to a
+  # no-op (not a failure) when a tree has zero tagged files today — true
+  # right now for container/agent-runner/src/, which has no perf-bounding
+  # test yet. That is a real, visible gap (the step's own log line says so
+  # on every run), not a silent one; failing the whole job over an empty
+  # tree would only teach people to delete this job the first time someone
+  # legitimately has nothing to tag there yet.
+  #
+  # Required (part of the `ci` gate's needs below), not report-only: the
+  # underlying risk class — an unbounded operation freezing the
+  # single-threaded host, or a container hang — is a host-wide DoS, not a
+  # cosmetic slowdown.
+  performance-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.12
+      - run: pnpm install --frozen-lockfile
+      - name: Install agent-runner deps (Bun)
+        working-directory: container/agent-runner
+        run: bun install --frozen-lockfile
+
+      - name: Host performance-bounding regression tests
+        run: |
+          set -eo pipefail
+          files="$(grep -rl --include='*.test.ts' 'PERF-GATE:' src || true)"
+          if [ -z "$files" ]; then
+            echo "::warning::No PERF-GATE-tagged test files found under src/ — host-side performance gate has nothing to run."
+            exit 0
+          fi
+          echo "Tagged host test files:"
+          echo "$files"
+          echo "$files" | xargs pnpm exec vitest run --config vitest.config.ci.ts
+
+      - name: Container performance-bounding regression tests
+        working-directory: container/agent-runner
+        run: |
+          set -eo pipefail
+          files="$(grep -rl --include='*.test.ts' 'PERF-GATE:' src || true)"
+          if [ -z "$files" ]; then
+            echo "No PERF-GATE-tagged test files found under container/agent-runner/src/ — nothing to run yet."
+            exit 0
+          fi
+          echo "Tagged container test files:"
+          echo "$files"
+          echo "$files" | xargs bun test
+
+  # Repository rules require exact `ci`; always run it so matrix, go-host,
+  # pnpm-audit, and performance-gate failures all remain blocking.
   ci:
     if: always()
-    needs: [test, go-host, pnpm-audit]
+    needs: [test, go-host, pnpm-audit, performance-gate]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -150,6 +225,7 @@ jobs:
           test "${{ needs.test.result }}" = success
           test "${{ needs.go-host.result }}" = success
           test "${{ needs.pnpm-audit.result }}" = success
+          test "${{ needs.performance-gate.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
