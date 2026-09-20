@@ -142,23 +142,27 @@ jobs:
   # go-host failures both remain blocking.
   ci:
     if: always()
-    needs: [test, go-host]
+    needs: [test, go-host, pnpm-audit]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
       - run: |
           test "${{ needs.test.result }}" = success
           test "${{ needs.go-host.result }}" = success
+          test "${{ needs.pnpm-audit.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
-  # every PR and their results are visible on the PR, but none of them is
-  # in the `ci` gate's `needs:` list above, so a finding here never blocks
-  # a merge — matching this project's own standing decision ("running a
-  # check and requiring a check to pass before merge are different
-  # things... branch protection stays deferred to Milestone E/F"). Promote
-  # any of these to `needs: [test, go-host, <job>]` above once that
-  # decision changes.
+  # every PR and their results are visible on the PR, but (pnpm-audit
+  # excepted — promoted into the gate 2026-09-20, see its own comment
+  # below) none of the rest is in the `ci` gate's `needs:` list above, so
+  # a finding there never blocks a merge — matching this project's own
+  # standing decision ("running a check and requiring a check to pass
+  # before merge are different things... branch protection stays deferred
+  # to Milestone E/F"). Promote any of these to
+  # `needs: [test, go-host, <job>]` above once that decision changes —
+  # pnpm-audit is the precedent: only worth doing once a job fails on
+  # genuine regressions rather than permanently-known noise.
   # ---------------------------------------------------------------------
 
   # go-host-os-matrix (Phase 13 pre-launch validation): the required
@@ -293,19 +297,74 @@ jobs:
       - name: govulncheck
         run: govulncheck ./...
 
-  # semgrep scope (2026-09-04): narrowed to go-host/ — the code this project
-  # actually owns and ports — dropping src/ from the scan target. src/ is
-  # the largely upstream-inherited TypeScript host (see go-host/README.md's
-  # own "Thesis": "Everything above the boundary... stays TypeScript"), and
-  # scanning it here surfaced 148 findings — mostly the path-traversal audit
-  # rule firing on path.join() calls built from already-validated internal
-  # identifiers, but also at least one XSS-shaped finding in
-  # webhook-server.ts — that this project has never triaged. That's real,
-  # separate work (not a CI-hardening regression: these predate this
-  # phase's own changes), tracked as an open follow-up rather than silently
-  # dropped — same reasoning already used to exclude vendor/ from the
-  # gofmt check above ("this project does not reformat code it does not
-  # own"). Promote src/ back into scope once that triage happens.
+  # pnpm-audit: govulncheck's counterpart for the npm/TypeScript side (found
+  # via a manual `pnpm audit` pass, 2026-09-20: 12 unique high/critical
+  # advisories — all in devDependencies only, eslint/vitest/vite/tsx's own
+  # transitive tree, confirmed via `pnpm audit --prod` returning zero — and
+  # all DoS-class, never code-execution).
+  #
+  # A plain `pnpm audit --audit-level=high` fails on every single run as
+  # long as ANY of those 12 known findings exist — permanently red, which
+  # buries a genuinely new advisory in noise nobody has a reason to read
+  # closely, and makes "just merge, pnpm-audit is always red" the only
+  # sane response. scripts/check-pnpm-audit-baseline.ts fixes that: it
+  # diffs the current high/critical advisory set against the checked-in
+  # .github/pnpm-audit-baseline.txt and fails ONLY on advisories not
+  # already accepted there (including a known advisory's severity later
+  # getting rescored up — it isn't in the high+ baseline yet, so that's
+  # correctly treated as new). That makes this job meaningful again, so
+  # — unlike go-vulncheck/go-lint/semgrep above — it's NOT continue-on-error
+  # and IS in the `ci` gate's `needs:` list below: a real regression here
+  # blocks merge. See that script's own header for the exact mechanics, and
+  # the baseline file's header for how to clear or accept an entry.
+  pnpm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: pnpm audit (new findings only — see comment above)
+        run: pnpm exec tsx scripts/check-pnpm-audit-baseline.ts
+
+  # semgrep scope (2026-09-20): src/ promoted back into scope after a full
+  # triage of the 149 findings a first pass surfaced here (2026-09-04 note
+  # this replaces). Disposition:
+  #   - 145 path-traversal findings (path-join-resolve-traversal): all false
+  #     positives. Every flagged path.join/resolve call resolves through one
+  #     of three validated-provenance sources — resolveLocalTemplate's
+  #     containment guard (src/templates/local-dir.ts), the stricter
+  #     allowlist-regex + containment guard in resolveGroupFolderPath
+  #     (src/group-folder.ts), or a DB-primary-key-resolved session/agent-
+  #     group id (never a raw external string at the join site — traced
+  #     exhaustively for session-manager.ts and mailbox/sqlite/paths.ts,
+  #     closing the gap docs/threat-model-addendum-p5.md §3 had left open).
+  #     None of the 145 sites are suppressed inline — they aren't part of
+  #     any PR's diff going forward, so a future PR that actually touches
+  #     one of them (and breaks the invariant) would surface it fresh.
+  #   - 2 detect-child-process findings (src/drivers/cli.ts,
+  #     src/modules/kernel-supervisor/index.ts): false positives —
+  #     array-form execFileSync/spawn, no shell involved. Marked
+  #     `nosemgrep` at each call site with that rationale.
+  #   - 1 XSS-shaped finding (webhook-server.ts's direct response write):
+  #     real, but already mitigated by the nosniff header added above.
+  #     Marked `nosemgrep` at the call site referencing that mitigation.
+  #   - 1 non-literal-regexp finding (router.ts's engage_pattern test): no
+  #     longer applies — the regex construction now happens inside a
+  #     vm-sandboxed string (see safeEngagePatternTest in src/router.ts,
+  #     which also fixes the underlying ReDoS gap that finding was
+  #     pointing at), which isn't a real RegExp() call in this file's AST
+  #     any more.
+  # src/ scans in PR-diff-only mode (--baseline-commit) rather than a full
+  # rescan every time — with 145 pattern-matches never going away, a full
+  # scan would just be permanent noise burying any genuinely new finding.
+  # go-host/ (small, project-owned, currently clean) keeps its full scan on
+  # every trigger. Non-PR triggers (schedule/workflow_dispatch) have no PR
+  # base commit to diff against, so the src/ step only runs on pull_request;
+  # go-host/'s full scan still runs on every trigger regardless.
   semgrep:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -313,8 +372,15 @@ jobs:
       image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
-      - name: semgrep scan
+        with:
+          fetch-depth: 0
+      - name: semgrep scan (go-host, full)
         run: semgrep scan --config auto --error go-host/
+      - name: semgrep scan (src, PR-diff only)
+        if: github.event_name == 'pull_request'
+        run: semgrep scan --config auto --error --baseline-commit "$BASE_SHA" src/
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
 
   # go-fuzz-smoke (P9-06, Phase 9/10 hardening): a short, time-boxed real
   # fuzzing run (mutation-guided, `-fuzz=`, not just the seed corpus) for

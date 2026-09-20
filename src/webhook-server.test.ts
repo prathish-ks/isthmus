@@ -103,4 +103,23 @@ describe('registerWebhookAdapter — route/handler split', () => {
     const res = await post('/webhook/nope', 'x');
     expect(res.status).toBe(404);
   });
+
+  // Defense-in-depth regression: the 404 "Unknown adapter: <name>" body
+  // reflects the URL segment verbatim, unescaped — safe only because
+  // Content-Type is explicit text/plain there. nosniff closes the residual
+  // gap where a client ignores that declared type. Checked on both the 404
+  // (where the reflection lives) and the real dispatch path (where it
+  // should apply just as uniformly, set once before any routing decision).
+  it('sets X-Content-Type-Options: nosniff on every response, 404 and dispatched alike', async () => {
+    const { chat } = stubChat('tag');
+    registerWebhookAdapter(chat, 'slack');
+
+    const notFound = await post('/webhook/nope', 'x');
+    expect(notFound.status).toBe(404);
+    expect(notFound.headers.get('x-content-type-options')).toBe('nosniff');
+
+    const dispatched = await post('/webhook/slack', 'x');
+    expect(dispatched.status).toBe(200);
+    expect(dispatched.headers.get('x-content-type-options')).toBe('nosniff');
+  });
 });
