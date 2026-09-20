@@ -504,6 +504,65 @@ func TestServe_RoundTripOverUnixSocket(t *testing.T) {
 	}
 }
 
+// TestServe_RefusesConcurrentSecondInstanceOnSameSocketPath guards the fix
+// for the incident that prompted acquireServeLock: two independently
+// started `nanogo serve` processes racing to bind the same socket path
+// used to succeed silently — the second call's own os.Remove+net.Listen
+// just stole the path out from under the first, no error either side
+// could see. That's a real integrity gap for a trust kernel (the control
+// socket itself becomes silently swappable), not just a reliability one.
+// This proves the second Serve call now fails loudly instead, and that
+// the first kernel keeps serving normally throughout — the fix must not
+// disrupt the instance that legitimately holds the socket.
+func TestServe_RefusesConcurrentSecondInstanceOnSameSocketPath(t *testing.T) {
+	sockPath := shortSocketPath(t)
+
+	first := New(testPolicy(), withExecutor(&fakeExecutor{}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	firstServeErr := make(chan error, 1)
+	go func() { firstServeErr <- first.Serve(ctx, sockPath) }()
+
+	// Block until the first instance is actually listening before racing
+	// the second — otherwise this test could pass for the wrong reason
+	// (second instance simply winning an honest race to bind first).
+	conn := dialWithRetry(t, sockPath)
+	_ = conn.Close()
+
+	second := New(testPolicy(), withExecutor(&fakeExecutor{}))
+	err := second.Serve(context.Background(), sockPath)
+	if err == nil {
+		t.Fatal("SECURITY: a second nanogo serve instance was able to silently bind the same socket path as a still-running kernel — the trust kernel's control socket is swappable with no error")
+	}
+
+	// The first instance must still be healthy: the fix should reject the
+	// intruder, not disrupt the legitimate holder.
+	conn2 := dialWithRetry(t, sockPath)
+	defer func() { _ = conn2.Close() }()
+	env := Envelope{Version: ProtocolVersion, Op: OpStatusTrace, RequestID: "still-alive", Payload: json.RawMessage(`{}`)}
+	raw, _ := json.Marshal(env)
+	if _, err := conn2.Write(append(raw, '\n')); err != nil {
+		t.Fatalf("write to first instance after rejected second: %v", err)
+	}
+	buf := make([]byte, 4096)
+	n, err := conn2.Read(buf)
+	if err != nil {
+		t.Fatalf("read from first instance after rejected second: %v", err)
+	}
+	var resp ResponseEnvelope
+	if err := json.Unmarshal(buf[:n], &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !resp.OK || resp.RequestID != "still-alive" {
+		t.Fatalf("first instance stopped serving correctly after the rejected second: %+v", resp)
+	}
+
+	cancel()
+	if err := <-firstServeErr; err != nil {
+		t.Fatalf("first instance Serve returned an unexpected error on shutdown: %v", err)
+	}
+}
+
 func deliveryCandidate(id, channelType, platformID string) delivery.MessagingGroupCandidate {
 	return delivery.MessagingGroupCandidate{ID: id, ChannelType: channelType, PlatformID: platformID}
 }
