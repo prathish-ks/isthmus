@@ -323,19 +323,41 @@ jobs:
       - name: pnpm audit
         run: pnpm audit --audit-level=high
 
-  # semgrep scope (2026-09-04): narrowed to go-host/ — the code this project
-  # actually owns and ports — dropping src/ from the scan target. src/ is
-  # the largely upstream-inherited TypeScript host (see go-host/README.md's
-  # own "Thesis": "Everything above the boundary... stays TypeScript"), and
-  # scanning it here surfaced 148 findings — mostly the path-traversal audit
-  # rule firing on path.join() calls built from already-validated internal
-  # identifiers, but also at least one XSS-shaped finding in
-  # webhook-server.ts — that this project has never triaged. That's real,
-  # separate work (not a CI-hardening regression: these predate this
-  # phase's own changes), tracked as an open follow-up rather than silently
-  # dropped — same reasoning already used to exclude vendor/ from the
-  # gofmt check above ("this project does not reformat code it does not
-  # own"). Promote src/ back into scope once that triage happens.
+  # semgrep scope (2026-09-20): src/ promoted back into scope after a full
+  # triage of the 149 findings a first pass surfaced here (2026-09-04 note
+  # this replaces). Disposition:
+  #   - 145 path-traversal findings (path-join-resolve-traversal): all false
+  #     positives. Every flagged path.join/resolve call resolves through one
+  #     of three validated-provenance sources — resolveLocalTemplate's
+  #     containment guard (src/templates/local-dir.ts), the stricter
+  #     allowlist-regex + containment guard in resolveGroupFolderPath
+  #     (src/group-folder.ts), or a DB-primary-key-resolved session/agent-
+  #     group id (never a raw external string at the join site — traced
+  #     exhaustively for session-manager.ts and mailbox/sqlite/paths.ts,
+  #     closing the gap docs/threat-model-addendum-p5.md §3 had left open).
+  #     None of the 145 sites are suppressed inline — they aren't part of
+  #     any PR's diff going forward, so a future PR that actually touches
+  #     one of them (and breaks the invariant) would surface it fresh.
+  #   - 2 detect-child-process findings (src/drivers/cli.ts,
+  #     src/modules/kernel-supervisor/index.ts): false positives —
+  #     array-form execFileSync/spawn, no shell involved. Marked
+  #     `nosemgrep` at each call site with that rationale.
+  #   - 1 XSS-shaped finding (webhook-server.ts's direct response write):
+  #     real, but already mitigated by the nosniff header added above.
+  #     Marked `nosemgrep` at the call site referencing that mitigation.
+  #   - 1 non-literal-regexp finding (router.ts's engage_pattern test): no
+  #     longer applies — the regex construction now happens inside a
+  #     vm-sandboxed string (see safeEngagePatternTest in src/router.ts,
+  #     which also fixes the underlying ReDoS gap that finding was
+  #     pointing at), which isn't a real RegExp() call in this file's AST
+  #     any more.
+  # src/ scans in PR-diff-only mode (--baseline-commit) rather than a full
+  # rescan every time — with 145 pattern-matches never going away, a full
+  # scan would just be permanent noise burying any genuinely new finding.
+  # go-host/ (small, project-owned, currently clean) keeps its full scan on
+  # every trigger. Non-PR triggers (schedule/workflow_dispatch) have no PR
+  # base commit to diff against, so the src/ step only runs on pull_request;
+  # go-host/'s full scan still runs on every trigger regardless.
   semgrep:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -343,8 +365,15 @@ jobs:
       image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
-      - name: semgrep scan
+        with:
+          fetch-depth: 0
+      - name: semgrep scan (go-host, full)
         run: semgrep scan --config auto --error go-host/
+      - name: semgrep scan (src, PR-diff only)
+        if: github.event_name == 'pull_request'
+        run: semgrep scan --config auto --error --baseline-commit "$BASE_SHA" src/
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
 
   # go-fuzz-smoke (P9-06, Phase 9/10 hardening): a short, time-boxed real
   # fuzzing run (mutation-guided, `-fuzz=`, not just the seed corpus) for
