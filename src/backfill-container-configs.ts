@@ -69,7 +69,20 @@ export async function backfillContainerConfigs(): Promise<void> {
       updated_at: new Date().toISOString(),
     };
 
-    await createContainerConfig(row);
+    try {
+      await createContainerConfig(row);
+    } catch (err) {
+      // Fail-fast (aborting the whole backfill, and thus host startup) is
+      // intentional — a group whose config row can't be created can't run.
+      // But without the group id/folder here, an operator has to guess which
+      // of potentially many groups caused it.
+      log.error('Backfill: failed to create container_configs row', {
+        agentGroupId: group.id,
+        folder: group.folder,
+        err: String(err),
+      });
+      throw err;
+    }
     backfilled++;
   }
 

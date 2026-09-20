@@ -50,6 +50,21 @@ export type SpinnerLabels = {
 };
 
 /**
+ * Attach an 'error' listener to a raw-log write stream so a mid-run failure
+ * (disk full, permissions, file deleted) degrades to a logged warning instead
+ * of an uncaught exception that crashes the whole setup process. Without a
+ * listener, Node's default behavior for a stream 'error' event is to throw.
+ */
+function warnOnRawLogError(stream: fs.WriteStream, rawLogPath: string): void {
+  let warned = false;
+  stream.on('error', (err) => {
+    if (warned) return;
+    warned = true;
+    console.error(`Warning: raw log write failed for ${rawLogPath}: ${(err as Error).message}`);
+  });
+}
+
+/**
  * Streaming parser for `=== NANOCLAW SETUP: TYPE ===` blocks. Emits each
  * block as it closes so the UI can react mid-stream (e.g. render a pairing
  * code card as soon as pair-telegram emits it, rather than after the step
@@ -123,6 +138,7 @@ export function spawnStep(
     const child = spawn('pnpm', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     const stream = new StatusStream(onBlock);
     const raw = fs.createWriteStream(rawLogPath, { flags: 'w' });
+    warnOnRawLogError(raw, rawLogPath);
     raw.write(`# ${stepName} — ${new Date().toISOString()}\n\n`);
 
     // Per-line forwarder for the optional onLine callback. We keep our own
@@ -184,6 +200,7 @@ export function spawnQuiet(
     });
     let transcript = '';
     const raw = fs.createWriteStream(rawLogPath, { flags: 'w' });
+    warnOnRawLogError(raw, rawLogPath);
     raw.write(`# ${[cmd, ...args].join(' ')} — ${new Date().toISOString()}\n\n`);
     const blocks: Block[] = [];
     const stream = new StatusStream((b) => blocks.push(b));

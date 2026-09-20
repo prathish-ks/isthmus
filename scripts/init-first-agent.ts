@@ -447,6 +447,11 @@ async function sendWelcomeViaCliSocket(
           text: welcome,
           senderId: identity.senderId,
           sender: identity.sender,
+          // Host-injected trigger, sent under the paired user's own identity
+          // for sender-gating — not a message the user actually typed. Lets
+          // cross-session backfill exclude it from timelines it echoes into
+          // sibling sessions without matching on the message text itself.
+          internal: true,
           to: {
             channelType: dmMg.channel_type,
             platformId: dmMg.platform_id,

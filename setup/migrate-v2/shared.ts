@@ -41,9 +41,20 @@ function isWhatsappJid(raw: string): boolean {
   return WA_JID_HOSTS.has(raw.slice(at + 1).toLowerCase());
 }
 
+/** Strip a leading v1 `wa:`/`whatsapp:` prefix from an otherwise-raw WhatsApp JID, if present. */
+function stripWhatsappPrefix(raw: string): string {
+  const colon = raw.indexOf(':');
+  if (colon === -1) return raw;
+  const prefix = raw.slice(0, colon).toLowerCase();
+  return prefix === 'wa' || prefix === 'whatsapp' ? raw.slice(colon + 1) : raw;
+}
+
 export function parseJid(raw: string): ParsedJid | null {
   if (isWhatsappJid(raw)) {
-    return { raw, prefix: 'whatsapp', id: raw, channel_type: 'whatsapp' };
+    // isWhatsappJid classifies by the JID's `@`-host alone, so a raw JID that
+    // already carries a recognized wa:/whatsapp: prefix reaches here with
+    // that prefix still attached — strip it so `id` is the bare JID.
+    return { raw, prefix: 'whatsapp', id: stripWhatsappPrefix(raw), channel_type: 'whatsapp' };
   }
   const colon = raw.indexOf(':');
   if (colon === -1) return null;

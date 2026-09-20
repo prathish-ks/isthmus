@@ -32,9 +32,15 @@ interface BackfillRow {
   self: boolean;
 }
 
-function parseContent(raw: string): { text?: string; sender?: string; senderId?: string; echo?: unknown } {
+function parseContent(raw: string): {
+  text?: string;
+  sender?: string;
+  senderId?: string;
+  echo?: unknown;
+  internal?: unknown;
+} {
   try {
-    return JSON.parse(raw) as { text?: string; sender?: string; senderId?: string; echo?: unknown };
+    return JSON.parse(raw) as { text?: string; sender?: string; senderId?: string; echo?: unknown; internal?: unknown };
   } catch {
     return {};
   }
@@ -65,11 +71,15 @@ async function collectSiblingTopLevel(
   if (timeline.root) {
     const r = timeline.root;
     const c = parseContent(r.content);
-    if (c.text && c.senderId !== 'system' && c.sender !== 'system' && !c.text.startsWith('System instruction:')) {
+    if (c.text && c.senderId !== 'system' && c.sender !== 'system' && c.internal !== true) {
       // Host-injected triggers (the welcome hand-off) are attributed to the
       // OWNER for sender-gating, so filter them by shape too — internal
       // prompts must never surface as user timeline entries (live-hit: the
       // raw "System instruction: run /welcome…" leaked into a new thread).
+      // `internal` is a structural marker (set by the CLI channel's routed
+      // transport) rather than a text-prefix match, so a genuine user typing
+      // text that happens to start with "System instruction:" is never
+      // dropped by mistake.
       rows.push({
         timestamp: r.timestamp,
         sender: c.sender ?? 'user',

@@ -318,7 +318,7 @@ export async function run(args: string[]): Promise<void> {
       // reconcile can't stop an install that already has its image.
       try {
         const { reconcileDerivedImages } = await import('./registry-reconcile.js');
-        const reconciled = reconcileDerivedImages();
+        const reconciled = await reconcileDerivedImages();
         log.info('Derived agent-group images reconciled', {
           cleared: reconciled.cleared.length,
           removed: reconciled.removed.length,

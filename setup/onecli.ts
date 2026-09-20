@@ -146,7 +146,7 @@ function removeLegacyOnecliContainers(): string {
   return out.join('\n');
 }
 
-function installOnecli(): { stdout: string; ok: boolean } {
+function installOnecli(): { stdout: string; gatewayStdout: string; ok: boolean } {
   let stdout = '';
 
   const cleanup = removeLegacyOnecliContainers();
@@ -157,16 +157,16 @@ function installOnecli(): { stdout: string; ok: boolean } {
   stdout += gw.stdout;
   if (!gw.ok) {
     log.error('OneCLI gateway install failed', { stderr: gw.stderr });
-    return { stdout: stdout + (gw.stderr ?? ''), ok: false };
+    return { stdout: stdout + (gw.stderr ?? ''), gatewayStdout: gw.stdout, ok: false };
   }
 
   const cli = installOnecliCliDirect();
   stdout += cli.stdout;
   if (!cli.ok) {
     log.error('OneCLI CLI install failed');
-    return { stdout, ok: false };
+    return { stdout, gatewayStdout: gw.stdout, ok: false };
   }
-  return { stdout, ok: true };
+  return { stdout, gatewayStdout: gw.stdout, ok: true };
 }
 
 function runInstall(cmd: string): { stdout: string; stderr?: string; ok: boolean } {
@@ -416,7 +416,12 @@ export async function run(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const url = extractUrlFromOutput(res.stdout);
+  // Resolve the api-host from the gateway installer's own output only — the
+  // CLI installer (installOnecliCliDirect) unconditionally logs its own
+  // `Downloading https://github.com/...` release URL on success, and that
+  // must never be mistaken for the gateway's api-host when the gateway
+  // installer's real output happens not to contain a URL.
+  const url = extractUrlFromOutput(res.gatewayStdout);
   if (!url) {
     emitStatus('ONECLI', {
       INSTALLED: true,

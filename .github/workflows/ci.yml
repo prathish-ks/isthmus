@@ -61,19 +61,12 @@ jobs:
       - name: Typecheck container
         run: pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit
 
-      # Host tests uses a CI-only vitest config (vitest.config.ci.ts)
-      # that excludes 2 files with pre-existing runtime test failures
-      # (15 total), confirmed via a real `pnpm exec vitest run` run on
-      # 2026-09-03 and matching docs/baseline.md's own recorded P0-09
-      # baseline exactly (same 2 files, same 15 failures, already
-      # documented there as upstream/environment-sensitive debt "not
-      # investigated further per plan"):
-      #   - scripts/add-dial-tool-scope.test.ts (11 failures)
-      #   - scripts/update/transaction.e2e.test.ts (4 failures)
-      # The base vitest.config.ts is untouched, so a local
-      # `pnpm exec vitest run` still runs (and shows) these known-failing
-      # tests by default. See vitest.config.ci.ts's own header comment
-      # for the full rationale.
+      # Host tests uses a CI-only vitest config (vitest.config.ci.ts).
+      # It used to exclude 2 files carried over from upstream's own
+      # recorded baseline failures; both were root-caused and confirmed
+      # fixed/non-reproducing on this fork (2026-09-20) and the exclusion
+      # was removed. See vitest.config.ci.ts's own header comment for the
+      # full history and root-cause detail.
       - name: Host tests
         run: pnpm exec vitest run --config vitest.config.ci.ts
 

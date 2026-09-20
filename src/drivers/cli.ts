@@ -76,7 +76,22 @@ export function realCli(bin: string): Cli {
         onExit: (cb) => exitCbs.push(cb),
         onStderr: (cb) => stderrCbs.push(cb),
         onStdout: (cb) => stdoutCbs.push(cb),
-        kill: () => child.kill('SIGKILL'),
+        kill: () => {
+          if (!child.pid) return;
+          try {
+            // Signal the whole detached process group (negative pid), not
+            // just this one pid. `sh -c '<cmd>'` doesn't always exec-replace
+            // itself into <cmd> — shell, invocation, and platform dependent
+            // (observed: reliable on one dev machine's shell, not on CI's) —
+            // and when it forks a real child instead, killing only the
+            // tracked pid leaves that child running, still holding the
+            // piped stdio fds open, so Node's 'close' event never fires
+            // until it exits on its own.
+            process.kill(-child.pid, 'SIGKILL');
+          } catch {
+            // Group already gone; nothing left to signal.
+          }
+        },
       };
     },
   };

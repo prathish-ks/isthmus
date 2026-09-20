@@ -147,11 +147,19 @@ async function main(): Promise<void> {
       if (fs.existsSync(sourceDir)) {
         const jsonlFiles = fs.readdirSync(sourceDir).filter((f) => f.endsWith('.jsonl'));
         if (jsonlFiles.length > 0) {
-          // Use the most recent JSONL file (by mtime from v1)
+          // Use the most recent JSONL file (by mtime from v1). Despite its
+          // name, `v1ProjectDir` above is already a copyTree() DESTINATION
+          // (under v2ClaudeDir) — copyFileSync resets mtime to copy time on
+          // every file it writes, so both it and v2ProjectDir have lost the
+          // real v1 timestamps by this point. The untouched original is
+          // v1ClaudeDir's own projects/-workspace-group, still on the v1
+          // filesystem — read mtimes from there when it's available.
+          const trueV1ProjectDir = path.join(v1ClaudeDir, 'projects', '-workspace-group');
+          const mtimeDir = fs.existsSync(trueV1ProjectDir) ? trueV1ProjectDir : sourceDir;
           const v1SessionId = jsonlFiles
             .map((f) => ({
               name: f.replace('.jsonl', ''),
-              mtime: fs.statSync(path.join(sourceDir, f)).mtimeMs,
+              mtime: fs.statSync(path.join(mtimeDir, f)).mtimeMs,
             }))
             .sort((a, b) => b.mtime - a.mtime)[0].name;
 

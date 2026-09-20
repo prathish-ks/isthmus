@@ -106,12 +106,17 @@ describe('scripts/init-first-agent.ts --instance', () => {
     expect(messagingGroups()).toEqual([
       { channel_type: 'telegram', platform_id: 'telegram:42', instance: 'telegram-mega' },
     ]);
-    expect((await w).to).toEqual({
+    const welcomeLine = await w;
+    expect(welcomeLine.to).toEqual({
       channelType: 'telegram',
       platformId: 'telegram:42',
       threadId: 'telegram:42',
       instance: 'telegram-mega',
     });
+    // The welcome is a host-injected trigger, not something the user typed —
+    // `internal: true` is what lets cross-session backfill exclude it from
+    // sibling-session timelines without matching on the message text.
+    expect(welcomeLine).toMatchObject({ internal: true });
   }, 60_000);
 
   it('without --instance keeps the default-instance row (instance = channel_type)', async () => {
