@@ -438,6 +438,20 @@ describe('prepareUpdate preconditions and strategies', () => {
   function initRepo(): string {
     const root = temp('nanoclaw-tx-prep-');
     exec(root, 'git', ['init', '-b', 'main']);
+    // Persist identity into the repo-local config, not just as one-off `-c`
+    // flags on commit() calls below. Production code's merge/rebase/
+    // cherry-pick invocations (transaction.ts's git()/tryGit() wrapper) pass
+    // no identity flags of their own — those operations write a committer
+    // identity for the commits they create even when replaying someone
+    // else's authored commit, and rely on git finding one via config. A
+    // developer machine's global ~/.gitconfig silently supplies that; a
+    // clean CI runner has none, so an unconfigured repo here makes every
+    // merge/rebase/cherry-pick in this file failed (caught by tryGit, which
+    // this code can't distinguish from a real content conflict) purely on
+    // identity, not on the scenario under test. Local, not global, so it
+    // can never leak into a real git config.
+    exec(root, 'git', ['config', 'user.name', 'Test']);
+    exec(root, 'git', ['config', 'user.email', 'test@example.com']);
     write(root, 'file.txt', 'v1\n');
     commit(root, 'base');
     return root;
@@ -537,9 +551,23 @@ describe('prepareUpdate preconditions and strategies', () => {
     expect(state.lastError).toBeTruthy();
 
     // Resolve the conflict by hand in the staging worktree, then resume.
+    // An explicit -m rather than --no-edit: reading the implicit MERGE_MSG
+    // that git writes when a merge conflicts is a real git-version-
+    // dependent behavior (confirmed: reliable on a dev machine's git,
+    // "Aborting commit due to empty commit message" on CI's) — supplying
+    // the message directly tests the same "any valid resolving commit"
+    // scenario without depending on that.
     write(state.stageRoot, 'file.txt', 'resolved-version\n');
     exec(state.stageRoot, 'git', ['add', 'file.txt']);
-    exec(state.stageRoot, 'git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--no-edit']);
+    exec(state.stageRoot, 'git', [
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.com',
+      'commit',
+      '-m',
+      'resolve conflict',
+    ]);
 
     state = resumePreparedUpdate(root, state.id, runtime);
     expect(state.phase).toBe('prepared');
