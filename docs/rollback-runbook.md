@@ -2,7 +2,7 @@
 
 **Read this before you install, not after something breaks.**
 
-## The rollback mechanism has changed since this beta was originally planned — read this section first
+## The rollback mechanism has changed since this was originally planned — read this section first
 
 Earlier project notes described rollback as "flip a single config value to
 point your install at the Go-backed session store or fall back to stock
@@ -41,9 +41,9 @@ reinterpretation of it.
 
 That means your data directory (central DB, mailboxes, config) should be
 readable by a stock NanoClaw install without conversion. This has **not**
-been separately exercised as a "downgrade" scenario in this beta yet —
-treat the backup step below as required until a tester confirms this in
-practice.
+been separately exercised as a "downgrade" scenario beyond the one dry
+run below yet — treat the backup step below as required until more
+testers confirm this in practice.
 
 ## Rollback steps
 
@@ -63,8 +63,8 @@ practice.
      working copy, or clone `nanocoai/nanoclaw` fresh into a new
      directory).
    - Simplest and safest: clone `nanocoai/nanoclaw` fresh into a separate
-     directory rather than trying to check out an old state of the beta
-     repo in place — this avoids any risk of a half-reverted mixed state.
+     directory rather than trying to check out an old state of this repo
+     in place — this avoids any risk of a half-reverted mixed state.
 
 4. **Point the fresh stock install at your existing data directory** (same
    environment variables / config pointing at your DB and mailbox
@@ -79,11 +79,11 @@ practice.
    correctly.
 
 7. **Report back** whether this rollback was clean — this is itself a
-   beta finding. If your data directory needed any manual fix-up to work
-   with stock NanoClaw, that's an important gap to flag, since the
+   valuable finding. If your data directory needed any manual fix-up to
+   work with stock NanoClaw, that's an important gap to flag, since the
    original design goal was zero-friction reversibility.
 
-## If something breaks *during* the beta test script
+## If something breaks *during* the tester walkthrough
 
 - A failure during **Step 1 (Install)** or **Step 2 (`doctor`)**: nothing
   privileged has run yet against real data — just stop and report; no

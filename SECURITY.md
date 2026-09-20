@@ -20,7 +20,7 @@ Please include, where possible: the specific file/function affected, whether the
 
 ## Response expectations
 
-This is currently a small, single-maintainer project in pre-beta status — response times are best-effort, not SLA-backed. A genuine security report will be acknowledged as soon as it's seen, and a fix or mitigation timeline communicated once the report is understood. Coordinated disclosure is preferred: please allow a reasonable window to investigate and patch before any public disclosure.
+This is currently a small, single-maintainer project — response times are best-effort, not SLA-backed. A genuine security report will be acknowledged as soon as it's seen, and a fix or mitigation timeline communicated once the report is understood. Coordinated disclosure is preferred: please allow a reasonable window to investigate and patch before any public disclosure.
 
 ## Known, disclosed gaps
 
@@ -28,4 +28,4 @@ This project maintains a public list of known security gaps rather than implying
 
 ## Supported versions
 
-Pre-beta: only the current `main`/latest commit on the default branch is supported. There is no released-version support matrix yet.
+Only the latest tagged release and the current `main`/latest commit on the default branch are supported.
