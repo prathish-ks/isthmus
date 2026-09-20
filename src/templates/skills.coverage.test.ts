@@ -22,6 +22,9 @@ afterEach(() => {
 });
 
 function skillDir(name: string): string {
+  // Test-only helper: `name` is always a literal from this same file, and
+  // `dir` is a freshly mkdtemp'd temp directory — never external input.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const d = path.join(dir, 'skills', name);
   fs.mkdirSync(d, { recursive: true });
   return d;

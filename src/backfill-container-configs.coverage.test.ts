@@ -33,7 +33,11 @@ function group(id: string, folder: string, agent_provider: string | null = null)
 }
 
 function writeLegacy(folder: string, content: string): void {
+  // Test-only helper: `folder` is always a literal from this same file, never
+  // external input — the rule below can't see that from the call sites alone.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   fs.mkdirSync(path.join(h.groupsDir, folder), { recursive: true });
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   fs.writeFileSync(path.join(h.groupsDir, folder, 'container.json'), content);
 }
 

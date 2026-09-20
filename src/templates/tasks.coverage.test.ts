@@ -23,6 +23,9 @@ afterEach(() => {
 });
 
 function writeTask(filename: string, content: string): void {
+  // Test-only helper: `filename` is always a literal from this same file,
+  // and `dir` is a freshly mkdtemp'd temp directory — never external input.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   fs.writeFileSync(path.join(dir, filename), content);
 }
 

@@ -80,8 +80,15 @@ let SA: Session;
 let SB: Session;
 
 function outbox(messageId: string, files: Record<string, string> = {}): string {
+  // Test-only helper: `messageId` is always a literal from this same file,
+  // never external input — the rule below can't see that from the call
+  // sites alone.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const dir = path.join(sessionDir(A, SA.id), 'outbox', messageId);
   fs.mkdirSync(dir, { recursive: true });
+  // `name` here is always a literal test key from the `files` argument passed
+  // in by call sites in this same file, never external input.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   for (const [name, bytes] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), bytes);
   return dir;
 }

@@ -50,6 +50,9 @@ describe('unmatched routes', () => {
     );
     // Force the server to actually be listening before probing an unmatched path.
     await waitForServer('/webhook/slack');
+    // Local loopback test server this same test spins up on 127.0.0.1 — not
+    // a real network request, so plain HTTP is correct here, not a finding.
+    // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
     const res = await fetch(`${BASE}/not-a-webhook-path`);
     expect(res.status).toBe(404);
     expect(await res.text()).toBe('Not found');
