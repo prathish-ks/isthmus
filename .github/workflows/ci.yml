@@ -339,10 +339,11 @@ jobs:
           echo "Budgets are fixed ceilings tuned against real GitHub Actions runner measurements, not a %-vs-baseline comparison — see each test file's own comment for the baseline this was set against." >> "$GITHUB_STEP_SUMMARY"
 
   # Repository rules require exact `ci`; always run it so matrix, go-host,
-  # pnpm-audit, and performance-gate failures all remain blocking.
+  # pnpm-audit, coverage-gate, and performance-gate failures all remain
+  # blocking.
   ci:
     if: always()
-    needs: [test, go-host, pnpm-audit, performance-gate]
+    needs: [test, go-host, pnpm-audit, coverage-gate, performance-gate]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -350,6 +351,7 @@ jobs:
           test "${{ needs.test.result }}" = success
           test "${{ needs.go-host.result }}" = success
           test "${{ needs.pnpm-audit.result }}" = success
+          test "${{ needs.coverage-gate.result }}" = success
           test "${{ needs.performance-gate.result }}" = success
 
   # ---------------------------------------------------------------------
@@ -530,6 +532,43 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: pnpm audit (new findings only — see comment above)
         run: pnpm exec tsx scripts/check-pnpm-audit-baseline.ts
+
+  # coverage-gate (2026-09-21): this repo's own analog to pnpm-audit's
+  # baseline pattern just above — host-side line/statement/branch/function
+  # coverage (src/, setup/, scripts/) must never drop below what's checked
+  # into .github/coverage-baseline.json (currently ~85% lines, following a
+  # coverage-uplift exercise that took it from ~54%; see docs/baseline.md
+  # and docs/coverage-uplift-findings-backlog.md for that history).
+  #
+  # Deliberately a floor, not a strict ratchet: coverage RISING above the
+  # baseline passes without complaint — the checked-in number only moves
+  # when someone runs `scripts/check-coverage-baseline.ts --update` and
+  # commits the result, so a real gain doesn't just become unclaimed slack
+  # for an unrelated later drop. All four vitest metrics are compared
+  # independently (not just lines), so a PR can't raise line coverage while
+  # quietly regressing branch coverage on new code with no failure-path
+  # test.
+  #
+  # Required (part of the `ci` gate's needs below), not report-only: like
+  # pnpm-audit, this is a real, actionable regression every time, not
+  # permanently-known noise. Runs the full coverage-instrumented suite on
+  # its own (~5-7 minutes) rather than reusing the `test` job's run, since
+  # that job's vitest.config.ci.ts and this one's vitest.coverage.config.ts
+  # serve different purposes (known-failure exclusions vs. coverage
+  # instrumentation across the full source tree) — merging them would
+  # couple two independent concerns for a modest CI-time saving.
+  coverage-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Coverage floor gate (vs .github/coverage-baseline.json)
+        run: pnpm exec tsx scripts/check-coverage-baseline.ts
 
   # semgrep scope (2026-09-20): src/ promoted back into scope after a full
   # triage of the 149 findings a first pass surfaced here (2026-09-04 note
