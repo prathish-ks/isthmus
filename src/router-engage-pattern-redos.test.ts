@@ -1,4 +1,10 @@
 /**
+ * PERF-GATE: bounds engage_pattern regex backtracking (commit 8cbf15db).
+ * Picked up by the CI `performance-gate` job (.github/workflows/ci.yml),
+ * which greps for this tag rather than hardcoding file paths — tag any
+ * future test asserting a wall-clock upper bound the same way and it's
+ * gated automatically, no workflow edit needed.
+ *
  * `engage_pattern` is operator/admin-set (approval-gated), but nothing
  * validates it's backtracking-safe. A catastrophic regex run directly via
  * `new RegExp(pat).test(text)` would hang this single-threaded host
