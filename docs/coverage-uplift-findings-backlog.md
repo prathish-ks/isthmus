@@ -8,12 +8,17 @@ itself). Writing and running ~1,700 new tests surfaced real behavior —
 mostly latent, narrow-window issues — that the tests only exposed, not
 caused. This doc tracks all of it, prioritized, for follow-up work.
 
-**Release-readiness read**: nothing below is Critical. Three items are
-scored High because they're plausible in normal operation (not exotic
-edge cases) and degrade badly when they hit — worth fixing soon, not
-blocking. Everything else is a narrow-window edge case, a cosmetic
-message, or tech debt. Two items are already fixed as part of this
-exercise, listed for the record.
+**Release-readiness read**: nothing below is Critical, and nothing is open
+at High or Medium any more — see the update note below. What remains is
+L1–L12: narrow-window edge cases, cosmetic messages, and pure tech debt.
+
+**Update, 2026-09-21**: all three High items and all eight Medium items
+were fixed in a follow-up pass the same day, commit `173effa6` ("fix:
+harden bugs surfaced by continued coverage-uplift work" — each with its
+own regression test). Moved into "Already fixed" below rather than left
+under now-inaccurate "High"/"Medium" headers, which was giving readers
+(and at least one other session) a false "still open" signal despite the
+code fix already being on `main`.
 
 ## Already fixed (this exercise)
 
@@ -21,27 +26,17 @@ exercise, listed for the record.
 |---|---|---|---|
 | F1 | `reconcileDerivedImages()` called without `await` — every successful image pull silently no-op'd the reconciliation step and logged a spurious error instead of actually reconciling | [setup/container.ts:321](../setup/container.ts#L321) | One-line `await` added, commit `f146390e` |
 | F2 | Two stale CI test exclusions (`scripts/update/transaction.e2e.test.ts`, `scripts/add-dial-tool-scope.test.ts`) carried "not investigated further" since Aug 2026 baseline. Root-caused: the first was a real symlink-unaware path-comparison bug (already independently fixed on this fork via `realResolve()`); the second no longer reproduces (self-contained fake `onecli` harness, no live dependency) | [vitest.config.ci.ts](../vitest.config.ci.ts) | Exclusions removed, root causes documented in `docs/baseline.md`, commit `f146390e` |
-
-## High — real operational impact under plausible conditions, worth scheduling soon
-
-| # | Finding | File:line | Why High |
-|---|---|---|---|
-| H1 | `fs.createWriteStream(rawLogPath, ...)` log tee has no `'error'` listener. If the log directory/file becomes unwritable mid-run (disk full, permissions, deleted) that's an **uncaught exception that crashes the whole setup process** instead of a clean error. Disk-full is not exotic — this exact exercise hit it repeatedly. | [setup/lib/runner.ts](../setup/lib/runner.ts), [setup/lib/windowed-runner.ts](../setup/lib/windowed-runner.ts) | Crashes the first-run / repair experience under a realistic trigger |
-| H2 | `extractUrlFromOutput()` falls through to matching the CLI installer's own `Downloading https://github.com/...` log line when the gateway installer's real output has no URL — silently "resolving" `https://github.com` as the OneCLI API host instead of correctly failing with `could_not_resolve_api_host` | [setup/onecli.ts:~307-343](../setup/onecli.ts) | Misleading **success** state during OneCLI setup with a broken gateway URL; hard for an operator to diagnose since setup reports OK |
-| H3 | `stopOneCLIApprovalHandler()` clears timers and the pending-approval map but never resolves in-flight `handleRequest` promises — a gateway callback still awaiting a decision when the handler stops **hangs forever**, not just until a timeout | [src/modules/approvals/onecli-approvals.ts:110-118](../src/modules/approvals/onecli-approvals.ts) | Approval flow gates credentialed actions (CLAUDE.md's own "Requiring approval for credential use"); an indefinite hang here blocks an agent mid-task until the container is manually restarted |
-
-## Medium — narrow-window or data-adjacent, real but lower likelihood
-
-| # | Finding | File:line | Note |
-|---|---|---|---|
-| M1 | `spawnContainer` logs "Agent group not found" and returns void on a missing agent group, but `wakeContainer` still resolves `true` — the caller believes the container spawned when nothing happened; the inbound message isn't marked for retry | [src/container-runner.ts:158-162](../src/container-runner.ts) | Silent failure in the core message-delivery path |
-| M2 | Backfilling container configs at startup: one group's `createContainerConfig` failure aborts the **entire** backfill (and thus host startup), without logging which group | [src/backfill-container-configs.ts:29](../src/backfill-container-configs.ts) | A single misconfigured group can prevent the whole host from starting; fail-fast may be intentional, but the missing group-id in the log makes it hard to diagnose |
-| M3 | The approval card is delivered to the approver **before** `createPendingApproval` writes the row; if the insert throws, the card is live with Approve/Reject buttons that resolve nothing | [src/modules/approvals/onecli-approvals.ts:161-211](../src/modules/approvals/onecli-approvals.ts) | Rare (DB insert failure), but produces a dead-looking UI element with no error surfaced to the approver |
-| M4 | `requestApproval()` with no delivery adapter bound yet records the `pending_approvals` row and logs, then returns — nobody is ever carded and nothing retries when the adapter comes up later | [src/modules/approvals/primitive.ts:265-291](../src/modules/approvals/primitive.ts) | Only during the narrow startup window before `setDeliveryAdapter` runs, but the approval is effectively stranded until noticed manually |
-| M5 | `v2PlatformId`'s docstring claims it strips a v1 `wa:`/`whatsapp:` prefix, but `isWhatsappJid` classifies by the JID's `@`-host alone — a raw JID that already carries a recognized WhatsApp host keeps the leading `wa:`/`whatsapp:` text unstripped. Confirmed: `v2PlatformId('whatsapp','wa:1234@s.whatsapp.net')` returns unchanged | [setup/migrate-v2/shared.ts:66-71](../setup/migrate-v2/shared.ts) | v1→v2 migration is a one-time, high-stakes step; a mismatched platform id could misfile a migrated WhatsApp user's identity/roles |
-| M6 | The "most recent v1 Claude Code session" picker re-stats mtime from the just-**copied** destination files; `copyFileSync` resets mtime to copy time, so with more than one archived session the pick is effectively directory-read order, not real v1 recency | [setup/migrate-v2/sessions.ts:146-157](../setup/migrate-v2/sessions.ts) | Can silently resume the wrong conversation after a v1→v2 migration — confusing, not destructive |
-| M7 | `collectSiblingTopLevel`'s three ORed guards drop any message whose **literal text** starts with `"System instruction:"` from cross-session backfill, even from a genuine user, not just host-injected triggers | [src/modules/cross-session-context/backfill.ts](../src/modules/cross-session-context/backfill.ts) | Low-probability text collision, but a real user's message can be silently excluded from an agent's context with no signal that it happened |
-| M8 | `egress-lockdown.ts`'s container-membership check is whitespace-token based; a network whose `{{.Name}}` output ever contained spaces would mis-tokenize | [src/egress-lockdown.ts:49](../src/egress-lockdown.ts) | Not observed live and Docker container names don't contain spaces today, but this is security-boundary code (network egress isolation) — worth a defensive fix precisely because the blast radius of a miss here is a lockdown bypass, not because it's currently triggerable |
+| H1 | `fs.createWriteStream(rawLogPath, ...)` log tee had no `'error'` listener. If the log directory/file became unwritable mid-run (disk full, permissions, deleted) that was an **uncaught exception that crashed the whole setup process** instead of a clean error. Disk-full is not exotic — this exact exercise hit it repeatedly. | [setup/lib/runner.ts](../setup/lib/runner.ts) | Degrades to a logged warning now, commit `173effa6` |
+| H2 | `extractUrlFromOutput()` fell through to matching the CLI installer's own `Downloading https://github.com/...` log line when the gateway installer's real output had no URL — silently "resolving" `https://github.com` as the OneCLI API host instead of correctly failing with `could_not_resolve_api_host` | [setup/onecli.ts](../setup/onecli.ts) | Resolves the URL from the gateway installer's own stdout only now, commit `173effa6` |
+| H3 | `stopOneCLIApprovalHandler()` cleared timers and the pending-approval map but never resolved in-flight `handleRequest` promises — a gateway callback still awaiting a decision when the handler stopped **hung forever**, not just until a timeout | [src/modules/approvals/onecli-approvals.ts](../src/modules/approvals/onecli-approvals.ts) | Stop now resolves every pending promise with `'deny'`, commit `173effa6` |
+| M1 | `spawnContainer` logged "Agent group not found" and returned void on a missing agent group, but `wakeContainer` still resolved `true` — the caller believed the container spawned when nothing happened; the inbound message wasn't marked for retry | [src/container-runner.ts](../src/container-runner.ts) | Throws instead, routing through `wakeContainer`'s own `.catch`, commit `173effa6` |
+| M2 | Backfilling container configs at startup: one group's `createContainerConfig` failure aborted the **entire** backfill (and thus host startup), without logging which group | [src/backfill-container-configs.ts](../src/backfill-container-configs.ts) | Logs the group id/folder before rethrowing, commit `173effa6` |
+| M3 | The approval card was delivered to the approver **before** `createPendingApproval` wrote the row; if the insert threw, the card was live with Approve/Reject buttons that resolved nothing | [src/modules/approvals/onecli-approvals.ts](../src/modules/approvals/onecli-approvals.ts) | Row created before delivery (deleted if delivery then fails), platform message id patched in after, commit `173effa6` |
+| M4 | `requestApproval()` with no delivery adapter bound yet recorded the `pending_approvals` row and logged, then returned — nobody was ever carded and nothing retried when the adapter came up later | [src/modules/approvals/primitive.ts](../src/modules/approvals/primitive.ts) | Defers delivery via the new `onDeliveryAdapterReady` hook instead of dropping it, commit `173effa6` |
+| M5 | `v2PlatformId`'s docstring claimed it strips a v1 `wa:`/`whatsapp:` prefix, but `isWhatsappJid` classifies by the JID's `@`-host alone — a raw JID that already carried a recognized WhatsApp host kept the leading `wa:`/`whatsapp:` text unstripped | [setup/migrate-v2/shared.ts](../setup/migrate-v2/shared.ts) | Now actually strips it, commit `173effa6` |
+| M6 | The "most recent v1 Claude Code session" picker re-stat'd mtime from the just-**copied** destination files; `copyFileSync` resets mtime to copy time, so with more than one archived session the pick was effectively directory-read order, not real v1 recency | [setup/migrate-v2/sessions.ts](../setup/migrate-v2/sessions.ts) | Reads mtimes from the untouched v1 source directory instead, commit `173effa6` |
+| M7 | `collectSiblingTopLevel`'s guards dropped any message whose **literal text** started with `"System instruction:"` from cross-session backfill, even from a genuine user, not just host-injected triggers | [src/modules/cross-session-context/backfill.ts](../src/modules/cross-session-context/backfill.ts) | Replaced with a structural `internal: true` marker set at the injection site and carried through the CLI channel's routed transport, commit `173effa6` |
+| M8 | `egress-lockdown.ts`'s container-membership check was whitespace-token based; a network whose `{{.Name}}` output ever contained spaces would mis-tokenize — security-boundary code (network egress isolation), so the blast radius of a miss was a lockdown bypass | [src/egress-lockdown.ts](../src/egress-lockdown.ts) | Newline-delimited format with exact per-line comparison, commit `173effa6` |
 
 ## Low — cosmetic, dead code, or pure tech debt
 
@@ -68,9 +63,6 @@ exercise, listed for the record.
 
 ## Suggested next step
 
-Pick up H1–H3 first (each is a small, well-understood fix once someone
-decides the intended degrade-gracefully behavior for H1 and the intended
-strict-failure behavior for H2). M1–M8 are good candidates for a single
-follow-up pass given they cluster in two subsystems (container wake/backfill,
-OneCLI approvals). L1–L12 are cleanup, fold into any nearby refactor rather
-than a dedicated pass.
+Everything but L1–L12 is fixed (see the 2026-09-21 update note above).
+L1–L12 are cleanup — fold into any nearby refactor rather than a
+dedicated pass.
