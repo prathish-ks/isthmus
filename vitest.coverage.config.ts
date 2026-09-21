@@ -28,7 +28,40 @@ export default mergeConfig(
         reporter: ['text-summary', 'json-summary', 'json'],
         reportsDirectory: process.env.COVERAGE_DIR ?? 'coverage',
         include: ['src/**/*.ts', 'setup/**/*.ts', 'scripts/**/*.ts'],
-        exclude: ['**/*.test.ts', '**/__fixtures__/**', '**/__snapshots__/**', 'src/test-setup.ts'],
+        exclude: [
+          '**/*.test.ts',
+          '**/__fixtures__/**',
+          '**/__snapshots__/**',
+          'src/test-setup.ts',
+
+          // Manual/dev-only tools: run directly by a human for a one-off
+          // diagnostic, seeding, or live-integration purpose, never part of
+          // the automated host/setup/container path. Testing them measures
+          // busywork, not product risk — same reasoning as excluding test
+          // files themselves.
+          'scripts/chat.ts',
+          'scripts/check-go-inbound.ts',
+          'scripts/detect-driver-migration.ts',
+          'scripts/ec07-live-host-smoke.ts',
+          'scripts/p3-06-mock-provider.ts',
+          'scripts/sanity-live-poll.ts',
+          'scripts/seed-discord.ts',
+          'scripts/test-registry-skills.ts',
+          'scripts/test-v2-agent.ts',
+          'scripts/test-v2-channel-e2e.ts',
+          'scripts/test-v2-host.ts',
+
+          // Genuinely tested, but via a child-process spawn (the realistic
+          // way to test a CLI entry point — real argv, real stdout/exit
+          // code) rather than an in-process import. V8 coverage only
+          // instruments the vitest worker process, so a spawned `tsx`
+          // subprocess is invisible to it regardless of how thoroughly its
+          // behavior is exercised. See scripts/init-first-agent.test.ts,
+          // scripts/q.test.ts, scripts/migrate.test.ts.
+          'scripts/init-first-agent.ts',
+          'scripts/q.ts',
+          'scripts/migrate.ts',
+        ],
       },
     },
   }),
