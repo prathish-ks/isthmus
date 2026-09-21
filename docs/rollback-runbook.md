@@ -128,6 +128,20 @@ correct here (no new blocking DB migration either direction — see the
 note on `go-host-experiment` drift below), but this should be called out
 explicitly in the install docs rather than left for a tester to hit cold.
 
+**Update: the upgrade-direction half of this gap is now closed.**
+`isthmus.sh` (the combined installer that replaced running
+`go-host/scripts/install.sh` and `nanoclaw.sh` as two separate steps —
+see `docs/quickstart.md`) detects an in-place migration by checking for
+`data/upgrade-state.json` and, when found, stamps the marker itself after
+setup completes — the same thing `/setup`/`/update-nanoclaw`/
+`/migrate-nanoclaw` already do, per `docs/upgrade-recovery.md`'s own "If
+you have your own upgrade flow" guidance. A migration run through
+`isthmus.sh` should not hit the tripwire at all. The *downgrade* direction
+(step 3 above, reverting to stock) is unaffected by this — this runbook's
+manual rollback steps are still the documented path for that, and the
+tripwire will still fire there exactly as described; clear it the same
+way.
+
 **Second gap found, unrelated to rollback correctness:** at the time of
 this dry run, `go-host-experiment` was one commit behind `main` — missing
 `024-host-coordination.ts` (schema-only, no writers yet, so functionally

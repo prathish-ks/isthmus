@@ -85,8 +85,10 @@ nanogo`, trying, in order:
    checksum trust decision, and produces a binary from exactly the source
    tree the user already has checked out.
 2. **Download a release binary** matching the local OS/arch from this
-   repo's own `nanogo-v*` GitHub releases (P10-02, `.github/workflows/
-   nanogo-release.yml`), verify its SHA256 against that release's published
+   repo's own `isthmus-v*` GitHub releases (P10-02, `.github/workflows/
+   isthmus-release.yml` — formerly its own `nanogo-v*` tag scheme, until
+   the kernel and TS host became inseparable at runtime and the two were
+   consolidated), verify its SHA256 against that release's published
    `SHA256SUMS` before ever executing or installing it, and refuse outright
    if the checksum file is missing or doesn't match — see
    `go-host/docs/release-verification.md` for the full verification story,

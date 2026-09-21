@@ -1,7 +1,7 @@
 # Verifying a downloaded `nanogo` release
 
-P10-02 (Phase 11, Release Packaging). Every `nanogo-v*` tag pushed to this
-repo triggers `.github/workflows/nanogo-release.yml`, which cross-compiles
+P10-02 (Phase 11, Release Packaging). Every `isthmus-v*` tag pushed to this
+repo triggers `.github/workflows/isthmus-release.yml`, which cross-compiles
 `nanogo` for four platforms and publishes, alongside the binaries:
 
 - **`SHA256SUMS`** — a checksum for every published file (the four
@@ -28,7 +28,7 @@ anyone to steal or for a compromised CI run to misuse. Instead, cosign's
 keyless mode has the release workflow prove its own identity to Sigstore's
 public Fulcio certificate authority via GitHub's own OIDC token for that
 specific run, and gets a certificate scoped to `prathish-ks/isthmus`'s
-`.github/workflows/nanogo-release.yml`, valid for a few minutes. It signs with that certificate,
+`.github/workflows/isthmus-release.yml`, valid for a few minutes. It signs with that certificate,
 and the certificate is published alongside the signature. Verifying later
 means checking the signature was made with a certificate that really was
 issued to *this repo's release workflow* — not trusting a key that could
@@ -58,10 +58,15 @@ have leaked or been rotated without anyone noticing.
    cosign verify-blob \
      --certificate SHA256SUMS.pem \
      --signature SHA256SUMS.sig \
-     --certificate-identity "https://github.com/prathish-ks/isthmus/.github/workflows/nanogo-release.yml@refs/tags/<the tag you downloaded>" \
+     --certificate-identity "https://github.com/prathish-ks/isthmus/.github/workflows/isthmus-release.yml@refs/tags/<the tag you downloaded>" \
      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
      SHA256SUMS
    ```
+
+   (Verifying a release published before the `isthmus-v*` consolidation —
+   i.e. `nanogo-v0.1.0` specifically — needs `nanogo-release.yml` in that
+   identity string instead, matching what actually signed it at the time.
+   Every release from `isthmus-v1.0.0` onward uses the path above.)
 
    (Install cosign first: `brew install cosign` on macOS, or see
    [sigstore/cosign releases](https://github.com/sigstore/cosign/releases)
@@ -90,7 +95,7 @@ have leaked or been rotated without anyone noticing.
 ## What this does and does not prove
 
 Checksum + signature together prove: "this exact file is what
-`prathish-ks/isthmus`'s own `nanogo-release.yml` workflow produced for
+`prathish-ks/isthmus`'s own `isthmus-release.yml` workflow produced for
 this tag, unmodified since." They do **not** prove the source code itself
 is free of bugs or vulnerabilities. That is what `go-host/docs/
 compatibility-security-report.md`'s test results and known-limitations
