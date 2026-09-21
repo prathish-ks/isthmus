@@ -9,10 +9,21 @@ kernel, to install and use it: this guide covers install, first run,
 most likely to hit.
 
 You do **not** need to fork this repository or set up a development
-environment to use it (that workflow — forking, adding `upstream`,
-branching — is only for people who intend to *modify* the Go kernel
-itself; see `claude/nanoclaw-go-host-master-plan.md`'s Phase 0 if that's
-you). A plain clone of a release tag is all a normal install needs.
+environment to use it — that workflow (forking, adding `upstream`,
+branching) is only for people who intend to *modify* the Go kernel itself.
+A plain clone of a release tag is all a normal install needs.
+
+**Migrating an existing NanoClaw install?** Everything below works the same
+way whether you're starting fresh or converting an already-set-up NanoClaw
+checkout in place — `isthmus.sh` (step 2) detects which one you're doing
+and handles the difference for you (see that step, and the "upgrade
+tripwire" note under Common failures below for what changes for a
+migration specifically). The one thing that must be true either way: your
+existing install needs to be on the pinned upstream baseline this release
+is built against (currently NanoClaw `v2.3.0` — see
+`docs/upstream-pin.json`) for the Go kernel's behavioral guarantees to
+hold. If you're on a materially different version, check
+`go-host/docs/version-compatibility.md` first.
 
 ## 1. Prerequisites
 
@@ -25,61 +36,67 @@ You need, already installed and working, before you start:
   have it: [docs.docker.com/get-docker](https://docs.docker.com/get-docker/).
 - **git**, to clone the repository.
 
-You do **not** need Node, pnpm, or Go installed yourself — `nanoclaw.sh`
-installs Node/pnpm for you, and `go-host/scripts/install.sh` (step 3 below)
-either builds `nanogo` with a Go toolchain if you happen to have one, or
-downloads a verified prebuilt binary if you don't. Neither ever uses
-`sudo` or installs anything system-wide.
+You do **not** need Node, pnpm, or Go installed yourself — `isthmus.sh`
+installs Node/pnpm for you as part of the normal setup flow, and installs
+`nanogo` first, either by building it with a Go toolchain if you happen to
+have one, or downloading a verified prebuilt binary if you don't. Nothing
+in this flow ever uses `sudo` or installs anything system-wide.
 
-## 2. Clone and run the base installer
-
-```sh
-git clone <this repository's URL> nanoclaw-go
-cd nanoclaw-go
-bash nanoclaw.sh
-```
-
-This is the same installer upstream NanoClaw ships (see the top-level
-`README.md`'s own Quick Start) — it walks you through installing Node/pnpm,
-registering your Anthropic credential, building the agent container image,
-and pairing your first channel (Slack, Telegram, Discord, WhatsApp,
-iMessage, or a local CLI). Nothing about the Go kernel changes this part;
-follow its prompts as normal.
-
-## 3. Install the Go kernel binary
+## 2. Clone and run the installer
 
 ```sh
-bash go-host/scripts/install.sh
+git clone <this repository's URL> isthmus
+cd isthmus
+bash isthmus.sh
 ```
 
-This places a working `nanogo` binary at `go-host/bin/nanogo` (built from
-source if you have a Go toolchain, otherwise a downloaded, checksum-verified
-release binary — see `go-host/docs/release-verification.md`), checks that
-Docker is reachable, and links it into `~/.local/bin/nanogo` too. It prints
-what it did and any prerequisite it couldn't satisfy for you (Docker not
-running, an unreachable release server) — read its output; it never fails
-silently.
+`isthmus.sh` is the single entry point for both a fresh install and
+converting an existing, already-set-up NanoClaw checkout to Isthmus in
+place (it checks for `data/upgrade-state.json` to tell which one you're
+doing). Either way it: installs the `nanogo` kernel binary first (checks
+Docker is reachable, links it into `~/.local/bin/nanogo`, checksum-verifies
+a downloaded binary — see `go-host/docs/release-verification.md`), then
+runs the same installer upstream NanoClaw ships — Node/pnpm, registering
+your Anthropic credential, building the agent container image (a plain
+`docker build`, not kernel-mediated — see "Why this is safe" below if
+you're wondering), and pairing your first channel (Slack, Telegram,
+Discord, WhatsApp, iMessage, or a local CLI). If it detected an in-place
+migration, it also stamps the upgrade marker at the end so the startup
+tripwire doesn't fire on next start — see Common failures below for what
+that means if you're doing this by hand instead.
 
-You only need to run this once per checkout. Re-run it after pulling a new
-version of this repository if `go-host/` changed.
+Kernel install and setup both print what they did and any prerequisite
+they couldn't satisfy (Docker not running, an unreachable release server)
+— read the output; neither fails silently. Only the kernel-install part
+needs re-running after pulling a new version of this repository if
+`go-host/` changed (`bash go-host/scripts/install.sh` directly, if you
+want to update just that piece without re-running setup).
 
-## 4. Start NanoClaw
+**Why the kernel installs before setup, safely**: the agent image build
+during setup is a plain `docker build` (`setup/container.ts`), not routed
+through the kernel at all — no mounts, no waking a live container, no
+credentials passed to anything running. The kernel only matters once the
+host actually spawns a real per-session container, which happens after
+setup finishes, at first use (step 4 below). Installing it first just
+closes the window where that could otherwise be a surprise.
 
-However you normally start it (the same launchd/systemd service
-`nanoclaw.sh` registered in step 2, or `pnpm start` for a foreground run
-during setup): the Go kernel now starts and stops automatically as part of
-the host process — you do not run `nanogo serve` yourself. Look for a line
-like this in the host's logs shortly after it starts:
+## 3. Start NanoClaw
+
+However you normally start it (the launchd/systemd service `isthmus.sh`
+registered via `nanoclaw.sh` in step 2, or `pnpm start` for a foreground
+run during setup): the Go kernel now starts and stops automatically as
+part of the host process — you do not run `nanogo serve` yourself. Look
+for a line like this in the host's logs shortly after it starts:
 
 ```
 INFO nanogo serve is listening socket=.../data/nanogo-kernel.sock pid=...
 ```
 
-If you instead see `nanogo binary not found`, go back to step 3. If you see
+If you instead see `nanogo binary not found`, go back to step 2. If you see
 `nanogo serve exited unexpectedly` repeated a few times, see Common
 failures below.
 
-## 5. Run doctor
+## 4. Run doctor
 
 ```sh
 go-host/bin/nanogo doctor -config <path> -kernel-socket data/nanogo-kernel.sock
@@ -111,10 +128,9 @@ denied by default rather than trusted — the opposite of what you'd get
 running `nanogo serve` by hand with no flags at all. If you want to audit
 that allowlist file's own contents once you've created one, use the
 separate `nanogo security-check -allowlist <path>` command — see
-`go-host/docs/ADR-018-p9-ec05-adversarial-pass-findings.md` and
 `go-host/docs/compatibility-security-report.md` for the full story.
 
-## 6. Send your agent its first message
+## 5. Send your agent its first message
 
 Use whatever channel you paired in step 2 (a Slack DM to your agent's app,
 a Telegram message, or the local CLI: `ncl chat <message>` if you paired
@@ -125,21 +141,25 @@ matching the kernel-derived naming `internal/kernel/naming.go` uses), and a
 reply comes back in the same channel within a few seconds to a couple of
 minutes depending on the request.
 
-If nothing happens: check `go-host/bin/nanogo doctor` (step 5) first, then
+If nothing happens: check `go-host/bin/nanogo doctor` (step 4) first, then
 the common failures below.
 
 ## Common failures
 
 **"NanoClaw stopped: update did not go through the supported path" right
-after step 4, on a machine that already had stock NanoClaw `/setup` on it.**
-This is NanoClaw's own upgrade tripwire (`docs/upgrade-recovery.md`), and
-it is expected here: installing Isthmus by switching an existing,
-already-set-up checkout's code (rather than starting from `git clone` in
-step 2) is itself a code change the tripwire doesn't know is sanctioned.
-Verified live 2026-09-06 in both directions — installing Isthmus this way,
-and later rolling back to stock the same way — with a clean build and no
-blocking DB migration either time (see `docs/rollback-runbook.md`). Clear
-it the same way the tripwire's own message says to:
+after step 3, on a machine that already had stock NanoClaw `/setup` on it.**
+This is NanoClaw's own upgrade tripwire (`docs/upgrade-recovery.md`) — a
+code-swap against an already-`/setup`-completed install isn't one of the
+tripwire's built-in supported paths, so it fires by default. If you ran
+`isthmus.sh` (step 2) for this migration, it already detected the
+in-place-upgrade case and stamped the marker for you at the end — you
+should not see this. If you *do* see it anyway (you migrated some other
+way — swapped the checkout code by hand, used your own deploy script,
+etc.), it's expected and not a real failure: verified live 2026-09-06 in
+both directions — installing Isthmus this way, and later rolling back to
+stock the same way — with a clean build and no blocking DB migration
+either time (see `docs/rollback-runbook.md`). Clear it the same way the
+tripwire's own message says to:
 ```sh
 pnpm exec tsx scripts/upgrade-state.ts set
 ```
@@ -148,8 +168,9 @@ itself didn't actually finish cleanly (a failed build, a missing
 dependency install).
 
 **"nanogo binary not found" in the host's startup logs.**
-Run `bash go-host/scripts/install.sh` (step 3) — it wasn't run yet, or ran
-in a different checkout than the one you're starting from.
+Run `bash go-host/scripts/install.sh` directly — either it wasn't run yet
+(shouldn't happen if you used `isthmus.sh`, which always runs it first),
+or it ran in a different checkout than the one you're starting from.
 
 **Docker-related `doctor` failures, or messages never get a reply.**
 Confirm Docker is actually running: `docker info`. Neither this project
@@ -159,10 +180,11 @@ nor its installer starts Docker for you.
 developer."**
 This project doesn't have a paid Apple Developer account to notarize
 releases with (see ADR-020's known-limitations section). If you ran
-`go-host/scripts/install.sh`, it already checksum-verified the download and
-cleared this for you — this message means either you downloaded a binary
-by hand outside the installer, or you're running an old copy from before
-the installer ran. Re-run step 3, or see
+`isthmus.sh` or `go-host/scripts/install.sh` directly, it already
+checksum-verified the download and cleared this for you — this message
+means either you downloaded a binary by hand outside the installer, or
+you're running an old copy from before the installer ran. Re-run
+`go-host/scripts/install.sh`, or see
 `go-host/docs/release-verification.md`'s Gatekeeper section for how to
 clear it yourself safely (checksum-verify first, always).
 
@@ -176,7 +198,7 @@ check for a leftover `nanogo serve` process from a manual test run with
 `pgrep -fl "nanogo serve"` and kill it).
 
 **A mount-allowlist `WARN` from `doctor` or in the startup logs.**
-Expected until you configure one — see step 5. Not a failure to "fix" by
+Expected until you configure one — see step 4. Not a failure to "fix" by
 silencing the warning; it's telling you the truth about your current
 configuration's actual security posture.
 

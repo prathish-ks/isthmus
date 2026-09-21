@@ -26,9 +26,10 @@ point we're testing.
 ## Step 1 — Install
 
 1. Clone the repo.
-2. Follow `docs/quickstart.md` in the repo: build/install the `nanogo`
-   binary via `go-host/scripts/install.sh`, then start the host as you
-   normally would (`pnpm start` or your usual process manager).
+2. Follow `docs/quickstart.md` in the repo: `bash isthmus.sh` (installs
+   the `nanogo` binary, then runs the normal NanoClaw setup flow), then
+   start the host as you normally would (`pnpm start` or your usual
+   process manager).
 3. **Record:** did install complete without needing anything not
    documented in `docs/quickstart.md`? Any step where you had to guess or
    dig into source to figure out what to do?

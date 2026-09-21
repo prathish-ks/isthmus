@@ -206,7 +206,7 @@ have introduced, if nobody is ever prompted to look again.
    on that one line stays a legible history of when and why the pin moved.
 
 **Tied to the release cadence, not just the weekly schedule**: before
-cutting a `nanogo` release (`.github/workflows/nanogo-release.yml`),
+cutting an `isthmus-v*` release (`.github/workflows/isthmus-release.yml`),
 manually trigger `egress-image-watch` via `workflow_dispatch` (or check its
 most recent scheduled run) and resolve any flagged drift first, rather than
 relying solely on the next Monday's cron to catch it. A release is a

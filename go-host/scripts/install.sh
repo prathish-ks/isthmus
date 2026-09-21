@@ -36,8 +36,11 @@
 #                       and use the downloaded-release path instead (useful
 #                       for testing the release artifacts themselves).
 #   --tag <tag>         install a specific release tag instead of latest
-#                       (e.g. nanogo-v0.1.0). Defaults to the latest
-#                       nanogo-v* release.
+#                       (e.g. isthmus-v1.0.0). Defaults to the latest
+#                       isthmus-v* release (formerly nanogo-v* — the two
+#                       tag schemes were consolidated once the kernel and
+#                       TS host became inseparable at runtime; see
+#                       isthmus.sh and .github/workflows/isthmus-release.yml).
 
 set -euo pipefail
 
@@ -139,11 +142,11 @@ download_release() {
 
   local tag="$TAG"
   if [ -z "$tag" ]; then
-    info "looking up the latest nanogo-v* release from github.com/${REPO}..."
+    info "looking up the latest isthmus-v* release from github.com/${REPO}..."
     tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
-      | grep -m1 '"tag_name": *"nanogo-v' \
+      | grep -m1 '"tag_name": *"isthmus-v' \
       | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
-    [ -n "$tag" ] || fail "could not find any nanogo-v* release for ${REPO}. Pass --tag <tag> explicitly, or install a Go toolchain so this script can build from source."
+    [ -n "$tag" ] || fail "could not find any isthmus-v* release for ${REPO}. Pass --tag <tag> explicitly, or install a Go toolchain so this script can build from source."
   fi
   info "using release ${tag}"
 

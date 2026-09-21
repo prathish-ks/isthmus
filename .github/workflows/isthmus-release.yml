@@ -1,4 +1,4 @@
-name: nanogo release
+name: isthmus release
 
 # P10-02 (Phase 11, Release Packaging): produces verifiable, checksummed,
 # SBOM'd, keylessly-signed nanogo binaries for every supported platform.
@@ -6,19 +6,25 @@ name: nanogo release
 # this workflow publishes, and go-host/docs/ADR-020-p10-01-minimum-trust-
 # install.md for how go-host/scripts/install.sh consumes these artifacts.
 #
-# Scoped to its own tag prefix (nanogo-v*) so a release of the Go kernel is
-# independent of any release process the TS host side may have of its own
-# — matches this project's existing "one pinned thing at a time" posture
-# (see docs/version-compatibility.md's version-range strategy for the same
-# idea applied to the upstream NanoClaw pin).
+# Formerly scoped to its own tag prefix (nanogo-v*), independent of any
+# whole-project release — that separation assumed the Go kernel and the TS
+# host could meaningfully drift apart. As of the enforcement-wiring work
+# (EC-02), they can't: container-runner.ts's privileged operations call
+# the kernel exclusively, with no TypeScript fallback, so a TS host without
+# a matching current nanogo binary is non-functional, not "running in a
+# degraded mode." Retargeted to isthmus-v* so one project-wide tag now
+# triggers both the whole-project release and this binary build — see
+# isthmus.sh, which installs the two together as a single entry point for
+# exactly this reason. install.sh's own release lookup was updated to
+# match (grep for isthmus-v, not nanogo-v).
 on:
   push:
     tags:
-      - "nanogo-v*"
+      - "isthmus-v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build and release (e.g. nanogo-v0.1.0) — for a manual re-run, not normal use"
+        description: "Tag to build and release (e.g. isthmus-v1.0.0) — for a manual re-run, not normal use"
         required: true
 
 permissions:
@@ -135,6 +141,16 @@ jobs:
             --output-certificate SHA256SUMS.pem \
             SHA256SUMS
 
+      # generate_release_notes is deliberately false: isthmus-v* releases
+      # carry hand-written notes, authored and published separately from
+      # this workflow (see isthmus-v1.0.0's own release for the current
+      # convention — RELEASING.md and CHANGELOG.md are upstream NanoClaw's
+      # own package.json/v* release process, unrelated to this tag scheme;
+      # do not confuse the two). This step's only job is attaching build
+      # artifacts to whatever release already exists for the tag (or
+      # creating a bare one with just these files if none exists yet,
+      # which a human then edits) — it must never generate or touch the
+      # notes body itself.
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -146,4 +162,4 @@ jobs:
             dist/SHA256SUMS
             dist/SHA256SUMS.sig
             dist/SHA256SUMS.pem
-          generate_release_notes: true
+          generate_release_notes: false
