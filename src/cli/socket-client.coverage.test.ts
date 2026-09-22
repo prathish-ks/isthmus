@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 
-import { DATA_DIR } from '../config.js';
+import { getRuntimeSocketDir } from '../install-slug.js';
 import type { RequestFrame } from './frame.js';
 import { DEFAULT_SOCKET_PATH, SocketTransport } from './socket-client.js';
 
@@ -117,7 +117,7 @@ describe('SocketTransport.sendFrame', () => {
     await new Promise((r) => setTimeout(r, 20));
   });
 
-  it('defaults to DATA_DIR/ncl.sock', () => {
-    expect(DEFAULT_SOCKET_PATH).toBe(path.join(DATA_DIR, 'ncl.sock'));
+  it('defaults to the short runtime socket dir, not DATA_DIR (sockaddr_un length limit)', () => {
+    expect(DEFAULT_SOCKET_PATH).toBe(path.join(getRuntimeSocketDir(), 'ncl.sock'));
   });
 });

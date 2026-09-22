@@ -32,6 +32,7 @@ import path from 'path';
 
 import { DATA_DIR, GROUPS_DIR, KERNEL_SOCKET_PATH, MOUNT_ALLOWLIST_PATH } from '../../config.js';
 import { onHostShutdown, onHostStart } from '../../host-lifecycle.js';
+import { ensureRuntimeSocketDir } from '../../install-slug.js';
 import { log } from '../../log.js';
 
 const PROJECT_ROOT = path.dirname(DATA_DIR);
@@ -42,6 +43,25 @@ const TRACE_FILE_PATH = path.join(DATA_DIR, 'nanogo-kernel-trace.json');
 const SOCKET_READY_TIMEOUT_MS = 5_000;
 const SOCKET_POLL_INTERVAL_MS = 100;
 const SHUTDOWN_GRACE_MS = 5_000;
+// BSD sysexits.h's EX_CONFIG — cmd/nanogo/serve.go's exit code for a
+// non-retryable configuration error (see its own exitConfigError doc
+// comment and kernel.ErrSocketPathTooLong in go-host/internal/kernel).
+// Kept in sync with that Go constant by hand (no shared-constant tooling
+// between the two languages in this codebase) — go-host/internal/kernel's
+// own kernel_test.go and this module's index.test.ts both assert their own
+// side's value, so a drift between them fails a test on whichever side
+// changed, rather than only surfacing at runtime.
+const EXIT_CONFIG_ERROR = 78;
+// The same limit go-host/internal/kernel/server.go's maxSocketPathLen
+// enforces. Checked here too so the common case — an install path (or an
+// explicit NANOCLAW_KERNEL_SOCKET override) that's too long — fails fast
+// with one clear TS-side log line, without ever spawning the nanogo
+// subprocess just to have it tell us something we already had the string
+// for. The Go-side check (and EXIT_CONFIG_ERROR above) stays as a second,
+// independent layer for cases this module doesn't fully control — Serve()
+// is also called directly (tests, a manually-run `nanogo serve`), and
+// nothing requires every caller to go through this pre-check first.
+const MAX_SOCKET_PATH_LEN = 104;
 // Capped exponential backoff between automatic restarts. After
 // MAX_CONSECUTIVE_FAILURES (== this array's length) failures with no
 // RESTART_RESET_AFTER_MS of clean uptime in between, this module stops
@@ -204,6 +224,12 @@ async function spawnKernel(nanogoPath: string): Promise<boolean> {
   const args = buildServeArgs();
   log.info('Starting nanogo serve', { bin: nanogoPath, socket: KERNEL_SOCKET_PATH });
 
+  // KERNEL_SOCKET_PATH's directory is computed lazily/purely (see
+  // install-slug.ts's getRuntimeSocketDir doc comment) — create it here,
+  // right before actually spawning, rather than as a module-load side
+  // effect of importing config.ts.
+  ensureRuntimeSocketDir(path.dirname(KERNEL_SOCKET_PATH));
+
   // Stale socket from an unclean previous exit: nanogo's own listener setup
   // would otherwise fail with "address already in use" against a socket
   // file nothing is listening on. Safe to remove unconditionally here —
@@ -247,6 +273,20 @@ async function spawnKernel(nanogoPath: string): Promise<boolean> {
       log.info('nanogo serve stopped', { code, signal });
       return;
     }
+    // exit 78 (EX_CONFIG, matching BSD sysexits.h) is cmd/nanogo/serve.go's
+    // signal for a non-retryable configuration error — currently just
+    // kernel.ErrSocketPathTooLong. Retrying can't ever succeed (the path's
+    // length doesn't change between attempts), so this skips the backoff
+    // schedule entirely rather than burning ~48s across 5 failed attempts
+    // before reaching the same "giving up" state scheduleRestart would
+    // eventually land on anyway.
+    if (code === EXIT_CONFIG_ERROR) {
+      log.error(
+        'nanogo serve exited with a configuration error it cannot recover from by retrying — container wake/kill will fail until this is fixed and the host is restarted. Check the warning nanogo logged just above for specifics (e.g. socket path length).',
+        { code, signal },
+      );
+      return;
+    }
     const uptimeMs = Date.now() - startedAt;
     if (uptimeMs >= RESTART_RESET_AFTER_MS) {
       consecutiveFailures = 0;
@@ -285,6 +325,19 @@ onHostStart(async () => {
   if (process.env.NANOCLAW_KERNEL_DISABLE === '1') {
     log.info(
       'nanogo serve supervision disabled via NANOCLAW_KERNEL_DISABLE — container wake/kill will fail unless something else runs it',
+    );
+    return;
+  }
+  // Fail fast, no subprocess: KERNEL_SOCKET_PATH is already a fully-
+  // resolved string at this point (src/config.ts), so there's no need to
+  // spawn nanogo and parse its exit code just to learn something already
+  // knowable here. Same MAX_SOCKET_PATH_LEN this module's exit-code-78
+  // handling exists for — see its own doc comment for why that path stays
+  // in place as a second layer regardless.
+  if (KERNEL_SOCKET_PATH.length > MAX_SOCKET_PATH_LEN) {
+    log.error(
+      `kernel socket path is ${KERNEL_SOCKET_PATH.length} bytes, over the ${MAX_SOCKET_PATH_LEN}-byte portable limit (macOS sockaddr_un) — container wake/kill will fail until this is fixed. Set NANOCLAW_KERNEL_SOCKET to a shorter absolute path.`,
+      { socket: KERNEL_SOCKET_PATH },
     );
     return;
   }

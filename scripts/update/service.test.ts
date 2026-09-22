@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { getRuntimeSocketDir } from '../../src/install-slug.js';
 import {
   createCommandRunner,
   detectService,
@@ -153,8 +154,13 @@ describe('drain and health gates', () => {
     const unit = path.join(home, '.config', 'systemd', 'user', `${name}.service`);
     fs.mkdirSync(path.dirname(unit), { recursive: true });
     fs.writeFileSync(unit, '[Service]\n');
-    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'data', 'ncl.sock'), 'test socket stand-in');
+    // Not data/ncl.sock — verifyServiceHealth now checks the same
+    // slug-keyed runtime dir the real socket lives in (src/install-slug.ts's
+    // getRuntimeSocketDir); the old DATA_DIR-relative path this test used
+    // to stand in at was exactly the stale location the socket relocation
+    // introduced a real, undetected regression against.
+    fs.mkdirSync(getRuntimeSocketDir(root), { recursive: true });
+    fs.writeFileSync(path.join(getRuntimeSocketDir(root), 'ncl.sock'), 'test socket stand-in');
 
     const healthy = await verifyServiceHealth(
       { mode: 'systemd-user', active: true, name, definition: unit },

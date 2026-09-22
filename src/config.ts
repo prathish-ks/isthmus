@@ -2,7 +2,12 @@ import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
-import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from './install-slug.js';
+import {
+  getContainerImageBase,
+  getDefaultContainerImage,
+  getInstallSlug,
+  getRuntimeSocketDir,
+} from './install-slug.js';
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
@@ -60,14 +65,19 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 // EC-02 (Phase 9): the internal/kernel Unix-socket security boundary
-// (`nanogo serve`'s -socket flag; see go-host/cmd/nanogo/serve.go). Same
-// `DATA_DIR`-relative default convention as `cli/socket-client.ts`'s
+// (`nanogo serve`'s -socket flag; see go-host/cmd/nanogo/serve.go).
+// Deliberately NOT DATA_DIR-relative — see getRuntimeSocketDir's doc
+// comment: a Unix socket path is capped at 104 bytes on macOS/BSD, and
+// DATA_DIR can be arbitrarily deep depending on where the user cloned the
+// repo. Same short runtime dir as `cli/socket-client.ts`'s
 // `DEFAULT_SOCKET_PATH` (ncl.sock) — a distinct filename so the two socket
 // servers (the `ncl` CLI transport and the Go security kernel) never
 // collide on the same install. Override via `.env`'s NANOCLAW_KERNEL_SOCKET
 // when a deployment runs `nanogo serve` against a non-default path.
 export const KERNEL_SOCKET_PATH =
-  process.env.NANOCLAW_KERNEL_SOCKET || envConfig.NANOCLAW_KERNEL_SOCKET || path.join(DATA_DIR, 'nanogo-kernel.sock');
+  process.env.NANOCLAW_KERNEL_SOCKET ||
+  envConfig.NANOCLAW_KERNEL_SOCKET ||
+  path.join(getRuntimeSocketDir(PROJECT_ROOT), 'nanogo-kernel.sock');
 // Local agent-template library. Committed but ships empty (+ README). Resolved
 // once at load. Override to another LOCAL path via NANOCLAW_TEMPLATES_DIR; never
 // a remote URL, never an ncl flag, never runtime-mutable.

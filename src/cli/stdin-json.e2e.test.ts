@@ -43,7 +43,7 @@ it('pipes stdin JSON through the real CLI and socket server into a registered co
   try {
     await startCliServer(socketPath);
 
-    const result = await runCli(tempDir, {
+    const result = await runCli(tempDir, socketPath, {
       stdin_value: 'from-stdin',
       nested: { enabled: true },
     });
@@ -79,6 +79,7 @@ it('runs when the CLI entry point is invoked through a symlink', async () => {
 
     const result = await runCli(
       tempDir,
+      socketPath,
       {
         stdin_value: 'from-stdin',
         nested: { enabled: true },
@@ -103,6 +104,7 @@ it('runs when the CLI entry point is invoked through a symlink', async () => {
 
 function runCli(
   cwd: string,
+  socketPath: string,
   stdin: Record<string, unknown>,
   clientPath = fileURLToPath(new URL('./client.ts', import.meta.url)),
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }> {
@@ -119,7 +121,18 @@ function runCli(
       '--stdin-json',
       '--json',
     ],
-    { cwd, stdio: ['pipe', 'pipe', 'pipe'] },
+    {
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // The client's own DEFAULT_SOCKET_PATH no longer derives from cwd
+      // (see src/install-slug.ts's getRuntimeSocketDir — it's keyed off a
+      // short runtime dir, not DATA_DIR, so matching sockaddr_un's 104-byte
+      // limit doesn't depend on install path depth). Point this spawned
+      // client at the exact socket this test's own startCliServer(socketPath)
+      // call bound, explicitly, rather than relying on cwd-derived defaults
+      // to coincidentally agree.
+      env: { ...process.env, NANOCLAW_NCL_SOCKET: socketPath },
+    },
   );
 
   let stdout = '';

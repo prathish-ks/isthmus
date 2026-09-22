@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -26,6 +27,14 @@ import (
 	"github.com/prathish-ks/isthmus/go-host/internal/session"
 	msgtrace "github.com/prathish-ks/isthmus/go-host/internal/trace"
 )
+
+// exitConfigError matches BSD sysexits.h's EX_CONFIG — a documented,
+// conventional exit code for "something in the configuration is wrong",
+// distinct from the generic exit 1 every other Serve failure uses. See
+// kernel.ErrSocketPathTooLong's doc comment for why this specific
+// distinction exists: a supervising parent process needs to tell "will
+// never succeed on retry" apart from "might be transient".
+const exitConfigError = 78
 
 // stringList collects a repeatable flag (e.g. -surface-root, which may
 // legitimately name more than one install-surface root) into a slice — the
@@ -195,7 +204,26 @@ func runServeCmd(args []string) {
 	fmt.Printf("nanogo: kernel listening on %s (pid %d) — Ctrl-C or SIGTERM to stop\n", *socketPath, os.Getpid())
 	if err := k.Serve(ctx, *socketPath); err != nil {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitCodeForServeErr(err))
 	}
 	fmt.Println("nanogo: kernel stopped")
+}
+
+// exitCodeForServeErr picks runServeCmd's os.Exit code for a Serve failure.
+// Split out from runServeCmd (which is otherwise untestable — it calls
+// os.Exit directly, which would kill the test process) so this decision
+// has real test coverage instead of being exercised only by hand.
+//
+// exitConfigError (not the generic 1 every other Serve failure uses) for a
+// non-retryable configuration problem specifically — see
+// kernel.ErrSocketPathTooLong's doc comment. A supervising parent
+// (kernel-supervisor/index.ts) checks for this exact code to stop
+// auto-restarting immediately: retrying can't ever succeed here, since the
+// path's length doesn't change between attempts, unlike a transient bind
+// failure.
+func exitCodeForServeErr(err error) int {
+	if errors.Is(err, kernel.ErrSocketPathTooLong) {
+		return exitConfigError
+	}
+	return 1
 }

@@ -306,6 +306,32 @@ func TestServe_EndToEndRoundTripOverRealSocket(t *testing.T) {
 	}
 }
 
+// TestExitCodeForServeErr_SocketPathTooLong pins the exit-code-78 contract
+// kernel-supervisor/index.ts's EXIT_CONFIG_ERROR depends on — a drift here
+// (e.g. someone changes exitConfigError's value, or this function stops
+// wrapping ErrSocketPathTooLong) now fails a Go test instead of only
+// surfacing as the TS supervisor silently falling back to full retry/
+// backoff for what should be a non-retryable failure.
+func TestExitCodeForServeErr_SocketPathTooLong(t *testing.T) {
+	err := fmt.Errorf("wrapped: %w", kernel.ErrSocketPathTooLong)
+	if got := exitCodeForServeErr(err); got != exitConfigError {
+		t.Fatalf("exitCodeForServeErr(ErrSocketPathTooLong) = %d, want exitConfigError (%d)", got, exitConfigError)
+	}
+	if exitConfigError != 78 {
+		t.Fatalf("exitConfigError = %d, want 78 (BSD sysexits.h EX_CONFIG — src/modules/kernel-supervisor/index.ts's EXIT_CONFIG_ERROR must match)", exitConfigError)
+	}
+}
+
+// TestExitCodeForServeErr_OtherFailure confirms the generic path is still 1
+// for any Serve failure that isn't ErrSocketPathTooLong — the distinction
+// this whole mechanism exists for only matters if ordinary failures don't
+// also claim the non-retryable code.
+func TestExitCodeForServeErr_OtherFailure(t *testing.T) {
+	if got := exitCodeForServeErr(fmt.Errorf("some other bind failure")); got != 1 {
+		t.Fatalf("exitCodeForServeErr(other) = %d, want 1", got)
+	}
+}
+
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(v)

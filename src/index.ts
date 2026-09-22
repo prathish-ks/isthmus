@@ -170,7 +170,7 @@ async function main(): Promise<void> {
   startHostSweep();
   log.info('Host sweep started');
 
-  // 8. Start the `ncl` CLI socket server (data/ncl.sock).
+  // 8. Start the `ncl` CLI socket server (see socket-server.ts for where it lives).
   await startCliServer();
 
   log.info('NanoClaw running');
