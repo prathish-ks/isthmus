@@ -78,18 +78,38 @@ describe('startCliServer', () => {
 
   it('continues (with a warning) when chmod fails', async () => {
     const p = sockPath();
-    const spy = vi.spyOn(fs, 'chmodSync').mockImplementationOnce(() => {
-      throw new Error('chmod denied');
+    // startCliServer now also chmods the socket's parent directory first
+    // (ensureRuntimeSocketDir) — and unlike before, that chmod failure is
+    // NOT silently absorbed (src/install-slug.ts's ownership-verification
+    // rewrite makes it throw, by design, once ownership is confirmed: a
+    // chmod failure at that point means something unexpected is going on,
+    // not safe to swallow and proceed). So this mock must throw only for
+    // the socket FILE path this test targets, not for every chmodSync
+    // call — throwing unconditionally would fail inside
+    // ensureRuntimeSocketDir itself, before startCliServer ever reaches
+    // the call under test here.
+    const realChmodSync = fs.chmodSync.bind(fs);
+    const spy = vi.spyOn(fs, 'chmodSync').mockImplementation((target, mode) => {
+      if (target === p) throw new Error('chmod denied');
+      realChmodSync(target, mode);
     });
-    await startCliServer(p);
-    spy.mockRestore();
-    expect(state.log.warn).toHaveBeenCalledWith(
-      'Failed to chmod ncl socket (continuing)',
-      expect.objectContaining({ socketPath: p }),
-    );
-    // Still serving.
-    const out = await exchange(p, JSON.stringify({ id: 'r2', command: 'help', args: {} }) + '\n');
-    expect(JSON.parse(out).ok).toBe(true);
+    // try/finally, not a bare mockRestore() after the fact: an
+    // unrestored spy here leaks fs.chmodSync's mocked-and-throwing
+    // behavior into every later test in this file, which is exactly what
+    // happened once already when startCliServer itself threw before
+    // reaching the mockRestore() line below.
+    try {
+      await startCliServer(p);
+      expect(state.log.warn).toHaveBeenCalledWith(
+        'Failed to chmod ncl socket (continuing)',
+        expect.objectContaining({ socketPath: p }),
+      );
+      // Still serving.
+      const out = await exchange(p, JSON.stringify({ id: 'r2', command: 'help', args: {} }) + '\n');
+      expect(JSON.parse(out).ok).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('skips blank lines before the frame', async () => {

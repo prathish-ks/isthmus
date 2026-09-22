@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -462,6 +463,14 @@ func TestServe_RejectsSocketPathOverPlatformLimit(t *testing.T) {
 	err := k.Serve(context.Background(), tooLong)
 	if err == nil {
 		t.Fatal("expected Serve to reject an over-limit socket path with a clear error instead of letting the OS fail obscurely later")
+	}
+	// cmd/nanogo distinguishes this specific, non-retryable failure from a
+	// transient bind error via errors.Is(err, ErrSocketPathTooLong) — see
+	// its exitConfigError handling. A caller supervising and auto-
+	// restarting this process needs that distinction to stop retrying
+	// immediately, so it's load-bearing, not incidental.
+	if !errors.Is(err, ErrSocketPathTooLong) {
+		t.Fatalf("expected err to wrap ErrSocketPathTooLong so callers can errors.Is() it, got: %v", err)
 	}
 }
 

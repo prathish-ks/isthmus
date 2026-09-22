@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { getRuntimeSocketDir } from '../../src/install-slug.js';
 import {
   createCommandRunner,
   defaultServiceEnvironment,
@@ -365,8 +366,9 @@ describe('verifyServiceHealth branch coverage', () => {
     const unit = path.join(home, '.config', 'systemd', 'user', `${name}.service`);
     fs.mkdirSync(path.dirname(unit), { recursive: true });
     fs.writeFileSync(unit, '[Service]\n');
-    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'data', 'ncl.sock'), 'stand-in');
+    // Not data/ncl.sock — see verifyServiceHealth's own comment (service.ts).
+    fs.mkdirSync(getRuntimeSocketDir(root), { recursive: true });
+    fs.writeFileSync(path.join(getRuntimeSocketDir(root), 'ncl.sock'), 'stand-in');
 
     const healthy = await verifyServiceHealth(
       { mode: 'systemd-user', active: true, name, definition: unit },

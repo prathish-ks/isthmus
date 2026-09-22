@@ -157,6 +157,41 @@ describe('kernel-supervisor: real process lifecycle (fixture scripts, no mocked 
     }
   }, 10_000);
 
+  it('exit 78 (EX_CONFIG) stops immediately, with no retry scheduled', async () => {
+    // Real fixture, not a mocked exit code: proves kernel-supervisor's own
+    // process.on('exit', ...) handler actually observes and reacts to the
+    // exit code cmd/nanogo/serve.go's exitCodeForServeErr produces for
+    // kernel.ErrSocketPathTooLong — go-host/cmd/nanogo/serve_test.go pins
+    // that Go-side value; this pins the TS side consuming it.
+    process.env.NANOCLAW_NANOGO_BIN = fixture('fake-nanogo-exit-config-error.sh');
+    const { log } = await import('../../log.js');
+    const lifecycle = await import('../../host-lifecycle.js');
+    await import('./index.js');
+
+    for (const cb of lifecycle.getHostStartCallbacks()) {
+      await cb({ db: {} as never, signal: new AbortController().signal });
+    }
+
+    // The fixture exits immediately and never opens a socket — give the
+    // exit handler a moment to run, then confirm no restart got scheduled.
+    // The shortest backoff step is 1s (RESTART_BACKOFF_MS[0]); waiting
+    // comfortably past that without a "Scheduling nanogo serve restart"
+    // warning is what actually distinguishes "gave up correctly" from
+    // "is about to retry, just hasn't yet."
+    await new Promise((r) => setTimeout(r, 1_500));
+
+    expect(fs.existsSync(socketPath)).toBe(false);
+    expect(log.error).toHaveBeenCalledWith(
+      expect.stringContaining('cannot recover from by retrying'),
+      expect.objectContaining({ code: 78 }),
+    );
+    expect(log.warn).not.toHaveBeenCalledWith('Scheduling nanogo serve restart', expect.anything());
+
+    for (const cb of lifecycle.getHostShutdownCallbacks()) {
+      await cb();
+    }
+  }, 10_000);
+
   it('does not throw and lets the host keep starting when nanogo is not found', async () => {
     process.env.NANOCLAW_NANOGO_BIN = path.join(tmpDir, 'does-not-exist');
     const lifecycle = await import('../../host-lifecycle.js');

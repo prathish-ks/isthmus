@@ -8,11 +8,24 @@
 import net from 'net';
 import path from 'path';
 
-import { DATA_DIR } from '../config.js';
+import { readEnvFile } from '../env.js';
+import { getRuntimeSocketDir } from '../install-slug.js';
 import type { RequestFrame, ResponseFrame } from './frame.js';
 import type { Transport } from './transport.js';
 
-export const DEFAULT_SOCKET_PATH = path.join(DATA_DIR, 'ncl.sock');
+// Deliberately NOT DATA_DIR-relative — see getRuntimeSocketDir's doc
+// comment (src/install-slug.ts): a Unix socket path is capped at 104
+// bytes on macOS/BSD, and DATA_DIR can be arbitrarily deep depending on
+// where the user cloned the repo. Same short runtime dir as
+// config.ts's KERNEL_SOCKET_PATH, distinct filename so the two socket
+// servers never collide. Override via NANOCLAW_NCL_SOCKET — checked in
+// both process.env and .env, matching KERNEL_SOCKET_PATH's own
+// NANOCLAW_KERNEL_SOCKET override exactly, so the two parallel overrides
+// don't silently behave differently for someone who reasonably expects
+// them to.
+const envConfig = readEnvFile(['NANOCLAW_NCL_SOCKET']);
+export const DEFAULT_SOCKET_PATH =
+  process.env.NANOCLAW_NCL_SOCKET || envConfig.NANOCLAW_NCL_SOCKET || path.join(getRuntimeSocketDir(), 'ncl.sock');
 
 export class SocketTransport implements Transport {
   constructor(private readonly socketPath: string = DEFAULT_SOCKET_PATH) {}

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { getInstallSlug } from '../../src/install-slug.js';
+import { getInstallSlug, getRuntimeSocketDir } from '../../src/install-slug.js';
 
 export interface CommandRunner {
   run(command: string, args: string[], cwd?: string): string;
@@ -217,7 +217,13 @@ export async function verifyServiceHealth(
   timeoutMs = 60_000,
 ): Promise<boolean> {
   if (!handle.active) return true;
-  const socket = path.join(projectRoot, 'data', 'ncl.sock');
+  // NOT data/ncl.sock — src/install-slug.ts's getRuntimeSocketDir moved
+  // the real socket to a short, slug-keyed runtime dir (sockaddr_un's
+  // 104-byte limit made a DATA_DIR-relative path unsafe for a deep
+  // install path). Mirrors src/cli/socket-client.ts's DEFAULT_SOCKET_PATH
+  // computation for this specific projectRoot, since that constant's own
+  // default (process.cwd()) may not match the install being verified here.
+  const socket = process.env.NANOCLAW_NCL_SOCKET || path.join(getRuntimeSocketDir(projectRoot), 'ncl.sock');
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const current = detectService(projectRoot, env);

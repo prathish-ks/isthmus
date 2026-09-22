@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -181,6 +182,16 @@ func respond(requestID string, payload any, errInfo *ErrorInfo) ResponseEnvelope
 // Kind/Detail split already applies to security denials.
 const maxSocketPathLen = 104
 
+// ErrSocketPathTooLong is wrapped into Serve's returned error when
+// socketPath exceeds maxSocketPathLen. Exported so cmd/nanogo can tell
+// this specific, non-retryable configuration failure apart from a
+// transient bind error (port/path in use, permission race) via errors.Is
+// — callers that supervise and auto-restart this process (see
+// src/modules/kernel-supervisor/index.ts) need that distinction to stop
+// retrying immediately instead of burning through a backoff schedule that
+// can never succeed: the path's length doesn't change between attempts.
+var ErrSocketPathTooLong = errors.New("kernel: socket path over the portable sockaddr_un limit")
+
 // acquireServeLock is implemented per-OS — see lock_unix.go / lock_windows.go.
 
 // Serve listens on a Unix domain socket at socketPath and dispatches one
@@ -195,7 +206,7 @@ const maxSocketPathLen = 104
 // same path — see that function's doc comment.
 func (k *Kernel) Serve(ctx context.Context, socketPath string) error {
 	if len(socketPath) > maxSocketPathLen {
-		return fmt.Errorf("kernel: socket path %q is %d bytes, over the %d-byte portable limit (macOS sockaddr_un) — use a shorter path, e.g. under /tmp or a dedicated run directory", socketPath, len(socketPath), maxSocketPathLen)
+		return fmt.Errorf("%w: %q is %d bytes, over the %d-byte portable limit (macOS sockaddr_un) — use a shorter path, e.g. under /tmp or a dedicated run directory", ErrSocketPathTooLong, socketPath, len(socketPath), maxSocketPathLen)
 	}
 	lockFile, err := acquireServeLock(socketPath)
 	if err != nil {

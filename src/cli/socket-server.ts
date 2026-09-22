@@ -3,13 +3,19 @@
  * per connection, calls dispatch() with caller='host', writes the response
  * frame, closes.
  *
- * Lives at data/ncl.sock (separate from data/cli.sock, which the existing
- * chat-style CLI channel adapter owns). Socket file is chmod 0600 — only
- * the user that started the host can connect.
+ * Lives under getRuntimeSocketDir() (src/install-slug.ts — a short,
+ * slug-keyed dir under XDG_RUNTIME_DIR/os.tmpdir(), not data/; a Unix
+ * socket path is capped at 104 bytes on macOS/BSD, which a DATA_DIR-
+ * relative path could exceed on a deep install), distinct filename from
+ * data/cli.sock (which the existing chat-style CLI channel adapter owns).
+ * Socket file is chmod 0600 — only the user that started the host can
+ * connect.
  */
 import fs from 'fs';
 import net from 'net';
+import path from 'path';
 
+import { ensureRuntimeSocketDir } from '../install-slug.js';
 import { log } from '../log.js';
 import { dispatch } from './dispatch.js';
 import type { CallerContext, RequestFrame, ResponseFrame } from './frame.js';
@@ -18,6 +24,12 @@ import { DEFAULT_SOCKET_PATH } from './socket-client.js';
 let server: net.Server | null = null;
 
 export async function startCliServer(socketPath: string = DEFAULT_SOCKET_PATH): Promise<void> {
+  // DEFAULT_SOCKET_PATH's directory is computed lazily/purely (see
+  // install-slug.ts's getRuntimeSocketDir doc comment) — create it here,
+  // right before actually binding, rather than as a module-load side
+  // effect of importing config.ts.
+  ensureRuntimeSocketDir(path.dirname(socketPath));
+
   // Stale-socket cleanup — a previous run that crashed may have left the
   // file behind, and net.createServer refuses to bind to an existing path.
   try {
