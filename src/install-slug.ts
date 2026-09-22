@@ -41,6 +41,13 @@ export function getInstallSlug(projectRoot: string = process.cwd()): string {
  */
 export function getRuntimeSocketDir(projectRoot?: string): string {
   const base = process.env.XDG_RUNTIME_DIR || os.tmpdir();
+  // False positive: projectRoot never reaches path.join raw — getInstallSlug
+  // hashes it first (sha1, hex, sliced to 8 chars), a fixed-charset,
+  // fixed-length output that cannot contain '/' or '..' regardless of
+  // projectRoot's value. Same disposition as this project's other
+  // path-join-resolve-traversal false positives (see .github/workflows/
+  // ci.yml's semgrep-scope comment) — a hash-sanitized value, not raw input.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return path.join(base, `nanoclaw-${getInstallSlug(projectRoot)}`);
 }
 
@@ -110,7 +117,9 @@ export function ensureRuntimeSocketDir(dir: string): void {
     throw new Error(`refusing to use ${dir} for a socket directory — could not determine this process's uid`);
   }
   if (info.uid !== uid) {
-    throw new Error(`refusing to use ${dir} for a socket directory — it's owned by uid ${info.uid}, not this process's uid ${uid}`);
+    throw new Error(
+      `refusing to use ${dir} for a socket directory — it's owned by uid ${info.uid}, not this process's uid ${uid}`,
+    );
   }
   // Ownership confirmed — now safe to tighten permissions if they'd drifted
   // (e.g. created by a process with a looser umask). Not swallowed: if this
