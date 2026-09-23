@@ -352,13 +352,15 @@ function extractAttachmentFiles(
   }
 
   const inboxRoot = path.join(sessionDir(agentGroupId, sessionId), 'inbox');
-  // Resolved lazily on the first attachment that actually carries bytes, so a
-  // message whose attachments have no inline `data` never creates an inbox dir.
-  // ensureContainedInboxDir refuses a pre-placed symlink at the inbox root or
-  // the per-message subdir before any write lands outside the sandbox (#2828).
-  let inboxDir: string | null = null;
-  let inboxResolved = false;
-
+  // Re-validated on EVERY attachment that carries bytes, not just once before
+  // the loop (code review finding): the session dir is RW-mounted into the
+  // container, so a co-resident process could swap `inboxDir` itself for a
+  // symlink between one attachment's write and the next — the `wx` flag below
+  // only refuses an existing symlink/file at the FINAL path component, not a
+  // symlinked intermediate directory. ensureContainedInboxDir is idempotent
+  // (mkdir on an already-valid dir is a no-op) and cheap, so re-running it
+  // per write shrinks the exposure window back down to a single operation
+  // instead of the whole attachment batch.
   let changed = false;
   for (const att of attachments) {
     if (typeof att.data !== 'string') continue;
@@ -373,10 +375,7 @@ function extractAttachmentFiles(
       });
     }
 
-    if (!inboxResolved) {
-      inboxDir = ensureContainedInboxDir(inboxRoot, messageId, { messageId });
-      inboxResolved = true;
-    }
+    const inboxDir = ensureContainedInboxDir(inboxRoot, messageId, { messageId });
     // Unsafe inbox (symlink / escape) — no attachment can be written safely.
     if (!inboxDir) break;
 
