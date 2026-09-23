@@ -106,7 +106,7 @@ jobs:
         if: steps.pin.outputs.changed == 'true'
         id: aws
         continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AGENT_IMAGE_CI_ROLE_ARN }}
           aws-region: us-east-1
