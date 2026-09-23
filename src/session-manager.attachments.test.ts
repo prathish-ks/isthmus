@@ -130,6 +130,13 @@ describe('extractAttachmentFiles — per-attachment re-validation (code review T
     const spy = vi.spyOn(inboxSafety, 'ensureContainedInboxDir').mockImplementation((inboxRoot, messageId, ctx) => {
       calls++;
       if (calls === 2) {
+        // False positive: messageId here is always the hardcoded literal
+        // passed to writeSessionMessage below in this same test file, never
+        // external input — this path.join deliberately mirrors production's
+        // own inbox-dir construction (ensureContainedInboxDir) so the
+        // injected symlink lands exactly where the real per-attachment
+        // re-check would look, which is the point of this regression test.
+        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
         const msgInboxDir = path.join(inboxRoot, messageId);
         fs.rmSync(msgInboxDir, { recursive: true, force: true });
         fs.symlinkSync(canaryDir, msgInboxDir);
