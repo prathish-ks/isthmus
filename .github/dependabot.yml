@@ -1,0 +1,43 @@
+# Version-update PRs only — no auto-merge. This project pins deliberately
+# (CLAUDE.md: "pin deliberately, never bun update blindly") and every
+# vulnerability gate here (pnpm-audit, bun-audit, go-vulncheck) requires
+# real review before merge regardless of who proposed the change. Four
+# ecosystems: the pnpm-managed host, agent-runner's separate Bun tree
+# (not a pnpm-workspace.yaml member — see CLAUDE.md's "Container Runtime
+# (Bun)" section), the Go kernel, and pinned GitHub Action versions
+# (an often-overlooked supply-chain surface in its own right).
+#
+# Root pnpm-workspace.yaml's minimumReleaseAge (3 days) still applies to
+# whatever Dependabot proposes for the root ecosystem below — pnpm install
+# --frozen-lockfile in CI enforces it at install time regardless of who
+# authored the bump, so this composes for free with no special
+# coordination needed here.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "bun"
+    directory: "/container/agent-runner"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "gomod"
+    directory: "/go-host"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
