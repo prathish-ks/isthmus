@@ -23,7 +23,7 @@ describe('SQLite mailbox canonical serialization', () => {
     const outbound = wrapSqliteOutbound(
       () => outboundDb,
       () => outboundDb,
-      nextSequence,
+      { nextSequence },
     );
 
     await inbound.insertMessage({

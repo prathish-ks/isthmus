@@ -40,6 +40,19 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      # container/agent-runner (2026-09-23, code review finding): eslint.config.js's
+      # `ignores` excludes container/ entirely, so no-floating-promises/
+      # no-misused-promises/await-thenable never applied to this Bun-managed
+      # tree despite the same "missing await" bug class being fixed at least
+      # 8 separate times on the host side (see the `lint` step just above).
+      # A separate config lives at container/agent-runner/eslint.config.js
+      # (its own tsconfig.json, own promise-handling-rules-only scope — see
+      # that file's own header) rather than folding it into the root config,
+      # run here via the root's already-installed eslint/typescript-eslint
+      # (no new devDependency added to that Bun-managed package tree).
+      - name: Lint agent-runner
+        run: pnpm run lint:agent-runner
+
       # Typecheck host uses a CI-only config (tsconfig.ci.json) that
       # excludes 3 files with pre-existing TypeScript errors (31 total,
       # all TS2783/TS2322 spread-then-explicit-property mismatches,

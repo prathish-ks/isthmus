@@ -199,11 +199,16 @@ Dedup is the channel adapter's responsibility. Chat SDK handles this internally.
 ## Session DB Schema
 
 Split across the two files. JSON blobs for content — schema-free, format varies by `kind`.
-`seq` is a global ordering counter with a **disjoint parity**: the host writes even seqs to
-`messages_in`, the container writes odd seqs to `messages_out`. Each side reads the other's
-MAX(seq) to pick its next value, so seq is a single monotonic message id across both tables —
-which is why the agent-facing message id it returns from `send_message` (and accepts in
-`edit_message` / `add_reaction`) is unambiguous.
+`seq` is a global ordering counter with a **disjoint parity**: the host writes even seqs (to
+`messages_in`, and to `messages_out` for host-generated direct replies like a command-gate deny),
+the container writes odd seqs to `messages_out`. The container computes its next odd value by
+reading `MAX(seq)` across both tables on every write; the host instead reads/writes a single
+persisted counter (`host_seq_state`, seeded from both tables' `MAX(seq)` once per session, not on
+every allocation — see [db-session.md §2.5/§3](db-session.md#25-host_seq_state)) shared by both of
+its own write paths, so its two even-seq allocators can't independently land on the same value.
+Either way seq ends up a single monotonic message id across both tables — which is why the
+agent-facing message id it returns from `send_message` (and accepts in `edit_message` /
+`add_reaction`) is unambiguous.
 
 ```sql
 -- inbound.db — host writes, container opens read-only
@@ -936,13 +941,12 @@ Messages starting with `/` are checked against three lists:
 - Passed raw, no `<messages>` XML wrapping
 
 **Admin-only commands (require admin sender):**
-- `/remote-control` — remote control session
 - `/clear` — clear session context
 - `/compact` — force context compaction
 - If sent by a non-admin user, the command is rejected with an error message. Not forwarded to the agent.
 
 **Filtered commands (dropped entirely):**
-- Commands that don't make sense in the NanoClaw context or could cause issues
+- Commands that don't make sense in the NanoClaw context or could cause issues, including `/remote-control`
 - Silently dropped — no error, no forwarding
 
 The command lists are hardcoded in the agent-runner. Admin verification happens host-side before the message ever reaches the container: `src/command-gate.ts` queries `user_roles` (owner / global admin / scoped-admin-of-this-agent-group) and either passes the message through, drops it, or routes it elsewhere. The container has no notion of admin identity — no env var, no DB query, no per-message check.

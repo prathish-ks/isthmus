@@ -16,15 +16,21 @@ export function isSessionEcho(msg: MessageInRow): boolean {
 
 /**
  * Command categories for messages starting with '/'.
- * - admin: sender must be in NANOCLAW_ADMIN_USER_IDS
+ * - admin: known admin-only command name (no privilege check happens HERE —
+ *   see below)
  * - filtered: silently drop (mark completed without processing)
  * - passthrough: pass raw to the agent (no XML wrapping)
  * - none: not a command — format normally
+ *
+ * These two lists mirror src/command-gate.ts's own (host-side, Node) — kept
+ * in sync manually since the container (Bun) and host (Node) share no
+ * modules (see CLAUDE.md's "Container Runtime" section) — verified equal by
+ * formatter.commandLists.test.ts, which fails loudly if they ever drift.
  */
 export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
 
-const ADMIN_COMMANDS = new Set(['/remote-control', '/clear', '/compact', '/context', '/cost', '/files', '/upload-trace']);
-const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/start']);
+const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/files', '/upload-trace']);
+const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/start', '/remote-control']);
 
 export interface CommandInfo {
   category: CommandCategory;
@@ -37,12 +43,21 @@ export interface CommandInfo {
  * Categorize a message as a command or not.
  * Only applies to chat/chat-sdk messages.
  *
- * The extracted `senderId` is compared against `NANOCLAW_ADMIN_USER_IDS`
- * which stores ids in the namespaced form `<channel_type>:<raw>` (see
- * src/db/users.ts). chat-sdk-bridge serializes `author.userId` as a raw
- * platform id with no prefix, so we prefix it here. If the id already
- * contains a `:` we assume it's pre-namespaced (non-chat-sdk adapters
- * that populate `senderId` directly) and leave it alone.
+ * Privilege is NOT checked here — command gating (filtered, admin) is done
+ * by the host router (src/command-gate.ts, against the DB-backed
+ * user_roles table) before messages reach the container; see
+ * isRunnerCommand's own comment below. This function's `admin`/`filtered`
+ * categorization is purely a static command-name lookup, used to decide
+ * container-side dispatch behavior (does the outer loop treat this as
+ * needing special first-input handling) for whatever already survived the
+ * host's gate — not a second privilege check.
+ *
+ * `senderId` is still extracted and returned in the namespaced form
+ * `<channel_type>:<raw>` (see src/db/users.ts) for CommandInfo callers that
+ * want it. chat-sdk-bridge serializes `author.userId` as a raw platform id
+ * with no prefix, so it's prefixed here; an id that already contains a `:`
+ * is assumed pre-namespaced (non-chat-sdk adapters that populate `senderId`
+ * directly) and left alone.
  */
 export function categorizeMessage(msg: MessageInRow): CommandInfo {
   const content = parseContent(msg.content);

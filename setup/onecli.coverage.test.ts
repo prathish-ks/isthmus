@@ -448,8 +448,14 @@ describe('run() — default install mode', () => {
     const { exits } = await runOnecli([]);
     expect(exits).toEqual([]);
     expect(cliState.execCalls).toContain('docker rm -f "onecli-app-1"');
-    // v2 service names are left alone.
-    expect(cliState.execCalls.some((c) => c.includes('onecli-1'))).toBe(false);
+    // v2 service names are left alone — assert the specific commands that
+    // would indicate the bug, rather than a broad `.some(c => c.includes(...))`
+    // scan over the whole run's exec history: a substring scan fails equally
+    // for the real bug and for any unrelated command that happens to share
+    // the substring, which makes a red run here undiagnosable from the
+    // assertion alone.
+    expect(cliState.execCalls).not.toContain('docker rm -f "onecli-1"');
+    expect(cliState.execCalls).not.toContain('docker rm -f "onecli-postgres-1"');
   });
 
   it('tolerates a legacy container removal failure and continues installing', async () => {

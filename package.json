@@ -28,6 +28,8 @@
     "chat": "tsx scripts/chat.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "lint:agent-runner": "cd container/agent-runner && eslint --config eslint.config.js \"src/**/*.ts\"",
+    "lint:agent-runner:fix": "cd container/agent-runner && eslint --config eslint.config.js \"src/**/*.ts\" --fix",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --config vitest.coverage.config.ts",

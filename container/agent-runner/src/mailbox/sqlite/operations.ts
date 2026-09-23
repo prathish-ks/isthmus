@@ -127,80 +127,108 @@ export function sqliteFindCliResponse(requestId: string): MessageInRow | undefin
 
 export function sqliteWriteMessageOut(message: OutboundWrite): number {
   const outbound = getOutboundDb();
-  const inbound = getInboundDb();
-  outbound.exec('BEGIN IMMEDIATE');
+  // Fresh, uncached connection: this cross-checks messages_in's high-water
+  // mark to avoid handing out a seq the host already used, and messages_in
+  // is exactly the continuously-host-written table connection.ts's own doc
+  // comment says needs openInboundDb() — getInboundDb()'s cached singleton
+  // can be pinned to a stale snapshot on virtiofs/NFS mounts, silently
+  // defeating this cross-check.
+  const inbound = openInboundDb();
   try {
-    const maxOut = (
-      outbound.prepare('SELECT COALESCE(MAX(seq), 0) AS value FROM messages_out').get() as {
-        value: number;
-      }
-    ).value;
-    const maxIn = (
-      inbound.prepare('SELECT COALESCE(MAX(seq), 0) AS value FROM messages_in').get() as {
-        value: number;
-      }
-    ).value;
-    const max = Math.max(maxOut, maxIn);
-    const sequence = max % 2 === 0 ? max + 1 : max + 2;
-    const record = createOutboundRecord(message, sequence, new Date().toISOString());
-    outbound
-      .prepare(
-        `INSERT INTO messages_out
-           (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content)
-         VALUES
-           ($id, $seq, $in_reply_to, $timestamp, $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content)`,
-      )
-      .run({
-        $id: record.id,
-        $seq: record.sequence,
-        $timestamp: record.timestamp,
-        $in_reply_to: record.inReplyTo,
-        $deliver_after: record.deliverAfter,
-        $recurrence: record.recurrence,
-        $kind: record.kind,
-        $platform_id: record.platformId,
-        $channel_type: record.channelType,
-        $thread_id: record.threadId,
-        $content: record.content,
-      });
-    outbound.exec('COMMIT');
-    return sequence;
-  } catch (error) {
-    outbound.exec('ROLLBACK');
-    throw error;
+    outbound.exec('BEGIN IMMEDIATE');
+    try {
+      const maxOut = (
+        outbound.prepare('SELECT COALESCE(MAX(seq), 0) AS value FROM messages_out').get() as {
+          value: number;
+        }
+      ).value;
+      const maxIn = (
+        inbound.prepare('SELECT COALESCE(MAX(seq), 0) AS value FROM messages_in').get() as {
+          value: number;
+        }
+      ).value;
+      const max = Math.max(maxOut, maxIn);
+      const sequence = max % 2 === 0 ? max + 1 : max + 2;
+      const record = createOutboundRecord(message, sequence, new Date().toISOString());
+      outbound
+        .prepare(
+          `INSERT INTO messages_out
+             (id, seq, in_reply_to, timestamp, deliver_after, recurrence, kind, platform_id, channel_type, thread_id, content)
+           VALUES
+             ($id, $seq, $in_reply_to, $timestamp, $deliver_after, $recurrence, $kind, $platform_id, $channel_type, $thread_id, $content)`,
+        )
+        .run({
+          $id: record.id,
+          $seq: record.sequence,
+          $timestamp: record.timestamp,
+          $in_reply_to: record.inReplyTo,
+          $deliver_after: record.deliverAfter,
+          $recurrence: record.recurrence,
+          $kind: record.kind,
+          $platform_id: record.platformId,
+          $channel_type: record.channelType,
+          $thread_id: record.threadId,
+          $content: record.content,
+        });
+      outbound.exec('COMMIT');
+      return sequence;
+    } catch (error) {
+      outbound.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    inbound.close();
   }
 }
 
 export function sqliteGetMessageIdBySeq(sequence: number): string | null {
-  const inbound = getInboundDb();
-  const inboundRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(sequence) as
-    | { id: string }
-    | undefined;
-  if (inboundRow) return inboundRow.id;
-  const outboundRow = getOutboundDb().prepare('SELECT id FROM messages_out WHERE seq = ?').get(sequence) as
-    | { id: string }
-    | undefined;
-  if (!outboundRow) return null;
-  const delivered = inbound
-    .prepare('SELECT platform_message_id FROM delivered WHERE message_out_id = ?')
-    .get(outboundRow.id) as { platform_message_id: string | null } | undefined;
-  return delivered?.platform_message_id || outboundRow.id;
+  // Fresh connection: both messages_in and delivered are continuously
+  // written by the host (see openInboundDb()'s doc comment) — the cached
+  // getInboundDb() singleton risks a stale-cache miss on the `delivered`
+  // lookup below, silently returning outboundRow.id (an internal UUID, not
+  // a real platform message id) to a caller (edit_message/add_reaction)
+  // that then acts on the wrong message.
+  const inbound = openInboundDb();
+  try {
+    const inboundRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(sequence) as
+      | { id: string }
+      | undefined;
+    if (inboundRow) return inboundRow.id;
+    const outboundRow = getOutboundDb().prepare('SELECT id FROM messages_out WHERE seq = ?').get(sequence) as
+      | { id: string }
+      | undefined;
+    if (!outboundRow) return null;
+    const delivered = inbound
+      .prepare('SELECT platform_message_id FROM delivered WHERE message_out_id = ?')
+      .get(outboundRow.id) as { platform_message_id: string | null } | undefined;
+    return delivered?.platform_message_id || outboundRow.id;
+  } finally {
+    inbound.close();
+  }
 }
 
 export function sqliteGetRoutingBySeq(
   sequence: number,
 ): { channel_type: string | null; platform_id: string | null; thread_id: string | null } | null {
-  const inbound = getInboundDb()
-    .prepare('SELECT channel_type, platform_id, thread_id FROM messages_in WHERE seq = ?')
-    .get(sequence) as { channel_type: string | null; platform_id: string | null; thread_id: string | null } | undefined;
-  if (inbound) return inbound;
-  return (
-    (getOutboundDb()
-      .prepare('SELECT channel_type, platform_id, thread_id FROM messages_out WHERE seq = ?')
-      .get(sequence) as
-      | { channel_type: string | null; platform_id: string | null; thread_id: string | null }
-      | undefined) ?? null
-  );
+  // Fresh connection: same staleness risk as sqliteGetMessageIdBySeq above
+  // (messages_in is continuously host-written) — this function is called
+  // alongside it by the same edit_message/add_reaction callers.
+  const inbound = openInboundDb();
+  try {
+    const inboundRow = inbound
+      .prepare('SELECT channel_type, platform_id, thread_id FROM messages_in WHERE seq = ?')
+      .get(sequence) as { channel_type: string | null; platform_id: string | null; thread_id: string | null } | undefined;
+    if (inboundRow) return inboundRow;
+    return (
+      (getOutboundDb()
+        .prepare('SELECT channel_type, platform_id, thread_id FROM messages_out WHERE seq = ?')
+        .get(sequence) as
+        | { channel_type: string | null; platform_id: string | null; thread_id: string | null }
+        | undefined) ?? null
+    );
+  } finally {
+    inbound.close();
+  }
 }
 
 export function sqliteGetUndeliveredMessages(): MessageOutRow[] {

@@ -296,8 +296,19 @@ export function wrapSqliteInbound(db: Database.Database, nextSequence = () => ne
 export function wrapSqliteOutbound(
   source: Database.Database | (() => Database.Database),
   writable: () => Database.Database = () => (typeof source === 'function' ? source() : source),
-  nextSequence = () => nextEvenAcross(undefined, writable()),
+  options: {
+    // Host-owned inbound.db handle, when the caller already has one open
+    // (see the `session()` call site below) — reading it to cross-check
+    // messages_in before allocating a direct-write seq costs nothing (same
+    // process, same file, no cross-mount read) and closes a real collision
+    // mode. Optional: callers with no inbound handle on hand (e.g. tests
+    // exercising the outbound wrapper in isolation) fall back to the
+    // outbound-only behavior this function always had.
+    inbound?: Database.Database;
+    nextSequence?: () => number;
+  } = {},
 ): OutboundMailbox {
+  const { inbound, nextSequence = () => nextEvenAcross(inbound, writable()) } = options;
   const readable = () => (typeof source === 'function' ? source() : source);
   return {
     getTerminalProcessingAcks: () =>
@@ -460,15 +471,31 @@ export class SqliteAgentMailbox implements AgentMailbox {
         if (deliveredColumns.length > 0) migrateDeliveredTable(inbound);
         this.migrated.add(inboundPath);
       }
-      // Sequences are allocated per file (inbound writes scan messages_in,
-      // direct outbound writes scan messages_out) — the host must never read
-      // the container-owned outbound.db just to insert an inbound row; the
-      // two-DB split exists to avoid exactly that cross-mount coupling.
+      // Both host-side even-seq allocators (messages_in inserts AND direct
+      // outbound writes — writeDirect, host-generated system replies like a
+      // command-gate deny) now share ONE persisted counter instead of each
+      // independently computing "next even" from its own table's MAX(seq)
+      // (code review finding: two independent per-table allocators could
+      // claim the same even value — one KNOWN GAP direction was closed by an
+      // earlier partial fix; this closes both directions for real). The
+      // counter lives in inbound.db (host-owned — already this same open
+      // `inbound` handle, so reading/writing it costs nothing and never
+      // touches the container-owned outbound.db on the hot insertMessage
+      // path). See makeHostSeqAllocator below for the one-time seed + atomic
+      // claim.
+      const nextHostSeq = makeHostSeqAllocator(inbound, readableOutbound);
       return await action({
-        ...wrapSqliteInbound(inbound),
-        ...wrapSqliteOutbound(readableOutbound, writableOutbound),
+        ...wrapSqliteInbound(inbound, nextHostSeq),
+        ...wrapSqliteOutbound(readableOutbound, writableOutbound, { inbound, nextSequence: nextHostSeq }),
       });
     } finally {
+      // `mailbox` (and the `nextHostSeq`/wrapSqliteInbound/wrapSqliteOutbound
+      // closures inside it) must not be retained and called after `action`
+      // resolves — every mailbox method above closes over `inbound`, and it
+      // is closed right here. No current caller does this (every call site
+      // awaits `action` fully before this method returns), but a future
+      // fire-and-forget caller that stashes the mailbox and calls a method
+      // on it later would hit a closed handle. (Code review finding.)
       inbound.close();
       outbound?.close();
       outboundWriter?.close();
@@ -481,4 +508,50 @@ function nextEvenAcross(inbound?: Database.Database, outbound?: Database.Databas
     (db.prepare(`SELECT COALESCE(MAX(seq), 0) AS value FROM ${table}`).get() as { value: number }).value;
   const max = Math.max(inbound ? maximum(inbound, 'messages_in') : 0, outbound ? maximum(outbound, 'messages_out') : 0);
   return max < 2 ? 2 : max + 2 - (max % 2);
+}
+
+/**
+ * Shared, host-owned "next even seq" counter for a session — the single
+ * source of truth both wrapSqliteInbound's default insertMessage/insertTask
+ * path and wrapSqliteOutbound's writeDirect path claim from, so the two can
+ * never independently allocate the same value (code review finding).
+ *
+ * Persisted as a single row in inbound.db (host-owned; `host_seq_state` in
+ * schema.ts). `CREATE TABLE IF NOT EXISTS` runs here unconditionally — cheap
+ * and idempotent — because `ensureSchema` only fires for brand-new session
+ * files (SqliteAgentMailbox.prepare gates it on `!fs.existsSync`), so an
+ * already-existing session's inbound.db would otherwise never pick up a
+ * schema addition like this one.
+ *
+ * Seeded exactly ONCE per session, the first time this allocator is called
+ * after the table is created, from both tables' historical MAX(seq) — this
+ * is the only time it reads outbound.db, and it's a one-time cold-start cost
+ * per session, not a recurring hot-path read. Every call after that reads
+ * and writes inbound.db only.
+ *
+ * The claim itself (read-or-seed, then increment) is built from plain
+ * synchronous better-sqlite3 calls with no `await` between them, and the
+ * host runs as a single Node process (CLAUDE.md) — so two "concurrent"
+ * callers can never interleave mid-claim; whichever call starts first always
+ * completes its claim before JS yields control back to the event loop. This
+ * also removes the prior MAX(seq)-based writeDirect race (code review
+ * finding): the claim is a single atomic step, not a separate read-then-
+ * later-insert.
+ */
+export function makeHostSeqAllocator(inbound: Database.Database, outbound: () => Database.Database): () => number {
+  inbound.exec(
+    'CREATE TABLE IF NOT EXISTS host_seq_state (id INTEGER PRIMARY KEY CHECK (id = 1), next_even_seq INTEGER NOT NULL)',
+  );
+  return () => {
+    const existing = inbound.prepare('SELECT next_even_seq FROM host_seq_state WHERE id = 1').get() as
+      | { next_even_seq: number }
+      | undefined;
+    if (existing) {
+      inbound.prepare('UPDATE host_seq_state SET next_even_seq = next_even_seq + 2 WHERE id = 1').run();
+      return existing.next_even_seq;
+    }
+    const seed = nextEvenAcross(inbound, outbound());
+    inbound.prepare('INSERT INTO host_seq_state (id, next_even_seq) VALUES (1, ?)').run(seed + 2);
+    return seed;
+  };
 }

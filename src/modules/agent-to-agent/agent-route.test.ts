@@ -576,6 +576,63 @@ describe('routeAgentMessage return-path', () => {
     warnSpy.mockRestore();
   });
 
+  it('file forwarding (code review TOCTOU finding): re-validates before EVERY file, not just the first, in a multi-file forward', async () => {
+    // Same shape as the session-manager.attachments.test.ts mid-batch test:
+    // targetInboxDir used to be resolved once before the loop and reused
+    // unchecked for every subsequent copy — a co-resident process could
+    // swap it for a symlink between two files in the same forward. Spies
+    // on ensureContainedInboxDir to inject the swap as a side effect of its
+    // second call (there's no async yield point inside the synchronous
+    // copy loop to interleave a real race from outside), then delegates to
+    // the real implementation.
+    const inboxSafety = await import('../../inbox-safety.js');
+    const canaryDir = path.join(TEST_DIR, 'canary-forward-midbatch');
+    fs.mkdirSync(canaryDir, { recursive: true });
+
+    const outboxDir = path.join(sessionDir(A, S1.id), 'outbox', 'msg-midbatch');
+    fs.mkdirSync(outboxDir, { recursive: true });
+    fs.writeFileSync(path.join(outboxDir, 'first.txt'), 'first-bytes');
+    fs.writeFileSync(path.join(outboxDir, 'second.txt'), 'attacker-bytes');
+
+    const real = inboxSafety.ensureContainedInboxDir;
+    let calls = 0;
+    const spy = vi.spyOn(inboxSafety, 'ensureContainedInboxDir').mockImplementation((inboxRoot, messageId, ctx) => {
+      calls++;
+      if (calls === 2) {
+        // False positive: messageId here is always the hardcoded literal
+        // (targetMsgId, below) this test defines, never external input —
+        // this path.join deliberately mirrors production's own inbox-dir
+        // construction (ensureContainedInboxDir) so the injected symlink
+        // lands exactly where the real per-file re-check would look, which
+        // is the point of this regression test.
+        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        const msgInboxDir = path.join(inboxRoot, messageId);
+        fs.rmSync(msgInboxDir, { recursive: true, force: true });
+        fs.symlinkSync(canaryDir, msgInboxDir);
+      }
+      return real(inboxRoot, messageId, ctx);
+    });
+
+    try {
+      const targetMsgId = 'midbatch-target';
+      const attachments = forwardAttachedFiles(
+        { agentGroupId: A, sessionId: S1.id, messageId: 'msg-midbatch', filenames: ['first.txt', 'second.txt'] },
+        { agentGroupId: B, sessionId: SB.id, messageId: targetMsgId },
+      );
+
+      // Proves the fix actually ran the per-file path, not a no-op.
+      expect(calls).toBe(2);
+      // The first file forwarded before the swap; the second was refused
+      // once the target inbox dir became a symlink — not silently copied
+      // through it via a stale, unchecked path.
+      expect(attachments).toHaveLength(1);
+      expect(attachments[0]?.filename).toBe('first.txt');
+      expect(fs.readdirSync(canaryDir)).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('file forwarding (#2828 regression): a normal forward still works end-to-end', async () => {
     const outboxDir = path.join(sessionDir(A, S1.id), 'outbox', 'msg-ok-file');
     fs.mkdirSync(outboxDir, { recursive: true });

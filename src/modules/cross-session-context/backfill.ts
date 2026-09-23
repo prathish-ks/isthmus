@@ -120,10 +120,17 @@ export async function backfillNewSession(agentGroup: AgentGroup, session: Sessio
     );
     if (siblings.length === 0) return;
 
-    const rows: BackfillRow[] = [];
-    for (const sibling of siblings) {
-      rows.push(...(await collectSiblingTopLevel(agentGroup, sibling.id, BACKFILL_LIMIT)));
-    }
+    // Code review finding: each sibling's read is fully independent (its own
+    // mailbox session, keyed by a distinct sessionId — see
+    // withExistingMailboxSession's per-key reentrancy guard, which only
+    // rejects a NESTED call for the SAME key) and results are just
+    // concatenated then sorted by timestamp below, so collection order
+    // never matters. This runs on every brand-new per-thread session, so a
+    // sequential await-per-sibling directly added to the latency of a
+    // user's very first message in that thread.
+    const rows = (
+      await Promise.all(siblings.map((s) => collectSiblingTopLevel(agentGroup, s.id, BACKFILL_LIMIT)))
+    ).flat();
     rows.sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
     const newest = rows.slice(-BACKFILL_LIMIT);
     if (newest.length === 0) return;

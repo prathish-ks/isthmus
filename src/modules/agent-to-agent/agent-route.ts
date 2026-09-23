@@ -99,15 +99,15 @@ export function forwardAttachedFiles(
   // pre-place `inbox` (or `inbox/<future-msgId>`) as a symlink pointing
   // anywhere host-writable; ensureContainedInboxDir refuses the symlink before
   // any copy lands outside the sandbox (#2828, CWE-59).
+  //
+  // Re-validated per filename inside the loop below, not just once here —
+  // the target session dir is RW-mounted into its own container, so a
+  // co-resident process could swap the inbox dir for a symlink between one
+  // file's copy and the next; COPYFILE_EXCL only refuses an existing
+  // symlink/file at the final path component, not a symlinked intermediate
+  // directory. ensureContainedInboxDir is idempotent and cheap, so
+  // re-running it per file shrinks the exposure window to a single copy.
   const inboxRoot = path.join(sessionDir(target.agentGroupId, target.sessionId), 'inbox');
-  const targetInboxDir = ensureContainedInboxDir(inboxRoot, target.messageId, {
-    targetGroup: target.agentGroupId,
-    targetSession: target.sessionId,
-    targetMsgId: target.messageId,
-  });
-  if (!targetInboxDir) {
-    return [];
-  }
 
   const attachments: ForwardedAttachment[] = [];
   for (const filename of source.filenames) {
@@ -144,6 +144,14 @@ export function forwardAttachedFiles(
       });
       continue;
     }
+    const targetInboxDir = ensureContainedInboxDir(inboxRoot, target.messageId, {
+      targetGroup: target.agentGroupId,
+      targetSession: target.sessionId,
+      targetMsgId: target.messageId,
+    });
+    // Unsafe target inbox (symlink / escape) — no further file can be
+    // written safely; keep whatever already copied successfully.
+    if (!targetInboxDir) break;
     const dst = path.join(targetInboxDir, filename);
     try {
       // COPYFILE_EXCL: fail with EEXIST rather than follow or overwrite a
