@@ -48,16 +48,31 @@ internally by the SDK, so the test suite's pass is real coverage of the
 actual code paths that changed, not a blind spot the tests happen not to
 exercise.
 
-## What this doesn't close yet
+## What this closed next
 
-This audit was run by hand. Nothing in CI catches the *next* one of these —
-a new advisory published tomorrow against an already-resolved version would
-sit undetected the same way these 38 did, for however long until someone
-runs `bun audit` by hand again. Closing that gap for good (a CI job
-mirroring `pnpm-audit`'s existing pattern, plus Dependabot version
-updates across all four of this repo's dependency ecosystems) is tracked
-as separate, follow-on work — not bundled into this fix, since fixing a
-live high-severity SSRF bug shouldn't wait on CI-pipeline design.
+The gap described above — nothing in CI catching the *next* advisory —
+is now closed, as a separate follow-on change from the fix itself
+(2026-09-23):
+
+- **`bun-audit` CI job** (`.github/workflows/ci.yml`), mirroring
+  `pnpm-audit`'s exact pattern: `container/agent-runner/scripts/check-bun-audit-baseline.ts`
+  diffs the current advisory set against `.github/bun-audit-baseline.txt`
+  and fails only on advisories not already accepted there. Starts
+  `continue-on-error`, not yet in the `ci` gate's required `needs:` list —
+  an independent review of this change (2026-09-23) surfaced that
+  "baseline started empty" only rebuts pnpm-audit's own original reason
+  for starting report-only (accumulated noise to baseline first); it
+  doesn't establish that the job itself is reliable in the real GitHub
+  Actions runner environment, which only local testing had exercised
+  before that review. Promote it into the required gate once a real CI
+  run confirms both the clean-baseline pass and a real induced-failure
+  path behave correctly — the same way `pnpm-audit` itself was promoted
+  once proven.
+- **`.github/dependabot.yml`**, covering all four of this repo's
+  dependency ecosystems (the pnpm host, this Bun tree, `go-host`, and
+  pinned GitHub Action versions) — version-update PRs only, no
+  auto-merge, consistent with this project's stated preference for
+  deliberate, reviewed pins.
 
 ## References
 

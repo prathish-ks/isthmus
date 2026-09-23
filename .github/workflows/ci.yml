@@ -353,7 +353,9 @@ jobs:
 
   # Repository rules require exact `ci`; always run it so matrix, go-host,
   # pnpm-audit, coverage-gate, and performance-gate failures all remain
-  # blocking.
+  # blocking. bun-audit is deliberately NOT in this list yet — see its own
+  # comment for why (continue-on-error until a real CI run proves it out,
+  # then promote here the same way pnpm-audit was).
   ci:
     if: always()
     needs: [test, go-host, pnpm-audit, coverage-gate, performance-gate]
@@ -545,6 +547,41 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: pnpm audit (new findings only — see comment above)
         run: pnpm exec tsx scripts/check-pnpm-audit-baseline.ts
+
+  # bun-audit: pnpm-audit's counterpart for container/agent-runner/ — a
+  # separate, Bun-managed package tree (its own package.json/bun.lock),
+  # not a pnpm-workspace.yaml member, so nothing above ever scanned it.
+  # A first real `bun audit` (2026-09-23) found 38 findings (9 high, 26
+  # moderate, 3 low), all transitive through @modelcontextprotocol/sdk's
+  # own dependency tree — including a high-severity SSRF bug in
+  # ip-address (GHSA-mwp4-54f8-5fhr). All 38 are fixed; see
+  # docs/agent-runner-audit-findings.md for the full disposition and
+  # confirmation this gap is inherited from upstream, not introduced here.
+  #
+  # Starts from a genuinely empty baseline (.github/bun-audit-baseline.txt),
+  # not a pre-existing-noise one like pnpm-audit's 12. That removes the
+  # specific reason pnpm-audit itself started report-only (accumulated,
+  # already-known noise to baseline first) — but report-only-on-first-
+  # introduction is this file's own established default for a different
+  # reason too: proving the job itself is reliable (new script, new CI
+  # wiring, a real GitHub Actions runner rather than just local testing)
+  # before it can block every future PR on an environment-specific issue
+  # unrelated to the change under review. continue-on-error here until a
+  # real CI run confirms both the clean-baseline path and a real induced-
+  # failure path behave correctly — then promote into the `ci` gate's
+  # `needs:` list above, the same way pnpm-audit itself was promoted once
+  # proven (see that job's own comment).
+  bun-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.12
+      - name: bun audit (new findings only — see comment above)
+        working-directory: container/agent-runner
+        run: bun run scripts/check-bun-audit-baseline.ts
 
   # coverage-gate (2026-09-21): this repo's own analog to pnpm-audit's
   # baseline pattern just above — host-side line/statement/branch/function
