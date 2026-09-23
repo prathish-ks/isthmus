@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { GROUPS_DIR } from './config.js';
+import { isPathInside } from './inbox-safety.js';
 
 /**
  * Aligned with the runtime label grammar (`labelValueLegal` in
@@ -33,9 +34,14 @@ export function assertValidGroupFolder(folder: string): void {
   }
 }
 
+// Code review finding: this used to reimplement its own copy of the same
+// containment check that's shared (isPathInside, src/inbox-safety.ts) and
+// already reused by session-manager.ts and agent-route.ts — one of three
+// independent copies of the identical logic. Kept as a thin, throwing
+// wrapper around the shared boolean check rather than changing this file's
+// two call sites' error-handling shape.
 function ensureWithinBase(baseDir: string, resolvedPath: string): void {
-  const rel = path.relative(baseDir, resolvedPath);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  if (!isPathInside(baseDir, resolvedPath)) {
     throw new Error(`Path escapes base directory: ${resolvedPath}`);
   }
 }
