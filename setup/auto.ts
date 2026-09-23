@@ -72,6 +72,7 @@ import { runUninstallFlow } from './uninstall/flow.js';
 import { detectExistingInstall } from './uninstall/scan.js';
 import { detectRegisteredGroups, detectExistingDisplayName, readEnvKey } from './environment.js';
 import { pollHealth } from './onecli.js';
+import { findAnthropicSecret, listSecrets } from './auth.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import type { AgentGroup } from '../src/types.js';
 import { claudeCliAvailable, resolveTimezoneViaClaude } from './lib/tz-from-claude.js';
@@ -1893,14 +1894,23 @@ function ensureLocalBinOnPath(): void {
   process.env.PATH = current ? `${localBin}${path.delimiter}${current}` : localBin;
 }
 
+/**
+ * Code review finding: this used to be a raw substring test
+ * (/anthropic/i) against unparsed `onecli secrets list` stdout — a
+ * differently-typed secret can still contain the literal text "anthropic"
+ * (e.g. the custom-endpoint flow below stores a Bearer secret host-patterned
+ * to api.anthropic.com), producing a false positive that would skip the
+ * auth flow while believing a real Anthropic credential was already
+ * connected. Reuses setup/auth.ts's structured, type-field-based check
+ * instead of re-deriving the same answer less accurately. Any failure to
+ * even ask OneCLI (vault not yet warm, a transient error — onecli itself is
+ * already confirmed installed by this point in the flow) falls back to
+ * "not found" rather than crashing the setup wizard, matching this
+ * function's original resilience.
+ */
 function anthropicSecretExists(): boolean {
   try {
-    const res = spawnSync('onecli', ['secrets', 'list'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    if (res.status !== 0) return false;
-    return /anthropic/i.test(res.stdout ?? '');
+    return findAnthropicSecret(listSecrets()) !== undefined;
   } catch {
     return false;
   }

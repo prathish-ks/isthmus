@@ -69,14 +69,23 @@ function parseArgs(args: string[]): Args {
   return { mode, value, force };
 }
 
-interface OnecliSecret {
+export interface OnecliSecret {
   id: string;
   name: string;
   type: string;
   hostPattern: string | null;
 }
 
-function listSecrets(): OnecliSecret[] {
+/**
+ * Exported for reuse (code review finding): a caller elsewhere had its own
+ * substring test against raw `onecli secrets list` stdout to answer "does
+ * an Anthropic secret exist?" — demonstrably less accurate, since a
+ * differently-typed secret can still contain the literal text "anthropic"
+ * (e.g. a Bearer secret host-patterned to api.anthropic.com for a custom
+ * endpoint). This structured, type-field check is the single source of
+ * truth; reuse it rather than re-deriving the same answer less precisely.
+ */
+export function listSecrets(): OnecliSecret[] {
   const out = execFileSync('onecli', ['secrets', 'list'], {
     encoding: 'utf-8',
     env: childEnv(),
@@ -86,7 +95,7 @@ function listSecrets(): OnecliSecret[] {
   return Array.isArray(parsed.data) ? (parsed.data as OnecliSecret[]) : [];
 }
 
-function findAnthropicSecret(secrets: OnecliSecret[]): OnecliSecret | undefined {
+export function findAnthropicSecret(secrets: OnecliSecret[]): OnecliSecret | undefined {
   return secrets.find((s) => s.type === 'anthropic');
 }
 
