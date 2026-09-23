@@ -107,7 +107,7 @@ jobs:
         working-directory: go-host
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
 
@@ -207,7 +207,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.12
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
       - run: pnpm install --frozen-lockfile
@@ -433,7 +433,7 @@ jobs:
         working-directory: .
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
 
@@ -476,7 +476,7 @@ jobs:
         working-directory: go-host
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
       # golangci-lint-action v6 only knows how to run golangci-lint v1.x —
@@ -502,7 +502,7 @@ jobs:
         working-directory: go-host
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
       - name: install govulncheck
@@ -707,7 +707,7 @@ jobs:
           - { pkg: "./internal/kernel/", name: "FuzzDispatch" }
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
       - name: fuzz ${{ matrix.target.name }} for 20s
@@ -752,7 +752,7 @@ jobs:
         working-directory: go-host
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
       - name: EC-05 live-Docker adversarial tests
@@ -785,7 +785,7 @@ jobs:
         working-directory: go-host
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
       # Diagnostic-only (never fails the job on its own — every command is
@@ -874,7 +874,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
       - run: pnpm install --frozen-lockfile
