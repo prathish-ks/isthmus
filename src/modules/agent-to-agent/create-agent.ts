@@ -21,7 +21,7 @@ import { createAgentGroup, getAgentGroup, getAgentGroupByFolder } from '../../db
 import { getContainerConfig } from '../../db/container-configs.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
-import { groupFolderExistsOnDisk } from '../../group-folder.js';
+import { groupFolderExistsOnDisk, isValidGroupFolder } from '../../group-folder.js';
 import { initGroupFilesystem } from '../../group-init.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
@@ -135,6 +135,25 @@ async function performCreateAgent(
   while ((await getAgentGroupByFolder(folder)) || groupFolderExistsOnDisk(folder)) {
     folder = `${localName}-${suffix}`;
     suffix++;
+  }
+
+  // Same grammar check the other two group-creation paths pair with
+  // normalizeName (src/cli/resources/groups.ts, src/templates/create-agent.ts)
+  // — normalizeName guarantees charset and alphanumeric edges but never caps
+  // length, and the dedup suffix above can itself push an otherwise-valid
+  // folder past the limit or onto a reserved word. Checked on the FINAL
+  // folder (after dedup), not just localName, since either derivation step
+  // can be the one that breaks the grammar. A folder this misses would be
+  // silently committed to the DB and scaffolded on disk, then refused at
+  // every future container spawn by the runtime label grammar
+  // (labelValueLegal in drivers/types.ts) with no easy recovery.
+  if (!isValidGroupFolder(folder)) {
+    await notify(
+      `Cannot create agent "${name}": the derived folder "${folder}" is invalid — group folders must ` +
+        `be at most 63 characters of letters, digits, "-", or "_", starting and ending with a letter or digit.`,
+    );
+    log.error('create_agent invalid folder', { name, folder });
+    return;
   }
 
   const groupPath = path.join(GROUPS_DIR, folder);
