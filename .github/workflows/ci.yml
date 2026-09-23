@@ -505,8 +505,16 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
+      # Pinned, not @latest: golang.org/x/vuln@v1.8.0 (2026-09-08) requires
+      # go >= 1.26.0, but go-host/go.mod pins go 1.25.14, and setup-go's
+      # GOTOOLCHAIN=local default means this install hard-fails instead of
+      # silently fetching a newer toolchain. v1.7.0 is the newest release
+      # that only requires go 1.25.0, so it builds cleanly against the
+      # pinned toolchain. Bump this deliberately alongside any future
+      # go-host Go upgrade — same "pin deliberately, never float" discipline
+      # as the bun-version pin in the bun-audit job below.
       - name: install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       # govulncheck has no -mod flag at all (unlike go build/vet/test) —
       # passing one is a hard "flag provided but not defined" error, exit
       # code 2. Go auto-detects and uses vendor/ by default whenever it's
