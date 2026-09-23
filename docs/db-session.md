@@ -2,7 +2,7 @@
 
 Reference for the two SQLite files each session owns: `inbound.db` (host writes, container reads) and `outbound.db` (container writes, host reads). Start with [db.md](db.md) for the three-DB overview, the single-writer rule, and the cross-mount visibility constraints.
 
-Schemas live in `src/db/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA` constants. Both files are created by `ensureSchema()` in `src/session-manager.ts` when a new session folder is provisioned.
+Schemas live in `src/mailbox/sqlite/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA` constants. Both files are created by `ensureSchema()` (defined in `src/mailbox/sqlite/session-db.ts`, invoked from `SqliteAgentMailbox.prepare()` in `src/mailbox/sqlite/index.ts`) when a new session folder is provisioned — an *existing* session's DB file is never re-run through `ensureSchema()`, so a later addition to either schema constant (e.g. `host_seq_state`, §2.5) needs its own `CREATE TABLE IF NOT EXISTS` at the point it's actually used, not just a new line in the schema constant.
 
 ---
 
@@ -27,7 +27,7 @@ Path helpers in `src/session-manager.ts`: `sessionDir()`, `inboundDbPath()`, `ou
 
 ## 2. Inbound DB (`inbound.db`)
 
-Host-owned, container-read-only. Schema constant: `INBOUND_SCHEMA` in `src/db/schema.ts`.
+Host-owned, container-read-only. Schema constant: `INBOUND_SCHEMA` in `src/mailbox/sqlite/schema.ts`.
 
 ### 2.1 `messages_in`
 
@@ -107,24 +107,37 @@ CREATE TABLE session_routing (
 
 Written by `writeSessionRouting()` on every container wake, derived from `sessions.messaging_group_id` + `sessions.thread_id`.
 
+### 2.5 `host_seq_state`
+
+Single-row (`id=1`) persisted counter backing the host's even-seq allocation (§3) — the source of the *next* even seq the host will hand out, shared by `messages_in` inserts and host-generated direct outbound writes (e.g. a command-gate deny) so the two never independently compute the same value.
+
+```sql
+CREATE TABLE host_seq_state (
+  id            INTEGER PRIMARY KEY CHECK (id = 1),
+  next_even_seq INTEGER NOT NULL
+);
+```
+
+Not created by `ensureSchema()` for sessions provisioned before this table existed (see §1's note above) — `makeHostSeqAllocator()` in `src/mailbox/sqlite/index.ts` runs its own `CREATE TABLE IF NOT EXISTS` the first time a session is opened through `SqliteAgentMailbox.session()`, then seeds the row once from both tables' historical `MAX(seq)` so it never collides with pre-existing data. Every claim after that first seed reads and writes `inbound.db` only — it never re-reads `outbound.db`.
+
 ---
 
 ## 3. Sequence numbering invariant
 
 Every message (in or out) gets a monotonic integer `seq`, unique *within the session* across both tables.
 
-- **Host writes even seq** (2, 4, 6, …) to `messages_in` — `nextEvenSeq()` in `src/mailbox/sqlite/session-db.ts`.
-- **Container writes odd seq** (1, 3, 5, …) to `messages_out` — logic at `container/agent-runner/src/db/messages-out.ts:54` (`max % 2 === 0 ? max + 1 : max + 2`), reading `MAX(seq)` across *both* tables to preserve global ordering.
+- **Host writes even seq** (2, 4, 6, …) — to `messages_in` for inbound inserts, and to `messages_out` for host-generated direct outbound writes (e.g. a command-gate deny). Both draw from the single persisted counter in `host_seq_state` (§2.5) via `makeHostSeqAllocator()` in `src/mailbox/sqlite/index.ts`, wired into both `wrapSqliteInbound` and `wrapSqliteOutbound` by `SqliteAgentMailbox.session()` — the only place both are constructed together. (`wrapSqliteInbound`'s and `wrapSqliteOutbound`'s own *default* `nextSequence` — `nextEvenAcross()`, scoped to that wrapper's own table's `MAX(seq)` — exists only for standalone/test usage outside `session()` and does not share the counter; production traffic always goes through `session()`.)
+- **Container writes odd seq** (1, 3, 5, …) to `messages_out` — `sqliteWriteMessageOut()` in `container/agent-runner/src/mailbox/sqlite/operations.ts`, reading `MAX(seq)` across *both* tables (via a fresh `openInboundDb()` connection — never the cached `getInboundDb()` singleton, since `messages_in` is written continuously by the host and a stale cached snapshot would defeat this cross-check) inside a `BEGIN IMMEDIATE` transaction on `outbound.db` to preserve global ordering.
 
-Why disjoint? `seq` is the agent-facing message ID. When the agent calls `edit_message(seq=5)` or `add_reaction(seq=6)`, `getMessageIdBySeq()` uses the parity to route the lookup: odd → `messages_out`, even → `messages_in`. The parity alone disambiguates without a join. Collisions would break editing.
+Why disjoint? `seq` is the agent-facing message ID. When the agent calls `edit_message(seq=5)` or `add_reaction(seq=6)`, `getMessageIdBySeq()` uses the parity to route the lookup: odd → `messages_out`, even → `messages_in`. The parity alone disambiguates without a join. Collisions would break editing — before `host_seq_state` existed, the host's two even-seq allocation paths (an inbound message and a host-generated direct outbound write) each independently computed "next even" from their own table's `MAX(seq)`, and could land on the same value in different tables; a collision there silently misdirected `edit_message`/`add_reaction` at the wrong message.
 
-If you add a code path that writes to either table, preserve parity — the invariant isn't enforced by a constraint, only by the two helper functions.
+If you add a code path that writes to either table, preserve parity: on the host side, allocate through `makeHostSeqAllocator()`'s shared counter, not a fresh `MAX(seq)` computation — the invariant isn't enforced by a constraint, only by that shared counter and the container's own transaction-scoped allocator.
 
 ---
 
 ## 4. Outbound DB (`outbound.db`)
 
-Container-owned, host reads only. Schema constant: `OUTBOUND_SCHEMA` in `src/db/schema.ts`.
+Container-owned, host reads only. Schema constant: `OUTBOUND_SCHEMA` in `src/mailbox/sqlite/schema.ts`.
 
 ### 4.1 `messages_out`
 
@@ -133,7 +146,7 @@ Everything the agent produces: chat replies, edits, reactions, cards, question s
 ```sql
 CREATE TABLE messages_out (
   id            TEXT PRIMARY KEY,
-  seq           INTEGER UNIQUE,   -- ODD only (container assigns) — see §3
+  seq           INTEGER UNIQUE,   -- ODD (container-assigned replies) or EVEN (host direct writes) — see §3
   in_reply_to   TEXT,
   timestamp     TEXT NOT NULL,
   deliver_after TEXT,
