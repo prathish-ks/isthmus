@@ -157,13 +157,24 @@ describe('writeOutboundDirect', () => {
     expect(rows.map((r) => r.seq)).toEqual([2, 4]);
   });
 
-  it('allocates even sequences per file — inbound writes never read outbound.db', async () => {
-    // Sequences are per-file (matching v1): host inbound seqs scan only
-    // messages_in, direct outbound seqs scan only messages_out. A shared
-    // cross-file space would make every router insert read the
-    // container-owned outbound.db across the mount — the lock coupling the
-    // two-DB split exists to prevent. Parity (host even / runner odd) is the
-    // only cross-file invariant.
+  it('messages_in and direct outbound writes share one host-owned seq counter (code review finding)', async () => {
+    // Inbound inserts (mailbox.insertMessage, the hot path — every message)
+    // and direct outbound writes (writeOutboundDirect — host-generated
+    // system replies like a command-gate deny, no container involvement)
+    // both claim from ONE persisted counter in inbound.db
+    // (makeHostSeqAllocator, src/mailbox/sqlite/index.ts) instead of each
+    // independently deriving "next even" from its own table's MAX(seq).
+    // Pre-fix, this exact sequence (an inbound message, then a direct
+    // outbound write, then another inbound message) could put the same seq
+    // in messages_in AND messages_out simultaneously — breaking the
+    // seq-is-globally-unique assumption sqliteGetMessageIdBySeq-style
+    // lookups depend on. The shared counter closes that for both orderings,
+    // not just the one where messages_in was already ahead.
+    //
+    // The counter is seeded from outbound.db's history exactly once (the
+    // very first claim on a session, ever) and every claim after that reads
+    // and writes inbound.db only — so this still never puts a live read of
+    // the container-owned outbound.db on the hot insertMessage path itself.
     const insert = (id: string) =>
       withMailboxSession(AG, SESS, (mailbox) =>
         mailbox.insertMessage({
@@ -192,8 +203,12 @@ describe('writeOutboundDirect', () => {
     const inbound = new Database(inboundDbPath(AG, SESS), { readonly: true });
     const inboundSeq = inbound.prepare('SELECT seq FROM messages_in ORDER BY seq').all() as Array<{ seq: number }>;
     inbound.close();
-    expect(inboundSeq.map(({ seq }) => seq)).toEqual([2, 4]);
-    expect(readMessagesOut().map(({ seq }) => seq)).toEqual([2]);
+    // in-1 claims 2 (counter seeded at 2 from empty history), out-1 claims
+    // 4 (the counter's next value — no longer messages_in's own max), in-2
+    // claims 6 (continuing the SAME shared counter, so it never reuses what
+    // out-1 just took).
+    expect(inboundSeq.map(({ seq }) => seq)).toEqual([2, 6]);
+    expect(readMessagesOut().map(({ seq }) => seq)).toEqual([4]);
   });
 });
 

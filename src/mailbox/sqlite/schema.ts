@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS session_routing (
   platform_id  TEXT,
   thread_id    TEXT
 );
+
+-- Single-row, host-owned counter shared by messages_in inserts and direct
+-- outbound writes so both allocate from ONE sequence instead of each
+-- independently computing its own next-even value from its own table's
+-- MAX(seq) (code review finding: two independent per-table allocators can
+-- claim the same even seq). See makeHostSeqAllocator in index.ts.
+CREATE TABLE IF NOT EXISTS host_seq_state (
+  id            INTEGER PRIMARY KEY CHECK (id = 1),
+  next_even_seq INTEGER NOT NULL
+);
 `;
 
 /** Runner-owned SQLite mailbox schema. */
