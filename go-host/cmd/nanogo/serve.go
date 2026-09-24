@@ -61,6 +61,30 @@ type serveFlags struct {
 	// Phase 9): a fixed, install-level Docker network every container.wake
 	// attaches to. Empty means no --network flag — see ADR-016.
 	dockerNetwork string
+	// egressLockdownExpected is NANOCLAW_EGRESS_LOCKDOWN read from this
+	// process's own environment, independent of any flag a caller passed.
+	// See buildServeKernel's own check below (ADR-025) for why: relying
+	// solely on the caller to compute -docker-network correctly means any
+	// second spawner that doesn't (scripts/ec06-live-smoke.sh, confirmed
+	// during code review to start `nanogo serve` directly with no network
+	// flag at all) silently reopens the exact bug ADR-024 fixed on the TS
+	// side. Reading the environment directly — not a flag — matters
+	// because env vars are inherited by child processes by default, so
+	// this check still fires even for a spawner that never learned about
+	// -docker-network, as long as NANOCLAW_EGRESS_LOCKDOWN is a real
+	// process/shell environment variable somewhere in the process tree.
+	//
+	// Known gap, not fixed here: src/config.ts's EGRESS_LOCKDOWN also
+	// falls back to a value read only from a .env FILE (src/env.ts's
+	// readEnvFile), which Node never copies into process.env — a lockdown
+	// enabled that way, and nowhere else, is invisible to this check (and
+	// to any other spawner's inherited environment). The correct,
+	// TS-computed -docker-network flag still reaches the kernel fine in
+	// that case; only this specific backstop can't see it. Exporting
+	// NANOCLAW_EGRESS_LOCKDOWN as a real env var (systemd/launchd unit
+	// config, or the shell) — the normal way to configure a long-running
+	// service — avoids the gap entirely.
+	egressLockdownExpected bool
 }
 
 // buildServeKernel assembles the real mount.Policy and Kernel options a
@@ -111,6 +135,24 @@ func buildServeKernel(cfg config.Config, sf serveFlags, warn func(string)) (*ker
 		// rather than a separate mechanism, so both "serve is running with a
 		// narrower guarantee than it could have" cases surface identically.
 		warn("SECURITY: no -allowlist configured — every 'allowlisted-extra' mount (e.g. a Docker-socket or credential-directory bind mount) is unconditionally trusted with no independent check (see ADR-018). Pass -allowlist <path> to enable mount.CheckAllowlistedExtra.")
+	}
+
+	// ADR-025: unlike the -allowlist gap above (warn, keep running with a
+	// narrower guarantee), this one refuses to start — matching
+	// ensureEgressNetwork's own documented contract on the TS side
+	// ("Fail-fast... throw rather than silently spawn an agent with open
+	// egress"). The operator explicitly turned lockdown on; a kernel
+	// process with no network to enforce it isn't a narrower guarantee,
+	// it's the exact silent-open-egress bug ADR-024 fixed, reachable again
+	// through any spawner that doesn't compute -docker-network itself.
+	if sf.egressLockdownExpected && sf.dockerNetwork == "" {
+		return nil, nil, fmt.Errorf(
+			"NANOCLAW_EGRESS_LOCKDOWN=true but no -docker-network was passed — refusing to start with " +
+				"unenforceable egress lockdown rather than silently allowing open egress. This flag is normally " +
+				"computed by kernel-supervisor/index.ts from the same setting; if you're starting nanogo serve " +
+				"another way (a script, a manual run), pass -docker-network explicitly or unset " +
+				"NANOCLAW_EGRESS_LOCKDOWN for this run",
+		)
 	}
 
 	opts := []kernel.Option{}
@@ -178,6 +220,9 @@ func runServeCmd(args []string) {
 		traceCapacity:   *traceCapacity,
 		surfaceRoots:    []string(surfaceRoots),
 		dockerNetwork:   *dockerNetwork,
+		// Read directly from the environment, not a flag — see
+		// serveFlags.egressLockdownExpected's own doc comment for why.
+		egressLockdownExpected: os.Getenv("NANOCLAW_EGRESS_LOCKDOWN") == "true",
 	}, func(msg string) { fmt.Fprintf(os.Stderr, "serve: warning: %s\n", msg) })
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "serve: %v\n", err)
