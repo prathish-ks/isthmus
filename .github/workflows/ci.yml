@@ -367,7 +367,7 @@ jobs:
   ci:
     if: always()
     needs:
-      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check]
+      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -379,6 +379,7 @@ jobs:
           test "${{ needs.performance-gate.result }}" = success
           test "${{ needs.live-egress-lockdown.result }}" = success
           test "${{ needs.wiring-registry-check.result }}" = success
+          test "${{ needs.sync-sibling-branch-script-test.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
@@ -1102,6 +1103,28 @@ jobs:
           else
             echo "Up to date — the pinned digest still matches the live alpine:3.20 tag."
           fi
+
+  # sync-sibling-branch-script-test: a Copilot PR review caught a real bug
+  # in scripts/sync-sibling-branch.sh (count_errors piped `tsc --noEmit`
+  # straight into `wc -l` with no `|| true`, so `set -euo pipefail` turned
+  # tsc's ordinary non-zero exit -- which happens on every real run
+  # against these branches -- into a script-aborting failure; the
+  # warn-and-skip path the script exists to reach could never be
+  # exercised) that only a live run of sync-sibling-branches below, which
+  # only fires on schedule/workflow_dispatch, would ever have surfaced.
+  # This job runs scripts/sync-sibling-branch.test.sh -- a stub-`pnpm`
+  # regression test for exactly that failure mode -- on every PR instead,
+  # so a future edit to the sync script that reintroduces this class of
+  # bug is caught before merge, not on the next scheduled run. Needs
+  # neither Node nor pnpm: the test's stub `pnpm` on PATH fully replaces
+  # the real one, and the only other command the script under test uses is
+  # `git worktree add` against this checkout's own HEAD.
+  sync-sibling-branch-script-test:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/sync-sibling-branch.test.sh
 
   # sync-sibling-branches: keeps this project's own `channels` and
   # `providers` branches (see CLAUDE.md's "Channels and Providers"
