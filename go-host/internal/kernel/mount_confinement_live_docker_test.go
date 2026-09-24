@@ -50,7 +50,18 @@ func TestLive_Wake_NormalMountSet_MatchesRequestExactlyAndConfinesReads(t *testi
 
 	hostDir := t.TempDir()
 	markerPath := filepath.Join(hostDir, "marker.txt")
-	if err := os.WriteFile(markerPath, []byte("confinement-smoke\n"), 0o600); err != nil {
+	// World-readable is deliberate, not an oversight: this fixture's own
+	// job is to be read by a process inside a container running as an
+	// unknown/arbitrary UID (the spec sets no explicit RunAs — Docker's
+	// own image default applies), and restricting it to owner-only would
+	// defeat the test on any runner where that UID doesn't happen to match
+	// the host process's own — confirmed the hard way: 0o600 passed
+	// locally (where the container happened to run as the same UID as the
+	// test process) but failed on the real Linux CI runner with EACCES.
+	// The file is a throwaway fixture in t.TempDir() (removed after the
+	// test) containing no sensitive data, so gosec's general
+	// least-privilege guidance doesn't apply to this specific case.
+	if err := os.WriteFile(markerPath, []byte("confinement-smoke\n"), 0o644); err != nil { // #nosec G306 -- intentionally world-readable; see comment above
 		t.Fatalf("write marker file: %v", err)
 	}
 
