@@ -30,7 +30,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { DATA_DIR, GROUPS_DIR, KERNEL_SOCKET_PATH, MOUNT_ALLOWLIST_PATH } from '../../config.js';
+import { DATA_DIR, EGRESS_LOCKDOWN, GROUPS_DIR, KERNEL_SOCKET_PATH, MOUNT_ALLOWLIST_PATH } from '../../config.js';
+import { EGRESS_NETWORK, ensureEgressNetwork } from '../../egress-lockdown.js';
 import { onHostShutdown, onHostStart } from '../../host-lifecycle.js';
 import { ensureRuntimeSocketDir } from '../../install-slug.js';
 import { log } from '../../log.js';
@@ -78,6 +79,11 @@ let shuttingDown = false;
 let consecutiveFailures = 0;
 let startedAt = 0;
 let restartTimer: NodeJS.Timeout | null = null;
+
+/** Test-only: proves a failure was actually counted, without depending on log-mock timing. */
+export function getConsecutiveFailuresForTests(): number {
+  return consecutiveFailures;
+}
 
 /**
  * Locate the `nanogo` binary. Checked in order: an explicit override
@@ -136,7 +142,75 @@ function ensureServeConfig(): string {
   return SERVE_CONFIG_PATH;
 }
 
-function buildServeArgs(): string[] {
+/**
+ * The kernel's `-docker-network` flag is process-wide (EC-02/ADR-016: network
+ * topology is kernel STARTUP configuration, not a per-request field — the
+ * kernel never accepts a caller-supplied network name). That's fine for
+ * egress lockdown specifically because `NANOCLAW_EGRESS_LOCKDOWN` is itself
+ * install-wide, read once from the host's own env (src/config.ts) — there is
+ * no per-session variation to lose by pinning it at kernel startup.
+ *
+ * Before EC-02 this decision was made per-spawn in `drivers/index.ts`'s
+ * `dockerNetworkArgs`, which called `ensureEgressNetwork()` on every wake.
+ * Once wake moved behind the kernel, that TS-side call site stopped
+ * participating in container creation at all (see docker-driver.ts's own
+ * comment on `networkArgsFor`) — so a host with lockdown on would still
+ * create/maintain the isolated network (host-sweep.ts's periodic
+ * `ensureEgressNetwork()` call keeps doing that), but no container was ever
+ * actually attached to it, and none of `ensureEgressNetwork`'s own fail-fast
+ * checks (`EgressLockdownError` when the gateway can't be reached) ever ran
+ * for a real spawn. The setting looked active and silently wasn't.
+ *
+ * This restores the fail-fast property at the one place that still runs
+ * before every kernel start: establish the network here (throws if lockdown
+ * is on but can't be established, matching ensureEgressNetwork's own
+ * documented contract), and pin the kernel to it for the process's lifetime.
+ */
+/**
+ * Injectable so tests can exercise every EGRESS_LOCKDOWN/conflict/throw
+ * branch by calling dockerNetworkArgs/buildServeArgs/spawnKernel directly
+ * with different deps, instead of re-mocking config.js/egress-lockdown.js
+ * (both read at this module's own top level) via vi.doMock + dynamic
+ * import for every case. That module-mock approach was tried first and
+ * proved genuinely flaky under vitest with this many sequential per-test
+ * overrides of the same two specifiers in one file — real, reproducible,
+ * not a one-off (see index.test.ts's own note on this describe block).
+ * Defaults are the real bindings, so production callers (spawnKernel(path)
+ * with no second argument) are unaffected.
+ */
+export interface DockerNetworkDeps {
+  egressLockdown: boolean;
+  egressNetwork: string;
+  ensureEgressNetwork: () => boolean;
+}
+
+export function defaultDockerNetworkDeps(): DockerNetworkDeps {
+  return { egressLockdown: EGRESS_LOCKDOWN, egressNetwork: EGRESS_NETWORK, ensureEgressNetwork };
+}
+
+export function dockerNetworkArgs(deps: DockerNetworkDeps = defaultDockerNetworkDeps()): string[] {
+  if (deps.egressLockdown) {
+    if (
+      process.env.NANOCLAW_KERNEL_DOCKER_NETWORK &&
+      process.env.NANOCLAW_KERNEL_DOCKER_NETWORK !== deps.egressNetwork
+    ) {
+      throw new Error(
+        `NANOCLAW_KERNEL_DOCKER_NETWORK is set to "${process.env.NANOCLAW_KERNEL_DOCKER_NETWORK}" while ` +
+          `NANOCLAW_EGRESS_LOCKDOWN=true requires the kernel to use "${deps.egressNetwork}". Refusing to start ` +
+          `with a conflicting network rather than silently picking one — unset NANOCLAW_KERNEL_DOCKER_NETWORK ` +
+          `or set it to the same value.`,
+      );
+    }
+    deps.ensureEgressNetwork(); // fail-fast: throws EgressLockdownError if it can't be established
+    return ['-docker-network', deps.egressNetwork];
+  }
+  if (process.env.NANOCLAW_KERNEL_DOCKER_NETWORK) {
+    return ['-docker-network', process.env.NANOCLAW_KERNEL_DOCKER_NETWORK];
+  }
+  return [];
+}
+
+export function buildServeArgs(dockerNetworkDeps?: DockerNetworkDeps): string[] {
   const args = [
     'serve',
     '-config',
@@ -158,9 +232,7 @@ function buildServeArgs(): string[] {
   if (process.env.NANOCLAW_KERNEL_RESOLVE_SYMLINKS === '1') {
     args.push('-resolve-symlinks');
   }
-  if (process.env.NANOCLAW_KERNEL_DOCKER_NETWORK) {
-    args.push('-docker-network', process.env.NANOCLAW_KERNEL_DOCKER_NETWORK);
-  }
+  args.push(...dockerNetworkArgs(dockerNetworkDeps));
   // On by default: `nanogo trace <id>` (P7-03) is otherwise unusable
   // out of the box, and OBJ-06 (diagnostics) is a named project goal.
   if (process.env.NANOCLAW_KERNEL_DISABLE_TRACE !== '1') {
@@ -220,8 +292,38 @@ function scheduleRestart(nanogoPath: string): void {
  * a *different*, restarted process created the socket. Found and fixed via
  * this module's own sandbox self-test before delivery.
  */
-async function spawnKernel(nanogoPath: string): Promise<boolean> {
-  const args = buildServeArgs();
+export async function spawnKernel(nanogoPath: string, dockerNetworkDeps?: DockerNetworkDeps): Promise<boolean> {
+  let args: string[];
+  try {
+    args = buildServeArgs(dockerNetworkDeps);
+  } catch (err) {
+    // Same contract as the missing-binary/socket-path-too-long checks above:
+    // log loudly and report failure rather than throw, so a misconfiguration
+    // here degrades to "container wake/kill will fail" instead of aborting
+    // the whole host's startup. Consistent with dockerNetworkArgs's own
+    // fail-fast-not-fail-silent goal — the *session* spawn already fails
+    // (every wake goes through this same kernel), so failing once, loudly,
+    // here is strictly better than the old per-session failure this
+    // replaces, not a regression from it.
+    //
+    // Critically, this must feed the SAME retry/backoff state machine a real
+    // process crash does (consecutiveFailures + scheduleRestart), not bypass
+    // it. Since spawn() below is never reached on this path, proc.on('exit',
+    // ...) — the only other place that increments consecutiveFailures and
+    // calls scheduleRestart — never fires either. Without this, a single
+    // transient failure here (e.g. the gateway container not up yet at boot)
+    // would permanently end kernel supervision with no retry and no "giving
+    // up" log line, since that message only exists inside scheduleRestart's
+    // own MAX_CONSECUTIVE_FAILURES check. Found by code review; regression-
+    // tested below ("re-arms the restart loop").
+    consecutiveFailures += 1;
+    log.error('Failed to build nanogo serve arguments — container wake/kill will fail until this is fixed', {
+      error: err instanceof Error ? err.message : String(err),
+      consecutiveFailures,
+    });
+    scheduleRestart(nanogoPath);
+    return false;
+  }
   log.info('Starting nanogo serve', { bin: nanogoPath, socket: KERNEL_SOCKET_PATH });
 
   // KERNEL_SOCKET_PATH's directory is computed lazily/purely (see
