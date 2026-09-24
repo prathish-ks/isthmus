@@ -148,19 +148,22 @@ table below (open cases, not yet fixed).
 | `buildAgentGroupImage` / Go `container.build_image` | **Spans the seam** (closed 2026-09-24) | `src/modules/self-mod/apply.test.ts` + `apply-install-packages.smoke.test.ts` (TS side, real business logic + real kernel socket) and `go-host/internal/kernel/build_image_live_docker_test.go` (Go side, live-verified: a real `docker build` produces a real tagged image) |
 | CLI-derived `restart`/`--rebuild` guard path | **Spans the seam** (closed 2026-09-24) | `src/cli/resources/groups-restart-cli-kernel-smoke.test.ts` — proves, over a real kernel socket, that `container.build_image` carries no guard (ADR-016's accepted gap) while `container.kill` carries the `cliRestart` `GuardContext` (ADR-015) |
 | Mount allowlist check (`validateAdditionalMounts`, operator-facing) | **Spans the seam** (closed 2026-09-24) | `src/mount-composition-additional-mounts.test.ts` — a malicious `additionalMounts` entry pushed through the real `buildMounts` composition is dropped; an allowlisted one survives into a validated `SessionSpec` |
-| Agent-to-agent messaging (`a2a.send`, `agents.create`) | **Seam gap — deliberately descoped, 2026-09-24** | `create-agent.test.ts`, `agent-route.test.ts` both mock `wakeContainer`. Lower risk than the closed items above: `wakeContainer` itself already has one real proof via the router path (`cli-channel-kernel-smoke.test.ts`), and these files' own heavy mocking of DB/filesystem collaborators (not just `container-runner.js`) made a safe seam-real retrofit a larger, riskier change than the time available warranted. Not in `docs/wiring-registry.json` — a genuine open item, not silently dropped. |
-| Scheduled/due-message sweep → wake | **Seam gap — deliberately descoped, 2026-09-24** | `host-sweep.coverage.test.ts`, `host-sweep-grace.test.ts` mock `container-runner.ts`. Same reasoning and same caveat as the a2a row above. |
+| Agent-to-agent messaging (`a2a.send`, `agents.create`) | **Spans the seam** (closed 2026-09-24) | `src/modules/agent-to-agent/create-agent-kernel-smoke.test.ts` (a successful `create_agent` wakes the real source session over a real kernel socket) and `agent-route-kernel-smoke.test.ts` (a self-send `a2a.send` route resolves the target session and wakes it for real). `create-agent.test.ts`/`agent-route.test.ts` keep their existing mocking — these are new, additive files, not rewrites of the authorization tests. |
+| Scheduled/due-message sweep → wake | **Spans the seam** (closed 2026-09-24) | `src/host-sweep-kernel-smoke.test.ts` — a real sweep tick against a real on-disk mailbox with a genuinely due message wakes the session over a real kernel socket. `host-sweep.coverage.test.ts`/`host-sweep-grace.test.ts` keep their existing mocking (they test the sweep's decision logic — due-message detection, stuck-claim SLA, grace periods — which this new file doesn't repeat). |
 
-Eight of the ten rows above now **span the seam** — five pre-existing
-(channel/kernel wake, OneCLI approvals, mount structural validation, egress
-lockdown, Go `wake`/`kill`) plus three closed 2026-09-24
-(`buildAgentGroupImage`, the CLI restart path, the mount allowlist). All
-eight are tracked in `docs/wiring-registry.json`, checked on every PR by the
-required `wiring-registry-check` CI job
-(`go-host/docs/ADR-028-wiring-boundary-registry.md`). The two remaining gaps
-(a2a messaging, the sweep) are recorded as open, not silently dropped —
-lower priority because `wakeContainer`'s own composition already has one
-real proof, but still real gaps worth closing.
+All ten rows above now **span the seam** — five pre-existing (channel/kernel
+wake, OneCLI approvals, mount structural validation, egress lockdown, Go
+`wake`/`kill`) plus five closed 2026-09-24 (`buildAgentGroupImage`, the CLI
+restart path, the mount allowlist, a2a messaging, the scheduled sweep). The
+first three of the five 2026-09-24 closures are tracked in
+`docs/wiring-registry.json`, checked on every PR by the required
+`wiring-registry-check` CI job (`go-host/docs/ADR-028-wiring-boundary-registry.md`).
+The a2a and sweep closures deliberately are NOT separate registry entries:
+they're new call sites of `wakeContainer`, which the registry already tracks
+via its one canonical entry (`src/cli-channel-kernel-smoke.test.ts`) — the
+registry's schema is per-function, not per-call-site, and adding a second
+entry for the same function would need a schema change this narrow-scope
+mechanism (LAW-05) doesn't yet warrant. Their evidence lives here instead.
 
 ## Boundary verification (runtime isolation, not just wiring)
 
