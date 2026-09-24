@@ -53,33 +53,15 @@ STUB
   echo "PASS test_count_errors_survives_nonzero_tsc"
 }
 
-# --- Test 2 -----------------------------------------------------------
-# End-to-end, against real git repos -- no stubbed git, only a stubbed
-# `pnpm`. Exercises main() itself, not just count_errors() in isolation,
-# specifically to settle a second Copilot review comment claiming the
-# `trap cleanup_tmp_root RETURN` in main() could fire between the two
-# count_errors() calls (once when the first, nested count_errors()
-# returns), deleting $tmp_root out from under the second call's
-# `git worktree add`. That claim doesn't hold: bash does not inherit
-# RETURN/DEBUG traps into called functions unless the function carries
-# the trace attribute or `set -o functrace` is on (neither is true here),
-# so a trap set in main() fires only when main() itself returns --
-# verified by hand against bash 3.2 (this machine's /bin/bash) with a
-# minimal repro before writing this test. But reasoning about trap
-# semantics in the abstract is exactly the kind of claim this session has
-# repeatedly found worth just running instead of trusting either way, so
-# this test does the real thing: two upstream commits, a real
-# `git fetch`/`git worktree add`/`git push` round trip through
-# SYNC_SIBLING_UPSTREAM_URL and a real `origin` remote, and asserts both
-# count_errors() calls actually completed (the log line reports both
-# counts) and the real push landed.
-test_main_end_to_end_real_git() {
-  local work upstream_repo origin_repo checkout_repo stub_bin
-  work="$(mktemp -d)"
-  upstream_repo="$work/upstream"
-  origin_repo="$work/origin.git"
-  checkout_repo="$work/checkout"
-  stub_bin="$(mktemp -d)"
+# --- Fixture shared by tests 2 and 3 -----------------------------------
+# A real local "upstream" repo, a real bare "origin" repo one commit
+# behind it, and a real clone of origin with `origin` configured as its
+# remote -- so check_branch()/push_branch() exercise real git fetch/push,
+# not stubs. Only `pnpm` is stubbed (no real install/typecheck needed to
+# prove these code paths).
+make_fixture() {
+  local work="$1"
+  local upstream_repo="$work/upstream" origin_repo="$work/origin.git" checkout_repo="$work/checkout"
 
   git init --quiet "$upstream_repo"
   git -C "$upstream_repo" config user.email test@example.com
@@ -92,15 +74,21 @@ test_main_end_to_end_real_git() {
   git clone --quiet --bare "$upstream_repo" "$origin_repo"
 
   # Advance upstream by one commit after cloning origin from it, so
-  # origin is genuinely behind -- the fast-forward main() should perform.
+  # origin is genuinely behind -- the fast-forward these functions should
+  # detect and act on.
   echo "v2" >> "$upstream_repo/f.txt"
   git -C "$upstream_repo" commit --quiet -a -m v2
 
   git clone --quiet "$origin_repo" "$checkout_repo"
+}
 
-  # A stable (not growing) typecheck baseline on both sides, so main()
-  # takes the push path rather than the skip-on-regression path -- this
-  # test is about the trap/worktree-sharing claim, not the health check.
+make_stub_pnpm() {
+  local stub_bin="$1"
+  # A stable (not growing) typecheck baseline on both sides, so
+  # check_branch() reports should_push=true rather than skipping on a
+  # (nonexistent) regression -- these tests are about the job-split and
+  # trap/worktree-sharing behavior, not the health-check math (that's
+  # test_count_errors_survives_nonzero_tsc's job, above).
   cat > "$stub_bin/pnpm" << 'STUB'
 #!/usr/bin/env bash
 if [ "$1" = "install" ]; then exit 0; fi
@@ -112,12 +100,39 @@ echo "unexpected stub pnpm invocation: $*" >&2
 exit 1
 STUB
   chmod +x "$stub_bin/pnpm"
+}
 
+# --- Test 2 -----------------------------------------------------------
+# check_branch() end-to-end against real git repos. Exercises the same
+# code a second Copilot review's RETURN-trap claim was about (that
+# `trap cleanup_tmp_root RETURN` could fire between the two count_errors()
+# calls, deleting $tmp_root before the second call's `git worktree add`
+# runs) -- that claim doesn't hold, verified separately by hand (bash
+# does not inherit RETURN/DEBUG traps into called functions without
+# `set -o functrace`, and even forcing that on this script directly and
+# rerunning this suite still passed, because `git worktree add`
+# auto-creates a missing parent directory regardless). This test is the
+# stronger, structural version of that proof: it doesn't reason about
+# trap semantics at all, it just asserts check_branch() actually reaches
+# should_push=true with the right target_sha, which requires both
+# count_errors() calls to have completed.
+#
+# Also verifies check_branch() never pushes anything itself (the whole
+# point of the job split a third Copilot review asked for) -- origin's
+# ref must be untouched after this call.
+test_check_branch_end_to_end_real_git() {
+  local work stub_bin
+  work="$(mktemp -d)"
+  stub_bin="$(mktemp -d)"
+  make_fixture "$work"
+  make_stub_pnpm "$stub_bin"
+
+  local origin_repo="$work/origin.git" checkout_repo="$work/checkout" upstream_repo="$work/upstream"
   local before_origin_sha upstream_tip output rc=0
   before_origin_sha="$(git -C "$origin_repo" rev-parse channels)"
   upstream_tip="$(git -C "$upstream_repo" rev-parse channels)"
 
-  output="$(cd "$checkout_repo" && PATH="$stub_bin:$PATH" SYNC_SIBLING_UPSTREAM_URL="$upstream_repo" bash "$script_path" channels 2>&1)" || rc=$?
+  output="$(cd "$checkout_repo" && PATH="$stub_bin:$PATH" SYNC_SIBLING_UPSTREAM_URL="$upstream_repo" bash "$script_path" check channels 2>&1)" || rc=$?
 
   local after_origin_sha
   after_origin_sha="$(git -C "$origin_repo" rev-parse channels)"
@@ -125,31 +140,99 @@ STUB
   rm -rf "$work" "$stub_bin"
 
   if [ "$rc" -ne 0 ]; then
-    echo "FAIL test_main_end_to_end_real_git: main() exited $rc on a clean fast-forward with a stable typecheck baseline. Output:"
+    echo "FAIL test_check_branch_end_to_end_real_git: exited $rc. Output:"
     echo "$output"
     return 1
   fi
-  if [ "$before_origin_sha" = "$after_origin_sha" ]; then
-    echo "FAIL test_main_end_to_end_real_git: origin's channels branch never moved -- main() didn't push. Output:"
-    echo "$output"
-    return 1
-  fi
-  if [ "$after_origin_sha" != "$upstream_tip" ]; then
-    echo "FAIL test_main_end_to_end_real_git: origin's channels moved to $after_origin_sha, expected upstream's tip $upstream_tip. Output:"
+  if [ "$before_origin_sha" != "$after_origin_sha" ]; then
+    echo "FAIL test_check_branch_end_to_end_real_git: origin's channels branch moved -- check_branch() must never push. Output:"
     echo "$output"
     return 1
   fi
   if ! printf '%s\n' "$output" | grep -q "before=1 after=1"; then
-    echo "FAIL test_main_end_to_end_real_git: expected both count_errors() calls to report the stable baseline (before=1 after=1) -- if \$tmp_root had been removed between them (the claimed bug), the second git worktree add would have failed with an error instead. Output:"
+    echo "FAIL test_check_branch_end_to_end_real_git: expected both count_errors() calls to report the stable baseline (before=1 after=1) -- if \$tmp_root had been removed between them, the second git worktree add would have failed with an error instead. Output:"
     echo "$output"
     return 1
   fi
+  if ! printf '%s\n' "$output" | grep -q "^should_push=true$"; then
+    echo "FAIL test_check_branch_end_to_end_real_git: expected should_push=true. Output:"
+    echo "$output"
+    return 1
+  fi
+  if ! printf '%s\n' "$output" | grep -q "^target_sha=${upstream_tip}$"; then
+    echo "FAIL test_check_branch_end_to_end_real_git: expected target_sha=${upstream_tip}. Output:"
+    echo "$output"
+    return 1
+  fi
+  echo "PASS test_check_branch_end_to_end_real_git"
+}
 
-  echo "PASS test_main_end_to_end_real_git"
+# --- Test 3 -----------------------------------------------------------
+# push_branch() end-to-end: confirms it actually pushes when the expected
+# SHA matches, and -- the fail-closed behavior the job split depends on
+# for correctness, not just for security -- refuses to push (with a
+# warning, not an error) when the expected SHA doesn't match upstream's
+# current tip, simulating upstream having moved between a check job and a
+# push job. Runs no `pnpm`/`tsc` at all: push_branch() only ever calls
+# git, which is the entire point of splitting it into its own job that
+# never executes fetched code.
+test_push_branch_end_to_end_real_git() {
+  local work
+  work="$(mktemp -d)"
+  make_fixture "$work"
+  local origin_repo="$work/origin.git" checkout_repo="$work/checkout" upstream_repo="$work/upstream"
+  local upstream_tip
+  upstream_tip="$(git -C "$upstream_repo" rev-parse channels)"
+
+  # 3a: correct expected SHA -> pushes.
+  local output rc=0
+  output="$(cd "$checkout_repo" && SYNC_SIBLING_UPSTREAM_URL="$upstream_repo" bash "$script_path" push channels "$upstream_tip" 2>&1)" || rc=$?
+  local origin_after_good_push
+  origin_after_good_push="$(git -C "$origin_repo" rev-parse channels)"
+
+  if [ "$rc" -ne 0 ] || [ "$origin_after_good_push" != "$upstream_tip" ]; then
+    echo "FAIL test_push_branch_end_to_end_real_git: push with the correct expected SHA did not land (rc=$rc, origin now at $origin_after_good_push, expected $upstream_tip). Output:"
+    echo "$output"
+    rm -rf "$work"
+    return 1
+  fi
+
+  # 3b: stale expected SHA (simulating upstream having moved since a
+  # separate check job ran) -> must refuse to push, not error out.
+  echo "v3" >> "$upstream_repo/f.txt"
+  git -C "$upstream_repo" commit --quiet -a -m v3
+  local new_upstream_tip
+  new_upstream_tip="$(git -C "$upstream_repo" rev-parse channels)"
+
+  local output2 rc2=0
+  output2="$(cd "$checkout_repo" && SYNC_SIBLING_UPSTREAM_URL="$upstream_repo" bash "$script_path" push channels "$upstream_tip" 2>&1)" || rc2=$?
+  local origin_after_stale_push
+  origin_after_stale_push="$(git -C "$origin_repo" rev-parse channels)"
+
+  rm -rf "$work"
+
+  if [ "$rc2" -ne 0 ]; then
+    echo "FAIL test_push_branch_end_to_end_real_git: a stale expected-sha push should exit 0 (skip with a warning, not error). Output:"
+    echo "$output2"
+    return 1
+  fi
+  if [ "$origin_after_stale_push" != "$upstream_tip" ]; then
+    echo "FAIL test_push_branch_end_to_end_real_git: origin moved past the last verified SHA on a stale push attempt -- expected it to stay at $upstream_tip (the last thing actually checked), got $origin_after_stale_push. Output:"
+    echo "$output2"
+    return 1
+  fi
+  if ! printf '%s\n' "$output2" | grep -q "::warning"; then
+    echo "FAIL test_push_branch_end_to_end_real_git: expected a ::warning:: annotation when refusing a stale push. Output:"
+    echo "$output2"
+    return 1
+  fi
+
+  echo "PASS test_push_branch_end_to_end_real_git"
 }
 
 test_count_errors_survives_nonzero_tsc || failures=$((failures + 1))
-test_main_end_to_end_real_git || failures=$((failures + 1))
+test_check_branch_end_to_end_real_git || failures=$((failures + 1))
+test_push_branch_end_to_end_real_git || failures=$((failures + 1))
 
 if [ "$failures" -ne 0 ]; then
   echo "FAILED: $failures test(s) failed"

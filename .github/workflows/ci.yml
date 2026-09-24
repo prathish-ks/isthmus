@@ -1126,8 +1126,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: bash scripts/sync-sibling-branch.test.sh
 
-  # sync-sibling-branches: keeps this project's own `channels` and
-  # `providers` branches (see CLAUDE.md's "Channels and Providers"
+  # sync-sibling-branches-{check,push}: keeps this project's own `channels`
+  # and `providers` branches (see CLAUDE.md's "Channels and Providers"
   # section) fast-forwarded to nanocoai/nanoclaw's same-named branches.
   # These two branches carry no Isthmus-specific commits -- /add-<channel>
   # and /add-opencode/add-codex skills only ever copy individual files out
@@ -1144,32 +1144,70 @@ jobs:
   # report-only, continue-on-error: true -- a skipped sync is a prompt for
   # a human, not a failure of this project.
   #
-  # timeout-minutes: 30 -- same live-host-docker precedent above (bound a
-  # report-only job's worst case explicitly rather than rely on the
-  # 360-minute platform default; continue-on-error only keeps a failure
-  # here from blocking the `ci` gate, it does nothing about a runner
-  # hanging indefinitely). This job does up to two `pnpm install`s and two
-  # `tsc --noEmit` runs per branch (before/after the pull), times two
-  # branches -- a stalled package-registry request or a hung compiler
-  # process could otherwise pin a runner well past any plausible real
-  # duration for this work.
-  sync-sibling-branches:
+  # Split into a read-only "check" job and a write-only "push" job -- not
+  # a stylistic choice, a security boundary a Copilot PR review correctly
+  # called a merge blocker on the original single-job design: that design
+  # ran `pnpm install`/`pnpm exec tsc` (to run the typecheck health check)
+  # against upstream's fetched tree in the SAME job that held a
+  # `contents: write` token for the eventual push. `pnpm install` can
+  # execute arbitrary lifecycle scripts from fetched package metadata,
+  # from either branch or any transitive dependency of theirs; a
+  # compromise there could have pushed unauthorized refs or exfiltrated
+  # the token, regardless of how much this project trusts nanocoai/
+  # nanoclaw's own maintainers specifically -- their dependency tree is a
+  # much larger, less-vetted trust boundary than the maintainers
+  # themselves. check runs under `permissions: contents: read` with
+  # checkout credentials not persisted at all (nothing worth stealing is
+  # available to whatever executes in the fetched worktrees) and never
+  # pushes; push runs under `contents: write` but never installs or
+  # executes anything it fetched -- only `git fetch`/`git push` against
+  # ref names and SHAs, and it independently re-verifies (fails closed,
+  # ::warning:: not error) that upstream's tip still matches exactly what
+  # check verified before pushing, rather than trusting a SHA carried
+  # across the job boundary. See scripts/sync-sibling-branch.sh's own
+  # header for the full check/push contract.
+  sync-sibling-branches-check:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      channels_should_push: ${{ steps.channels.outputs.should_push }}
+      channels_target_sha: ${{ steps.channels.outputs.target_sha }}
+      providers_should_push: ${{ steps.providers.outputs.should_push }}
+      providers_target_sha: ${{ steps.providers.outputs.target_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - name: Sync channels
-        run: bash scripts/sync-sibling-branch.sh channels
-      - name: Sync providers
-        run: bash scripts/sync-sibling-branch.sh providers
+      - name: Check channels
+        id: channels
+        run: bash scripts/sync-sibling-branch.sh check channels
+      - name: Check providers
+        id: providers
+        run: bash scripts/sync-sibling-branch.sh check providers
+
+  sync-sibling-branches-push:
+    needs: sync-sibling-branches-check
+    if: needs.sync-sibling-branches-check.outputs.channels_should_push == 'true' || needs.sync-sibling-branches-check.outputs.providers_should_push == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push channels
+        if: needs.sync-sibling-branches-check.outputs.channels_should_push == 'true'
+        run: bash scripts/sync-sibling-branch.sh push channels "${{ needs.sync-sibling-branches-check.outputs.channels_target_sha }}"
+      - name: Push providers
+        if: needs.sync-sibling-branches-check.outputs.providers_should_push == 'true'
+        run: bash scripts/sync-sibling-branch.sh push providers "${{ needs.sync-sibling-branches-check.outputs.providers_target_sha }}"
