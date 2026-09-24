@@ -39,7 +39,6 @@
  *     for the driver's docker-CLI leg.
  */
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -74,8 +73,8 @@ import type {
 } from '../../drivers/types.js';
 import { FakeCli } from '../../drivers/fake-cli.js';
 import { mountPolicy, resetSessionDriver } from '../../drivers/index.js';
+import { RecordingKernel } from '../../kernel/fake-server.js';
 import { KERNEL_PROTOCOL_VERSION } from '../../kernel/protocol.js';
-import type { CapabilityRequestPayload, KernelEnvelope } from '../../kernel/protocol.js';
 import type { PendingApproval, Session } from '../../types.js';
 import { applyInstallPackages } from './apply.js';
 
@@ -109,44 +108,6 @@ const AGENT_GROUP_ID = 'ag-install-smoke';
 const GROUP_FOLDER = 'install-smoke';
 const session = { id: 'session-smoke', agent_group_id: AGENT_GROUP_ID } as Session;
 
-/** Same shape as cli-channel-kernel-smoke.test.ts's RecordingKernel, scoped to build_image. */
-class RecordingKernel {
-  readonly received: Array<KernelEnvelope<CapabilityRequestPayload>> = [];
-  readonly #server: net.Server;
-
-  constructor(readonly socket: string) {
-    this.#server = net.createServer((conn) => {
-      let buffer = '';
-      conn.on('data', (chunk) => {
-        buffer += chunk.toString('utf8');
-        const idx = buffer.indexOf('\n');
-        if (idx < 0) return;
-        const envelope = JSON.parse(buffer.slice(0, idx)) as KernelEnvelope<CapabilityRequestPayload>;
-        this.received.push(envelope);
-        conn.write(
-          JSON.stringify({
-            version: KERNEL_PROTOCOL_VERSION,
-            requestId: envelope.requestId,
-            ok: true,
-            payload: { allowed: true, imageId: 'sha256:smoke-fake-image-id' },
-          }) + '\n',
-        );
-        conn.end();
-      });
-    });
-  }
-
-  listen(): Promise<void> {
-    return new Promise((resolve) => this.#server.listen(this.socket, resolve));
-  }
-  close(): Promise<void> {
-    return new Promise((resolve) => this.#server.close(() => resolve()));
-  }
-  buildImageRequests(): Array<KernelEnvelope<CapabilityRequestPayload>> {
-    return this.received.filter((e) => e.payload.capability === 'container.build_image');
-  }
-}
-
 let kernel: RecordingKernel;
 
 beforeEach(async () => {
@@ -165,7 +126,10 @@ beforeEach(async () => {
 
   resetSessionDriver(new DockerSessionDriver({ ...mountPolicy(), cli: new FakeCli('docker') }));
 
-  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'));
+  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'), {
+    allowed: true,
+    imageId: 'sha256:smoke-fake-image-id',
+  });
   await kernel.listen();
 });
 
@@ -202,8 +166,8 @@ describe('an approved install_packages replay reaches the kernel over a real soc
   it('sends a well-formed container.build_image envelope carrying the SelfModGuardContext', async () => {
     await applyInstallPackages({ apt: ['ripgrep'] }, session, fakeApproval());
 
-    expect(kernel.buildImageRequests()).toHaveLength(1);
-    const envelope = kernel.buildImageRequests()[0];
+    expect(kernel.requestsFor('container.build_image')).toHaveLength(1);
+    const envelope = kernel.requestsFor('container.build_image')[0];
 
     expect(envelope.version).toBe(KERNEL_PROTOCOL_VERSION);
     expect(envelope.op).toBe('capability.request');
@@ -233,6 +197,6 @@ describe('an approved install_packages replay reaches the kernel over a real soc
 
     await applyInstallPackages({ apt: ['ripgrep'] }, session, fakeApproval());
 
-    expect(kernel.buildImageRequests()).toHaveLength(0);
+    expect(kernel.requestsFor('container.build_image')).toHaveLength(0);
   });
 });

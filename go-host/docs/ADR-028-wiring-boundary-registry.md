@@ -58,14 +58,20 @@ does the declared proof file still exist and still look like a test. This is
 deliberately the automated version of exactly the manual technique that
 found all four instances today — not a new, invented methodology.
 
-**Scope is deliberately narrow (LAW-05)**: only `container-runner.ts`'s
-privileged functions and the Go kernel's capability table — the exact
-bounded surface LAW-07's own annotation already names as what "exclusive
-enforcement" is about — plus the specific boundary claims two dated audits
-actually found and closed. This is not a general "audit every function in
-the codebase" tool, and it should not grow into one; a new privileged
-function outside this scope does not need a registry entry unless it joins
-that same bounded surface.
+**Scope is deliberately narrow (LAW-05)**: the enumerable set of privileged
+functions and security boundary claims the 2026-09-24 wiring/seam and
+boundary audits actually found and closed — LAW-07's three named
+`container-runner.ts` functions, the Go kernel's capability table, and one
+more the wiring audit also closed the same day: `validateAdditionalMounts`,
+the operator-facing mount allowlist check (`modules/mount-security/index.ts`,
+not `container-runner.ts`). It is privileged and security-critical in the
+same sense LAW-07's three functions are — a wired-but-never-exercised
+allowlist check is exactly the ADR-024 shape one abstraction layer over
+from "no caller at all" — so it belongs in the registry despite living
+outside `container-runner.ts`. This is not a general "audit every function
+in the codebase" tool, and it should not grow into one: the bar for a new
+entry is "found by one of these two audits or a successor," not "seemed
+privileged enough to track."
 
 **Verified before trusting it**: before this ADR was written, the check was
 proven to actually catch both failure shapes — re-adding

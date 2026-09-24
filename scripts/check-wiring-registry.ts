@@ -51,7 +51,7 @@ export interface WiringEntry {
   note?: string;
 }
 
-interface GoCapabilityEntry {
+export interface GoCapabilityEntry {
   capability: string;
   definedIn: string;
   liveDockerTest: string;
@@ -107,13 +107,18 @@ function productionTsFiles(root: string): string[] {
  * misses) is far more likely than a false positive at this call-site
  * density.
  */
+/** Escapes a string for safe interpolation into a `new RegExp(...)` source. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function hasRealCaller(
   fnName: string,
   definedIn: string,
   root: string = ROOT,
 ): { ok: boolean; callers: string[] } {
   const definedInAbs = path.join(root, definedIn);
-  const pattern = new RegExp(`\\b${fnName}\\s*\\(`);
+  const pattern = new RegExp(`\\b${escapeRegExp(fnName)}\\s*\\(`);
   const callers: string[] = [];
   for (const file of productionTsFiles(root)) {
     if (file === definedInAbs) continue;
@@ -132,15 +137,58 @@ export function hasRealCaller(
 }
 
 /**
+ * Extracts the full source text of every top-level `vi.mock(...)` call in
+ * `content`, from `vi.mock(` through its own matching closing paren —
+ * tracking string/template-literal state so a paren inside a quoted string
+ * (e.g. inside a mock factory's returned object) can't be miscounted as
+ * part of the call's argument list. Deliberately not a full JS parse (this
+ * project has no TS AST dependency to reach for here), but robust to
+ * anything short of a paren inside a `/regex/` literal — good enough for
+ * source that is itself hand-written test code, not adversarial input.
+ */
+function extractMockBlocks(content: string): string[] {
+  const blocks: string[] = [];
+  const marker = 'vi.mock(';
+  let searchFrom = 0;
+  while (true) {
+    const start = content.indexOf(marker, searchFrom);
+    if (start < 0) break;
+    let i = start + marker.length;
+    let depth = 1; // the '(' in "vi.mock(" itself
+    let quote: '"' | "'" | '`' | null = null;
+    while (i < content.length && depth > 0) {
+      const ch = content[i];
+      if (quote) {
+        if (ch === '\\') i += 1; // skip an escaped char inside the string
+        else if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        quote = ch;
+      } else if (ch === '(') {
+        depth += 1;
+      } else if (ch === ')') {
+        depth -= 1;
+      }
+      i += 1;
+    }
+    blocks.push(content.slice(start, i));
+    searchFrom = i;
+  }
+  return blocks;
+}
+
+/**
  * Does the seam-test file stub `fnName` out via `vi.mock`? Looks for a
- * `vi.mock(` block that (a) targets a path whose basename matches
- * `definedIn`'s basename, and (b) lists `fnName: vi.fn()`-shaped text
- * inside that block — the exact shape `apply.test.ts`'s original
- * `buildAgentGroupImage: vi.fn()` had before this file's own fix. A
- * `vi.mock` of the same module that does NOT stub this specific export
- * (e.g. mocking `killContainer`/`wakeContainer` while leaving
- * `buildAgentGroupImage` real via `vi.importActual`) is fine and common —
- * only stubbing THIS function collapses the seam.
+ * `vi.mock(` block that (a) targets `definedIn` specifically — matched by
+ * the actual relative import specifier the seam test would need to write
+ * (e.g. `../../container-runner.js`), not a bare basename, since this repo
+ * has 22 different files literally named `index.ts` and a basename-only
+ * match would collide across any of them — and (b) lists
+ * `fnName: vi.fn()`-shaped text inside that block — the exact shape
+ * `apply.test.ts`'s original `buildAgentGroupImage: vi.fn()` had before
+ * this file's own fix. A `vi.mock` of the same module that does NOT stub
+ * this specific export (e.g. mocking `killContainer`/`wakeContainer` while
+ * leaving `buildAgentGroupImage` real via `vi.importActual`) is fine and
+ * common — only stubbing THIS function collapses the seam.
  */
 export function seamTestStubsFunction(
   seamTest: string,
@@ -149,14 +197,61 @@ export function seamTestStubsFunction(
   root: string = ROOT,
 ): boolean {
   const content = fs.readFileSync(path.join(root, seamTest), 'utf-8');
-  const moduleBasename = path.basename(definedIn, '.ts');
-  const mockBlocks = content.match(/vi\.mock\([^)]*\)[\s\S]*?(?=\nvi\.mock\(|\nimport |\n\/\/ [A-Z]|$)/g) ?? [];
-  for (const block of mockBlocks) {
-    const targetsModule = block.includes(`${moduleBasename}.js`);
-    const stubsFunction = new RegExp(`\\b${fnName}\\s*:\\s*vi\\.fn\\(`).test(block);
-    if (targetsModule && stubsFunction) return true;
+
+  // The specifier a real `vi.mock(...)` call in this file would use to
+  // reach definedIn — computed the same way Node's relative-import
+  // resolution would produce it, so two different `index.ts` files never
+  // collide on a shared basename.
+  const relFromSeamTestDir = path.relative(path.dirname(path.join(root, seamTest)), path.join(root, definedIn));
+  const specifier = (relFromSeamTestDir.startsWith('.') ? relFromSeamTestDir : `./${relFromSeamTestDir}`).replace(
+    /\.ts$/,
+    '.js',
+  );
+
+  const stubPattern = new RegExp(`\\b${escapeRegExp(fnName)}\\s*:\\s*vi\\.fn\\(`);
+  for (const block of extractMockBlocks(content)) {
+    // The module specifier is vi.mock(...)'s own first argument — a
+    // string literal immediately after the opening paren. Matched as the
+    // COMPLETE quoted argument, not a substring: `.includes(specifier)`
+    // would let a deeper relative path (e.g. '../../container-runner.js')
+    // false-positive-match a shallower one ('../container-runner.js') is
+    // a substring of it, defeating the whole point of moving off bare
+    // basenames.
+    const firstArg = /^vi\.mock\(\s*(['"`])((?:\\.|(?!\1).)*)\1/.exec(block);
+    const targetsModule = firstArg?.[2] === specifier;
+    if (targetsModule && stubPattern.test(block)) return true;
   }
   return false;
+}
+
+/**
+ * The Go constant name a capability string derives to, e.g.
+ * "container.build_image" -> "CapabilityContainerBuildImage" — mirrors the
+ * naming `internal/kernel/capability.go` already uses for every capability
+ * (`CapabilityContainerWake = "container.wake"`, etc.), so this needs no
+ * separate mapping table to keep in sync.
+ */
+function capabilityConstantName(capability: string): string {
+  const words = capability.split(/[._]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  return `Capability${words.join('')}`;
+}
+
+/**
+ * Is this Go capability still wired into its own dispatch switch? The TS
+ * "real caller" question (hasRealCaller) doesn't translate directly to Go
+ * capabilities — the dispatch switch lives in the SAME file
+ * (`capability.go`) that declares the constant, so "called from a
+ * different file" isn't the right shape of orphan to look for. The
+ * equivalent ADR-024-shaped risk on this side of the boundary is the `case
+ * CapabilityX:` branch itself disappearing from the switch while the
+ * constant declaration (and its live-Docker test) are left behind —
+ * checked here directly.
+ */
+function hasGoCaseHandler(capability: string, definedIn: string, root: string): boolean {
+  const content = fs.readFileSync(path.join(root, definedIn), 'utf-8');
+  const constant = capabilityConstantName(capability);
+  const pattern = new RegExp(`\\bcase\\s+${escapeRegExp(constant)}\\s*:`);
+  return content.split('\n').some((line) => pattern.test(line) && !line.trim().startsWith('//'));
 }
 
 /**
@@ -220,6 +315,13 @@ export function checkRegistry(registry: Registry, root: string = ROOT): string[]
     if (!looksLikeTestFile(entry.liveDockerTest, root)) {
       failures.push(
         `goKernelCapabilities["${entry.capability}"]: "${entry.liveDockerTest}" no longer looks like a test file.`,
+      );
+    }
+    if (!hasGoCaseHandler(entry.capability, entry.definedIn, root)) {
+      failures.push(
+        `goKernelCapabilities["${entry.capability}"]: no "case ${capabilityConstantName(entry.capability)}:" ` +
+          `found in ${entry.definedIn} — this capability's dispatch branch appears to have been removed ` +
+          `while its constant/registry entry stayed behind.`,
       );
     }
   }

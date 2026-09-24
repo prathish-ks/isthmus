@@ -10,11 +10,19 @@
  * proves for the router's own wake path.
  *
  * Self-send (source agent group === target agent group) is used
- * deliberately — `routeAgentMessage`'s own comment says self-sends are
- * "always allowed", so this exercises the real composition
- * (`performAgentRoute` → `resolveTargetSession` → `wakeContainer`) without
- * needing destination-ACL or agent_message_policies rows the guard
- * decision itself already has dedicated (mocked) coverage for.
+ * deliberately — `guard.ts`'s `a2aSend` decide fn short-circuits the
+ * destination-ACL check entirely for a self-send (`!isSelf && ...`), so
+ * this exercises the real composition (`performAgentRoute` →
+ * `resolveTargetSession` → `wakeContainer`) without needing a destination
+ * or agent_message_policies row the guard decision itself already has
+ * dedicated (mocked) coverage for. Worth being precise about what this
+ * scenario represents in production, since it's easy to overstate: nothing
+ * in `create_agent`'s own destination-creation code
+ * (`create-agent.ts`'s two `createDestination` calls are both cross-group,
+ * creator→child and child→parent) ever produces a self-targeting
+ * destination, so a genuine self-send is reachable only via a manually
+ * operator-created destination (`ncl destinations add`), not any automated
+ * agent flow — this is a real, guard-allowed path, just not a routine one.
  *
  * What is real here: `routeAgentMessage`, the real central DB, the real
  * `DockerSessionDriver`, the real `KernelClient`, and a real Unix-socket
@@ -25,7 +33,6 @@
  * `internal/kernel` admits it.
  */
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,68 +50,17 @@ vi.mock('../../config.js', async () => {
 });
 
 import { closeDb, createAgentGroup, ensureContainerConfig, initTestDb, runMigrations } from '../../db/index.js';
-import { createDestination } from './db/agent-destinations.js';
 import { DockerSessionDriver } from '../../drivers/docker-driver.js';
 import { FakeCli } from '../../drivers/fake-cli.js';
 import { mountPolicy, resetSessionDriver, withSessionEvents } from '../../drivers/index.js';
 import { resetGatewayProvider, type GatewayProvider } from '../../gateway-providers/index.js';
-import { KERNEL_PROTOCOL_VERSION } from '../../kernel/protocol.js';
-import type { CapabilityRequestPayload, KernelEnvelope } from '../../kernel/protocol.js';
+import { RecordingKernel, eventually } from '../../kernel/fake-server.js';
 import type { Session } from '../../types.js';
 import { routeAgentMessage, type RoutableAgentMessage } from './agent-route.js';
 
 const AGENT_GROUP_ID = 'ag-agent-route-smoke';
 const FOLDER = 'agent-route-smoke';
 const SESSION_ID = 'sess-agent-route-smoke';
-
-class RecordingKernel {
-  readonly received: Array<KernelEnvelope<CapabilityRequestPayload>> = [];
-  readonly #server: net.Server;
-
-  constructor(readonly socket: string) {
-    this.#server = net.createServer((conn) => {
-      let buffer = '';
-      conn.on('data', (chunk) => {
-        buffer += chunk.toString('utf8');
-        const idx = buffer.indexOf('\n');
-        if (idx < 0) return;
-        const envelope = JSON.parse(buffer.slice(0, idx)) as KernelEnvelope<CapabilityRequestPayload>;
-        this.received.push(envelope);
-        conn.write(
-          JSON.stringify({
-            version: KERNEL_PROTOCOL_VERSION,
-            requestId: envelope.requestId,
-            ok: true,
-            payload: {
-              allowed: true,
-              containerId: 'agent-route-smoke-container-id',
-              containerName: 'ncl-agent-route-smoke-kernel-chose-this',
-            },
-          }) + '\n',
-        );
-        conn.end();
-      });
-    });
-  }
-  listen(): Promise<void> {
-    return new Promise((resolve) => this.#server.listen(this.socket, resolve));
-  }
-  close(): Promise<void> {
-    return new Promise((resolve) => this.#server.close(() => resolve()));
-  }
-  wakes(): Array<KernelEnvelope<CapabilityRequestPayload>> {
-    return this.received.filter((e) => e.payload.capability === 'container.wake');
-  }
-}
-
-async function eventually(what: string, predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`timed out after ${timeoutMs}ms waiting for: ${what}`);
-}
 
 let kernel: RecordingKernel;
 
@@ -125,18 +81,6 @@ beforeEach(async () => {
     created_at: now(),
   });
   await ensureContainerConfig(AGENT_GROUP_ID);
-  // Self-send still goes through the destination-ACL check first in
-  // guard.ts's a2aSend decide fn before the self-send allow short-circuits
-  // — a self-destination row is what a real create_agent-derived "self"
-  // destination would look like, and its absence would otherwise deny
-  // before self-send is ever consulted.
-  await createDestination({
-    agent_group_id: AGENT_GROUP_ID,
-    local_name: 'self',
-    target_type: 'agent',
-    target_id: AGENT_GROUP_ID,
-    created_at: now(),
-  });
 
   const noGateway: GatewayProvider = { kind: 'none', contribute: async () => ({ env: {}, mounts: [] }) };
   resetGatewayProvider(noGateway);
@@ -145,7 +89,11 @@ beforeEach(async () => {
   fakeCli.responses = [{ match: /^inspect /, throws: 'Error: No such object' }];
   resetSessionDriver(withSessionEvents(new DockerSessionDriver({ ...mountPolicy(), cli: fakeCli })));
 
-  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'));
+  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'), {
+    allowed: true,
+    containerId: 'agent-route-smoke-container-id',
+    containerName: 'ncl-agent-route-smoke-kernel-chose-this',
+  });
   await kernel.listen();
 });
 
@@ -182,9 +130,9 @@ describe('a self-send a2a route reaches the kernel over a real socket', () => {
 
     await eventually(
       'the kernel to receive a container.wake for the resolved target session',
-      () => kernel.wakes().length === 1,
+      () => kernel.requestsFor('container.wake').length === 1,
     );
-    const wake = kernel.wakes()[0];
+    const wake = kernel.requestsFor('container.wake')[0];
     expect(wake.payload.session?.key.agentGroupId).toBe(AGENT_GROUP_ID);
   });
 });

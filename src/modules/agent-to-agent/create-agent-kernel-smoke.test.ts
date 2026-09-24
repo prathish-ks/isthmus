@@ -28,7 +28,6 @@
  * it.
  */
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,69 +53,22 @@ import {
   initTestDb,
   runMigrations,
 } from '../../db/index.js';
+import { getAgentGroupByFolder } from '../../db/agent-groups.js';
+import { updateContainerConfigScalars } from '../../db/container-configs.js';
+import { runGuarded } from '../../delivery-guard.js';
 import { DockerSessionDriver } from '../../drivers/docker-driver.js';
 import { FakeCli } from '../../drivers/fake-cli.js';
 import { mountPolicy, resetSessionDriver, withSessionEvents } from '../../drivers/index.js';
 import { resetGatewayProvider, type GatewayProvider } from '../../gateway-providers/index.js';
-import { KERNEL_PROTOCOL_VERSION } from '../../kernel/protocol.js';
-import type { CapabilityRequestPayload, KernelEnvelope } from '../../kernel/protocol.js';
+import { RecordingKernel, eventually } from '../../kernel/fake-server.js';
 import type { Session } from '../../types.js';
-import { createAgent } from './create-agent.js';
+import { agentsCreate } from './guard.js';
+import { createAgent, requestCreateAgentHold, validateCreateAgent } from './create-agent.js';
 
 const SOURCE_AGENT_GROUP_ID = 'ag-create-agent-smoke-source';
 const SOURCE_FOLDER = 'create-agent-smoke-source';
 const MESSAGING_GROUP_ID = 'mg-create-agent-smoke';
 const SOURCE_SESSION_ID = 'sess-create-agent-smoke-source';
-
-/** Same recording-kernel shape as every other seam-real test added this session. */
-class RecordingKernel {
-  readonly received: Array<KernelEnvelope<CapabilityRequestPayload>> = [];
-  readonly #server: net.Server;
-
-  constructor(readonly socket: string) {
-    this.#server = net.createServer((conn) => {
-      let buffer = '';
-      conn.on('data', (chunk) => {
-        buffer += chunk.toString('utf8');
-        const idx = buffer.indexOf('\n');
-        if (idx < 0) return;
-        const envelope = JSON.parse(buffer.slice(0, idx)) as KernelEnvelope<CapabilityRequestPayload>;
-        this.received.push(envelope);
-        conn.write(
-          JSON.stringify({
-            version: KERNEL_PROTOCOL_VERSION,
-            requestId: envelope.requestId,
-            ok: true,
-            payload: {
-              allowed: true,
-              containerId: 'create-agent-smoke-container-id',
-              containerName: 'ncl-create-agent-smoke-kernel-chose-this',
-            },
-          }) + '\n',
-        );
-        conn.end();
-      });
-    });
-  }
-  listen(): Promise<void> {
-    return new Promise((resolve) => this.#server.listen(this.socket, resolve));
-  }
-  close(): Promise<void> {
-    return new Promise((resolve) => this.#server.close(() => resolve()));
-  }
-  wakes(): Array<KernelEnvelope<CapabilityRequestPayload>> {
-    return this.received.filter((e) => e.payload.capability === 'container.wake');
-  }
-}
-
-async function eventually(what: string, predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`timed out after ${timeoutMs}ms waiting for: ${what}`);
-}
 
 let kernel: RecordingKernel;
 
@@ -165,7 +117,11 @@ beforeEach(async () => {
   fakeCli.responses = [{ match: /^inspect /, throws: 'Error: No such object' }];
   resetSessionDriver(withSessionEvents(new DockerSessionDriver({ ...mountPolicy(), cli: fakeCli })));
 
-  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'));
+  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'), {
+    allowed: true,
+    containerId: 'create-agent-smoke-container-id',
+    containerName: 'ncl-create-agent-smoke-kernel-chose-this',
+  });
   await kernel.listen();
 });
 
@@ -177,30 +133,76 @@ afterEach(async () => {
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-describe('a successful create_agent reaches the kernel over a real socket', () => {
-  it('wakes the SOURCE session (never the new agent group) through a real wakeContainer call', async () => {
-    const sourceSession: Session = {
-      id: SOURCE_SESSION_ID,
-      agent_group_id: SOURCE_AGENT_GROUP_ID,
-      messaging_group_id: MESSAGING_GROUP_ID,
-      thread_id: null,
-      agent_provider: null,
-      status: 'active',
-      container_status: 'running',
-      last_active: null,
-      created_at: now(),
-    } as Session;
+function sourceSession(): Session {
+  return {
+    id: SOURCE_SESSION_ID,
+    agent_group_id: SOURCE_AGENT_GROUP_ID,
+    messaging_group_id: MESSAGING_GROUP_ID,
+    thread_id: null,
+    agent_provider: null,
+    status: 'active',
+    container_status: 'running',
+    last_active: null,
+    created_at: now(),
+  } as Session;
+}
 
-    await createAgent({ name: 'Scout', instructions: 'Find things.' }, sourceSession);
+/**
+ * Drives the exact same guard spec `modules/agent-to-agent/index.ts`
+ * registers create_agent with (`agentsCreate`, `validateCreateAgent`,
+ * `requestCreateAgentHold`) — not a hand-rolled equivalent — so "reaches
+ * the kernel" is proven through the real authorization layer
+ * `performCreateAgent`'s own doc comment says is mandatory, closing the
+ * gap an earlier version of this test had: calling `createAgent` directly
+ * bypasses guard entirely, so it couldn't distinguish "wiring works" from
+ * "wiring works AND an unauthorized session can trigger it too."
+ */
+function createAgentGuarded(content: Record<string, unknown>, session: Session): Promise<void> {
+  return runGuarded(
+    'agents.create',
+    { guardAction: agentsCreate, precheck: validateCreateAgent, requestHold: requestCreateAgentHold },
+    (c, s) => createAgent(c, s),
+    content,
+    session,
+    null,
+  );
+}
+
+describe('a successful create_agent reaches the kernel over a real socket', () => {
+  it('wakes the SOURCE session (never the new agent group) through a real wakeContainer call, for a trusted global-scope group', async () => {
+    // agentsCreate's decide fn ALLOWs directly only for cli_scope: 'global'
+    // (guard.ts) — the trusted-owner case. Set explicitly rather than
+    // relying on ensureContainerConfig's default, which is 'group'
+    // (confined) — see the HOLD case below for that one.
+    await updateContainerConfigScalars(SOURCE_AGENT_GROUP_ID, { cli_scope: 'global' });
+
+    await createAgentGuarded({ name: 'Scout', instructions: 'Find things.' }, sourceSession());
 
     await eventually(
       'the kernel to receive a container.wake for the source session',
-      () => kernel.wakes().length === 1,
+      () => kernel.requestsFor('container.wake').length === 1,
     );
-    const wake = kernel.wakes()[0];
+    const wake = kernel.requestsFor('container.wake')[0];
     expect(wake.payload.session?.key).toMatchObject({
       agentGroupId: SOURCE_AGENT_GROUP_ID,
       sessionId: SOURCE_SESSION_ID,
     });
+    expect(await getAgentGroupByFolder('scout')).toBeTruthy();
+  });
+});
+
+describe('an unauthorized create_agent never reaches the kernel', () => {
+  it('holds for a confined (default group-scope) session and never creates the agent group', async () => {
+    // cli_scope defaults to 'group' (ensureContainerConfig's own default,
+    // left untouched here) — the realistic prompt-injection-victim shape
+    // guard.ts's own comment names. agentsCreate HOLDs this, never ALLOWs
+    // it directly. The privileged effect this guard exists to gate
+    // (createAgentGroup's central-DB write, reached only from inside the
+    // ALLOW branch) is the assertion that actually matters here — not
+    // "was the kernel called", since a HOLD's own admin-notification path
+    // has side effects of its own that aren't what this test is about.
+    await createAgentGuarded({ name: 'Blocked Sub-Agent', instructions: null }, sourceSession());
+
+    expect(await getAgentGroupByFolder('blocked-sub-agent')).toBeUndefined();
   });
 });

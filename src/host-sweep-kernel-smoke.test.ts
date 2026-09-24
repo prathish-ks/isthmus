@@ -22,7 +22,6 @@
  * docker CLI is a `FakeCli`.
  */
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,61 +45,34 @@ import { FakeCli } from './drivers/fake-cli.js';
 import { mountPolicy, resetSessionDriver, withSessionEvents } from './drivers/index.js';
 import { resetGatewayProvider, type GatewayProvider } from './gateway-providers/index.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
-import { KERNEL_PROTOCOL_VERSION } from './kernel/protocol.js';
-import type { CapabilityRequestPayload, KernelEnvelope } from './kernel/protocol.js';
+import { RecordingKernel, eventually } from './kernel/fake-server.js';
 import { initSessionFolder, writeSessionMessage } from './session-manager.js';
 
 const AGENT_GROUP_ID = 'ag-host-sweep-smoke';
 const FOLDER = 'host-sweep-smoke';
 const SESSION_ID = 'sess-host-sweep-smoke';
 
-class RecordingKernel {
-  readonly received: Array<KernelEnvelope<CapabilityRequestPayload>> = [];
-  readonly #server: net.Server;
+// Mirrors SWEEP_INTERVAL_MS in host-sweep.ts — identifies the sweep's own
+// self-reschedule among other setTimeout calls (e.g. eventually's polling).
+const SWEEP_INTERVAL_MS = 60_000;
 
-  constructor(readonly socket: string) {
-    this.#server = net.createServer((conn) => {
-      let buffer = '';
-      conn.on('data', (chunk) => {
-        buffer += chunk.toString('utf8');
-        const idx = buffer.indexOf('\n');
-        if (idx < 0) return;
-        const envelope = JSON.parse(buffer.slice(0, idx)) as KernelEnvelope<CapabilityRequestPayload>;
-        this.received.push(envelope);
-        conn.write(
-          JSON.stringify({
-            version: KERNEL_PROTOCOL_VERSION,
-            requestId: envelope.requestId,
-            ok: true,
-            payload: {
-              allowed: true,
-              containerId: 'host-sweep-smoke-container-id',
-              containerName: 'ncl-host-sweep-smoke-kernel-chose-this',
-            },
-          }) + '\n',
-        );
-        conn.end();
-      });
-    });
-  }
-  listen(): Promise<void> {
-    return new Promise((resolve) => this.#server.listen(this.socket, resolve));
-  }
-  close(): Promise<void> {
-    return new Promise((resolve) => this.#server.close(() => resolve()));
-  }
-  wakes(): Array<KernelEnvelope<CapabilityRequestPayload>> {
-    return this.received.filter((e) => e.payload.capability === 'container.wake');
-  }
-}
+/**
+ * sweep()'s self-reschedule (`setTimeout(() => void sweep(), SWEEP_INTERVAL_MS)`)
+ * only runs at the very END of a full tick — after sweepSession, and
+ * therefore after its awaited maintainSessionMailbox/handleRecurrence
+ * continuation, have both resolved. Waiting for the wake alone (as an
+ * earlier version of this test did) races that continuation against
+ * afterEach's closeDb(): observed empirically as a stray "Database not
+ * initialized" thrown from inside sweepSession's own try/catch when run
+ * alongside other test files. Capturing the reschedule instead of guessing
+ * a delay is the same technique host-sweep-grace.test.ts already
+ * established for exactly this reason.
+ */
+const sweepTickCallbacks: Array<() => void> = [];
+let setTimeoutSpy: ReturnType<typeof vi.spyOn>;
 
-async function eventually(what: string, predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`timed out after ${timeoutMs}ms waiting for: ${what}`);
+async function waitForFullSweepTick(): Promise<void> {
+  await eventually('the sweep tick to fully complete (self-reschedule captured)', () => sweepTickCallbacks.length === 1);
 }
 
 let kernel: RecordingKernel;
@@ -110,6 +82,16 @@ function now(): string {
 }
 
 beforeEach(async () => {
+  sweepTickCallbacks.length = 0;
+  const realSetTimeout = global.setTimeout;
+  setTimeoutSpy = vi.spyOn(global, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+    if (ms === SWEEP_INTERVAL_MS) {
+      sweepTickCallbacks.push(fn);
+      return 0 as unknown as NodeJS.Timeout;
+    }
+    return realSetTimeout(fn, ms);
+  }) as typeof setTimeout);
+
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
   fs.mkdirSync(path.join(TEST_DIR, 'groups'), { recursive: true });
 
@@ -136,7 +118,12 @@ beforeEach(async () => {
   initSessionFolder(AGENT_GROUP_ID, SESSION_ID);
   // A genuinely due message — the exact condition sweepSession's
   // `dueCount > 0 && !isContainerRunning(session.id)` checks for.
-  await writeSessionMessage(AGENT_GROUP_ID, SESSION_ID, { id: 'm-1', kind: 'chat', timestamp: now(), content: '{"text":"hi"}' });
+  await writeSessionMessage(AGENT_GROUP_ID, SESSION_ID, {
+    id: 'm-1',
+    kind: 'chat',
+    timestamp: now(),
+    content: '{"text":"hi"}',
+  });
 
   const noGateway: GatewayProvider = { kind: 'none', contribute: async () => ({ env: {}, mounts: [] }) };
   resetGatewayProvider(noGateway);
@@ -145,12 +132,17 @@ beforeEach(async () => {
   fakeCli.responses = [{ match: /^inspect /, throws: 'Error: No such object' }];
   resetSessionDriver(withSessionEvents(new DockerSessionDriver({ ...mountPolicy(), cli: fakeCli })));
 
-  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'));
+  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'), {
+    allowed: true,
+    containerId: 'host-sweep-smoke-container-id',
+    containerName: 'ncl-host-sweep-smoke-kernel-chose-this',
+  });
   await kernel.listen();
 });
 
 afterEach(async () => {
   stopHostSweep();
+  setTimeoutSpy.mockRestore();
   resetSessionDriver(null);
   resetGatewayProvider(null);
   await kernel.close();
@@ -162,11 +154,17 @@ describe('a sweep tick with a due message reaches the kernel over a real socket'
   it('wakes the session through a real wakeContainer call', async () => {
     startHostSweep();
 
-    await eventually('the kernel to receive a container.wake for the due session', () => kernel.wakes().length === 1);
-    const wake = kernel.wakes()[0];
+    await eventually('the kernel to receive a container.wake for the due session', () => kernel.requestsFor('container.wake').length === 1);
+    const wake = kernel.requestsFor('container.wake')[0];
     expect(wake.payload.session?.key).toMatchObject({
       agentGroupId: AGENT_GROUP_ID,
       sessionId: SESSION_ID,
     });
+
+    // Wait for the REST of sweepSession's continuation (maintainSessionMailbox
+    // -> handleRecurrence, still running after the wake) to fully settle
+    // before this test returns and afterEach tears the DB down underneath
+    // it — see waitForFullSweepTick's own comment for the race this closes.
+    await waitForFullSweepTick();
   });
 });

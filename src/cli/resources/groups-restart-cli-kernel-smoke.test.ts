@@ -32,7 +32,6 @@
  * question — see `adversarial_live_docker_test.go`/`build_image_live_docker_test.go`).
  */
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -56,8 +55,7 @@ import { DockerSessionDriver } from '../../drivers/docker-driver.js';
 import { FakeCli } from '../../drivers/fake-cli.js';
 import { mountPolicy, resetSessionDriver, withSessionEvents } from '../../drivers/index.js';
 import { resetGatewayProvider, type GatewayProvider } from '../../gateway-providers/index.js';
-import { KERNEL_PROTOCOL_VERSION } from '../../kernel/protocol.js';
-import type { CapabilityRequestPayload, KernelEnvelope } from '../../kernel/protocol.js';
+import { RecordingKernel, eventually } from '../../kernel/fake-server.js';
 import type { PendingApproval, Session } from '../../types.js';
 import { dispatch } from '../dispatch.js';
 // Side-effect import: registers the `groups-*` commands (including restart).
@@ -67,57 +65,6 @@ const AGENT_GROUP_ID = 'ag-restart-smoke';
 const GROUP_FOLDER = 'restart-smoke';
 const MESSAGING_GROUP_ID = 'mg-restart-smoke';
 const SESSION_ID = 'sess-restart-smoke';
-
-/** Same recording-kernel shape as cli-channel-kernel-smoke.test.ts / apply-install-packages.smoke.test.ts. */
-class RecordingKernel {
-  readonly received: Array<KernelEnvelope<CapabilityRequestPayload>> = [];
-  readonly #server: net.Server;
-
-  constructor(readonly socket: string) {
-    this.#server = net.createServer((conn) => {
-      let buffer = '';
-      conn.on('data', (chunk) => {
-        buffer += chunk.toString('utf8');
-        const idx = buffer.indexOf('\n');
-        if (idx < 0) return;
-        const envelope = JSON.parse(buffer.slice(0, idx)) as KernelEnvelope<CapabilityRequestPayload>;
-        this.received.push(envelope);
-        conn.write(
-          JSON.stringify({
-            version: KERNEL_PROTOCOL_VERSION,
-            requestId: envelope.requestId,
-            ok: true,
-            payload: {
-              allowed: true,
-              containerId: 'restart-smoke-container-id',
-              containerName: 'ncl-restart-smoke-kernel-chose-this',
-              imageId: 'sha256:restart-smoke-fake-image-id',
-            },
-          }) + '\n',
-        );
-        conn.end();
-      });
-    });
-  }
-  listen(): Promise<void> {
-    return new Promise((resolve) => this.#server.listen(this.socket, resolve));
-  }
-  close(): Promise<void> {
-    return new Promise((resolve) => this.#server.close(() => resolve()));
-  }
-  requestsFor(capability: string): Array<KernelEnvelope<CapabilityRequestPayload>> {
-    return this.received.filter((e) => e.payload.capability === capability);
-  }
-}
-
-async function eventually(what: string, predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`timed out after ${timeoutMs}ms waiting for: ${what}`);
-}
 
 let kernel: RecordingKernel;
 let fakeCli: FakeCli;
@@ -147,7 +94,12 @@ beforeEach(async () => {
   fakeCli.responses = [{ match: /^inspect /, throws: 'Error: No such object' }];
   resetSessionDriver(withSessionEvents(new DockerSessionDriver({ ...mountPolicy(), cli: fakeCli })));
 
-  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'));
+  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'), {
+    allowed: true,
+    containerId: 'restart-smoke-container-id',
+    containerName: 'ncl-restart-smoke-kernel-chose-this',
+    imageId: 'sha256:restart-smoke-fake-image-id',
+  });
   await kernel.listen();
 });
 
