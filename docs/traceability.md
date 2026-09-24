@@ -145,21 +145,41 @@ table below (open cases, not yet fixed).
 | Mount structural validation (`validateSpec`) | **Spans the seam** | `src/mount-composition.test.ts` — real `buildMounts`/`mountPolicy`/`validateSpec` with negative cases |
 | Egress lockdown network wiring | **Spans the seam** (as of ADR-026) | `scripts/ec08-egress-lockdown-live-smoke.ts`, required CI gate |
 | Go kernel `container.wake` / `container.kill` | **Spans the seam** | `adversarial_live_docker_test.go`, EC-07 (`go-host/docs/ADR-023-*.md`) |
-| **`buildAgentGroupImage` / Go `container.build_image`** | **Seam gap — highest-priority open finding** | Every TS caller (`self-mod/apply.ts`, `cli/resources/groups.ts --rebuild`) mocks `container-runner.ts`; `applyInstallPackages` has **zero test coverage of any kind**; the dedicated test seam `setKernelClientForTests` (`src/container-runner.ts:891`) has **zero callers anywhere**; the Go-side `container.build_image` capability has no live-Docker test, unlike its `wake`/`kill` siblings |
-| CLI-derived `restart`/`--rebuild` guard path | **Seam gap** | `groups-restart-rebuild.test.ts`, `groups.test.ts`, `groups-plugin-guard.test.ts` all mock `container-runner.ts`; `--rebuild` is the CLI's own route into the `buildAgentGroupImage` gap above |
-| Mount allowlist check (`validateAdditionalMounts`, operator-facing) | **Seam gap** | Wired for real at `container-runner.ts:602`, but every composition-level test passes `additionalMounts: []` — no test has ever pushed a malicious entry through the real spawn path |
-| Agent-to-agent messaging (`a2a.send`, `agents.create`) | **Seam gap** | `create-agent.test.ts`, `agent-route.test.ts` both mock `wakeContainer` — authorization is well-tested, the wake effect isn't |
-| Scheduled/due-message sweep → wake | **Seam gap** | `host-sweep.coverage.test.ts`, `host-sweep-grace.test.ts` mock `container-runner.ts`; lower risk since `wakeContainer` itself has one real proof via the router path above |
+| `buildAgentGroupImage` / Go `container.build_image` | **Spans the seam** (closed 2026-09-24) | `src/modules/self-mod/apply.test.ts` + `apply-install-packages.smoke.test.ts` (TS side, real business logic + real kernel socket) and `go-host/internal/kernel/build_image_live_docker_test.go` (Go side, live-verified: a real `docker build` produces a real tagged image) |
+| CLI-derived `restart`/`--rebuild` guard path | **Spans the seam** (closed 2026-09-24) | `src/cli/resources/groups-restart-cli-kernel-smoke.test.ts` — proves, over a real kernel socket, that `container.build_image` carries no guard (ADR-016's accepted gap) while `container.kill` carries the `cliRestart` `GuardContext` (ADR-015) |
+| Mount allowlist check (`validateAdditionalMounts`, operator-facing) | **Spans the seam** (closed 2026-09-24) | `src/mount-composition-additional-mounts.test.ts` — a malicious `additionalMounts` entry pushed through the real `buildMounts` composition is dropped; an allowlisted one survives into a validated `SessionSpec` |
+| Agent-to-agent messaging (`a2a.send`, `agents.create`) | **Seam gap — deliberately descoped, 2026-09-24** | `create-agent.test.ts`, `agent-route.test.ts` both mock `wakeContainer`. Lower risk than the closed items above: `wakeContainer` itself already has one real proof via the router path (`cli-channel-kernel-smoke.test.ts`), and these files' own heavy mocking of DB/filesystem collaborators (not just `container-runner.js`) made a safe seam-real retrofit a larger, riskier change than the time available warranted. Not in `docs/wiring-registry.json` — a genuine open item, not silently dropped. |
+| Scheduled/due-message sweep → wake | **Seam gap — deliberately descoped, 2026-09-24** | `host-sweep.coverage.test.ts`, `host-sweep-grace.test.ts` mock `container-runner.ts`. Same reasoning and same caveat as the a2a row above. |
 
-**The `buildAgentGroupImage` finding is structurally identical to ADR-024's
-bug** — a real, guard-gated, production-reachable privileged function with no
-test exercising it against anything real, on either side of the TS/Go
-boundary. Unlike ADR-024, this has not shipped a known regression yet; it's
-flagged here as an open risk, not a confirmed incident. Closing it (a
-seam-real test in the shape of `cli-channel-kernel-smoke.test.ts`, wiring
-`setKernelClientForTests` to something, and a live-Docker test for
-`container.build_image`) is not yet scheduled — this is a candidate for the
-next ADR in this area, pending prioritization.
+Eight of the ten rows above now **span the seam** — five pre-existing
+(channel/kernel wake, OneCLI approvals, mount structural validation, egress
+lockdown, Go `wake`/`kill`) plus three closed 2026-09-24
+(`buildAgentGroupImage`, the CLI restart path, the mount allowlist). All
+eight are tracked in `docs/wiring-registry.json`, checked on every PR by the
+required `wiring-registry-check` CI job
+(`go-host/docs/ADR-028-wiring-boundary-registry.md`). The two remaining gaps
+(a2a messaging, the sweep) are recorded as open, not silently dropped —
+lower priority because `wakeContainer`'s own composition already has one
+real proof, but still real gaps worth closing.
+
+## Boundary verification (runtime isolation, not just wiring)
+
+A different axis from the seam table above: once a privileged path *is*
+wired and called, does the actual runtime isolation guarantee hold, or is it
+only decided in code and never checked against anything real? A 2026-09-24
+audit checked seven such claims. Four were already **live-verified**
+(Docker-socket exposure, NDJSON protocol-version rejection, guard-grant
+cross-scope binding, and — not applicable, since neither makes an
+enforcement claim to test — the hardened-runtime-class check and the
+rootless-install mode). Three were **decided-but-unverified**; all three are
+now closed and tracked in `docs/wiring-registry.json`'s `boundaries[]`
+section:
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| Credential-shaped contributed-env values never reach a real container's environment | **Live-verified** (closed 2026-09-24, highest-priority boundary finding) | `go-host/internal/kernel/credential_boundary_live_docker_test.go` — EC-07/EC-08 deliberately stub the gateway's credential contribution to avoid exercising this exact check; verified live: a `sk-ant-...`-shaped value never reaches `docker create`, an ordinary value does land in the real container's real env (positive control) |
+| A normally-spawned container's real mounts match intent, and an unmounted path is unreachable from inside it | **Live-verified** (closed 2026-09-24) | `go-host/internal/kernel/mount_confinement_live_docker_test.go` — the prior live coverage (`adversarial_live_docker_test.go`) was scoped narrowly to the Docker-socket/`.ssh` adversarial pair; this is the general case, including a real `docker exec` read attempt against an unmounted path |
+| The approval CAS (`transitionPendingApprovalStatus`) allows a held action to execute exactly once under concurrent resolution | **Live-verified against a real DB** (closed 2026-09-24, lowest-priority boundary finding) | `src/db/pending-approval-race.test.ts` — two concurrent, and separately ten concurrent, `pending→approved` transitions on the same row resolve to exactly one success |
 
 ## Known gaps (stated honestly, not solved by this document)
 
@@ -176,12 +196,17 @@ next ADR in this area, pending prioritization.
   *what kind* of logic or dependency was added, which is a judgment call,
   not (today) a pattern a script can reliably check. Flagged rather than
   quietly left blank.
-- **This table itself is not yet enforced.** Nothing today verifies that
-  this document stays in sync with `.github/workflows/ci.yml` or with which
-  test files actually exist. It is only as current as its last edit
-  (2026-09-24). A follow-up (not yet built) would add a CI check that
-  confirms the file paths and job names named here still exist, so the
-  table can't silently drift the way `docs/test-inventory.md` did.
+- ~~**This table itself is not yet enforced.**~~ **Closed 2026-09-24.** The
+  seam-coverage and boundary tables' entries are now mirrored in
+  `docs/wiring-registry.json` and re-checked on every PR by the required
+  `wiring-registry-check` CI job — see `go-host/docs/ADR-028-wiring-boundary-registry.md`.
+  Scope stays narrow: the registry only covers `container-runner.ts`'s
+  privileged functions, the Go kernel's capability table, and the specific
+  boundary claims two dated audits found — not every row in the general
+  regression safety net further up this document, and not a promise that
+  this whole document can never drift (the "General regression safety net"
+  table and the "Law-to-enforcement matrix" above still have no equivalent
+  automated staleness check).
 
 ## ADR index and law-breach log
 
@@ -221,6 +246,7 @@ history is the third kind.
 | [025](../go-host/docs/ADR-025-kernel-side-egress-lockdown-enforcement.md) | Closes the follow-on gap ADR-024 left open: the kernel now refuses to start under egress lockdown unless it was actually given a network, instead of trusting the caller. | 2026-09-24 | **Resolution** (defense in depth for ADR-024) |
 | [026](../go-host/docs/ADR-026-egress-lockdown-live-ci-gate.md) | EC-08: adds a required (not report-only) live-Docker CI gate asserting real container network isolation — closes the coverage hole that let ADR-024 ship undetected. | 2026-09-24 | **Resolution** (closes the test-coverage gap behind ADR-024) |
 | [027](../go-host/docs/ADR-027-feature-growth-phase-transition.md) | Records LAW-03 as satisfied for the current contract surface — feature growth and TS hardening proceed alongside, not after, continued Go-kernel migration. | 2026-09-24 | Compliant citation (LAW-03, phase framing) |
+| [028](../go-host/docs/ADR-028-wiring-boundary-registry.md) | Adds `docs/wiring-registry.json` + a required CI check — the standing, automated form of the wiring/seam and boundary audits, after the same failure shape (ADR-024's) was found or nearly found four times in one day. | 2026-09-24 | **Resolution** (closes the "table itself is not yet enforced" gap; prevents recurrence of the ADR-024 shape) |
 
 **Note**: `ADR-018` does not exist — the numbering has a gap (never assigned or
 since removed); not a data-loss concern, just recorded here so a reader
@@ -244,3 +270,8 @@ Update this document in the same PR as any of:
 - A new Go kernel slice or TypeScript module that closes one of the "Known
   gaps" rows above (update the row, don't just delete it — note when and how
   it closed).
+- A new privileged function added to `container-runner.ts`, or a new
+  capability added to the Go kernel's dispatch table: add a
+  `docs/wiring-registry.json` entry and a passing seam/live test in the same
+  PR — `wiring-registry-check` (required CI, ADR-028) fails the moment one
+  exists without the other.
