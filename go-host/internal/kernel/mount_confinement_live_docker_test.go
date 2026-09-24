@@ -50,7 +50,7 @@ func TestLive_Wake_NormalMountSet_MatchesRequestExactlyAndConfinesReads(t *testi
 
 	hostDir := t.TempDir()
 	markerPath := filepath.Join(hostDir, "marker.txt")
-	if err := os.WriteFile(markerPath, []byte("confinement-smoke\n"), 0o644); err != nil {
+	if err := os.WriteFile(markerPath, []byte("confinement-smoke\n"), 0o600); err != nil {
 		t.Fatalf("write marker file: %v", err)
 	}
 

@@ -47,7 +47,7 @@ import (
 func buildImagePolicy(t *testing.T, groupFolder string) mount.Policy {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, groupFolder), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, groupFolder), 0o750); err != nil {
 		t.Fatalf("mkdir group folder: %v", err)
 	}
 	policy := testPolicy()
@@ -73,6 +73,8 @@ func removeDockerImage(t *testing.T, tag string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// #nosec G204 -- tag is always a fixed test-fixture literal here, never
+	// external/attacker-controlled input.
 	_ = exec.CommandContext(ctx, "docker", "image", "rm", "-f", tag).Run() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 }
 
