@@ -361,7 +361,8 @@ jobs:
   # usual report-only-first sequencing.
   ci:
     if: always()
-    needs: [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown]
+    needs:
+      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -372,6 +373,7 @@ jobs:
           test "${{ needs.coverage-gate.result }}" = success
           test "${{ needs.performance-gate.result }}" = success
           test "${{ needs.live-egress-lockdown.result }}" = success
+          test "${{ needs.wiring-registry-check.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
@@ -631,6 +633,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Coverage floor gate (vs .github/coverage-baseline.json)
         run: pnpm exec tsx scripts/check-coverage-baseline.ts
+
+  # wiring-registry-check (ADR-028, 2026-09-24): required from its first
+  # commit, not promoted later — same reasoning ADR-026 gave for
+  # live-egress-lockdown. This is the standing form of the 2026-09-24
+  # wiring/seam and boundary audits, which found the exact ADR-024 shape
+  # (a real, guard-gated function with no remaining caller) a second time
+  # the same day, plus a seam that had collapsed back into a mock. A check
+  # for this failure class that started report-only would reproduce the
+  # precise problem it exists to close: something that looks like coverage
+  # but isn't enforced.
+  wiring-registry-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: docs/wiring-registry.json entries still hold (real callers, seam not re-mocked, proof files exist)
+        run: pnpm exec tsx scripts/check-wiring-registry.ts
 
   # semgrep scope (2026-09-20): src/ promoted back into scope after a full
   # triage of the 149 findings a first pass surfaced here (2026-09-04 note

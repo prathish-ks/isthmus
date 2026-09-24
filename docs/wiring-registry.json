@@ -1,0 +1,80 @@
+{
+  "$comment": "Machine-readable form of docs/traceability.md's 'End-to-end wiring / seam coverage' and 'Boundary verification' tables. Checked by scripts/check-wiring-registry.ts (required CI job wiring-registry-check, per go-host/docs/ADR-028-wiring-boundary-registry.md). Scope deliberately narrow, per LAW-05: only the bounded, enumerable surface LAW-07 already names (container-runner.ts's privileged functions, the Go kernel's capability table) plus the specific boundary claims the 2026-09-24 audits found and closed — not a general 'audit everything' registry.",
+  "wiring": [
+    {
+      "function": "buildAgentGroupImage",
+      "definedIn": "src/container-runner.ts",
+      "seamTest": "src/modules/self-mod/apply-install-packages.smoke.test.ts",
+      "note": "ADR-024-shaped gap closed 2026-09-24: zero test coverage, dedicated setKernelClientForTests seam unused, no live-Docker leg on either side of the TS/Go boundary."
+    },
+    {
+      "function": "wakeContainer",
+      "definedIn": "src/container-runner.ts",
+      "seamTest": "src/cli-channel-kernel-smoke.test.ts",
+      "note": "ADR-022's original seam-real proof."
+    },
+    {
+      "function": "killContainer",
+      "definedIn": "src/container-runner.ts",
+      "seamTest": "src/cli/resources/groups-restart-cli-kernel-smoke.test.ts",
+      "note": "CLI-derived restart guard path (cliRestart GuardContext), closed 2026-09-24."
+    },
+    {
+      "function": "validateAdditionalMounts",
+      "definedIn": "src/modules/mount-security/index.ts",
+      "seamTest": "src/mount-composition-additional-mounts.test.ts",
+      "note": "Operator mount allowlist, proven on the real buildMounts composition path, closed 2026-09-24."
+    }
+  ],
+  "goKernelCapabilities": [
+    {
+      "capability": "container.wake",
+      "definedIn": "go-host/internal/kernel/capability.go",
+      "liveDockerTest": "go-host/internal/kernel/adversarial_live_docker_test.go"
+    },
+    {
+      "capability": "container.kill",
+      "definedIn": "go-host/internal/kernel/capability.go",
+      "liveDockerTest": "scripts/ec07-live-host-smoke.ts",
+      "note": "Live leg is EC-07 (TypeScript-host-in-front shell harness, ADR-023), not a Go test file."
+    },
+    {
+      "capability": "container.build_image",
+      "definedIn": "go-host/internal/kernel/capability.go",
+      "liveDockerTest": "go-host/internal/kernel/build_image_live_docker_test.go",
+      "note": "The one capability with no live-Docker leg on either side before 2026-09-24; closed same day."
+    }
+  ],
+  "boundaries": [
+    {
+      "claim": "A credential-shaped contributed-env value never reaches a real container's environment.",
+      "verifiedBy": "go-host/internal/kernel/credential_boundary_live_docker_test.go",
+      "note": "Highest-priority boundary finding: EC-07/EC-08 deliberately stub the gateway's credential contribution to avoid exercising this. Closed 2026-09-24."
+    },
+    {
+      "claim": "A normally-spawned container's real, inspected mount list matches the request exactly, and a path that was never mounted is unreachable from inside it.",
+      "verifiedBy": "go-host/internal/kernel/mount_confinement_live_docker_test.go",
+      "note": "adversarial_live_docker_test.go's live coverage was scoped narrowly to the docker-socket/.ssh pair; this is the general case."
+    },
+    {
+      "claim": "A real spawned agent container has no access to the host's Docker socket unless an operator allowlist explicitly permits it.",
+      "verifiedBy": "go-host/internal/kernel/adversarial_live_docker_test.go",
+      "note": "Pre-existing (EC-05); included here for a complete registry rather than because it was a 2026-09-24 finding."
+    },
+    {
+      "claim": "The approval CAS (transitionPendingApprovalStatus) allows a held action to execute exactly once, even under concurrent resolution.",
+      "verifiedBy": "src/db/pending-approval-race.test.ts",
+      "note": "Closed 2026-09-24 (lowest-priority boundary finding)."
+    },
+    {
+      "claim": "The kernel rejects a mismatched NDJSON protocol version over a real Unix socket.",
+      "verifiedBy": "go-host/internal/kernel/kernel_test.go",
+      "note": "Already live-verified before the 2026-09-24 audit (TestServe_RoundTripOverUnixSocket + TestDispatch_RejectsUnsupportedVersion); included for a complete registry."
+    },
+    {
+      "claim": "A guard grant approved for one agent group/command cannot be replayed to authorize a different one.",
+      "verifiedBy": "src/modules/agent-to-agent/guard.coverage.test.ts",
+      "note": "Already live-verified against a real DB before the 2026-09-24 audit; included for a complete registry."
+    }
+  ]
+}
