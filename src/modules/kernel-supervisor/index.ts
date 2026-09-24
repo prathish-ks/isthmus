@@ -317,7 +317,17 @@ export async function spawnKernel(nanogoPath: string, dockerNetworkDeps?: Docker
     // own MAX_CONSECUTIVE_FAILURES check. Found by code review; regression-
     // tested below ("re-arms the restart loop").
     consecutiveFailures += 1;
-    log.error('Failed to build nanogo serve arguments — container wake/kill will fail until this is fixed', {
+    // Purely factual, matching proc.on('exit', ...)'s own "nanogo serve
+    // exited unexpectedly" wording below — deliberately not claiming
+    // "wake/kill will fail until this is fixed" here, since that's not
+    // always true: scheduleRestart, called next, is what actually decides
+    // and says whether this retries ("Scheduling nanogo serve restart") or
+    // gives up ("keeps crashing — giving up automatic restarts... until
+    // this is fixed and the host is restarted"). An operator reading logs
+    // top-to-bottom should see one coherent verdict, not this line
+    // asserting "broken until fixed" immediately before scheduleRestart's
+    // own line says "retrying in Nms".
+    log.error('Failed to build nanogo serve arguments', {
       error: err instanceof Error ? err.message : String(err),
       consecutiveFailures,
     });

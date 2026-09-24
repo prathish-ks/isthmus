@@ -140,16 +140,31 @@ anything else has nowhere to go. The agent is non-root with no `NET_ADMIN`, so
 it cannot undo this. Identical mechanism on macOS and Linux (no host firewall,
 no `host-gateway` route).
 
-- **Self-healing:** the gateway is re-attached to the network at every spawn and
-  on each host-sweep tick, so an out-of-band detach (e.g. `docker compose up` on
-  the OneCLI stack — its compose lives in `~/.onecli`, not this repo) recovers
-  automatically.
-- **Fail-fast:** if lockdown is on but the network can't be created or the
-  gateway can't be attached (e.g. a non-standard gateway container name, or the
-  gateway isn't running), nanoclaw **refuses to spawn the agent** and surfaces a
-  clear error — it never silently falls back to open egress. Fix the cause (or
-  set `NANOCLAW_EGRESS_LOCKDOWN=false`) and retry. The host-sweep re-heal is the
-  exception: a heal failure there is logged but not fatal, since already-running
+- **Network topology is kernel-startup configuration, not per-spawn.** The
+  isolated network is established once, when `nanogo serve` starts (via
+  `kernel-supervisor/index.ts`, which computes and passes the kernel's
+  `-docker-network` flag) — not re-verified on every individual container
+  wake. This is deliberate: a kernel-mediated install has exactly one
+  process creating containers for its whole lifetime, and every container it
+  spawns during that lifetime shares the same network decision.
+- **Self-healing runs on host-sweep's ~60-second cadence**, not per spawn: an
+  out-of-band gateway detach (e.g. `docker compose up` on the OneCLI stack —
+  its compose lives in `~/.onecli`, not this repo) is re-attached automatically
+  within that window, not instantly. Containers spawned during that window stay
+  correctly isolated either way (no open-egress leak) — the only thing that can
+  lag is the gateway *route*, not the isolation itself.
+- **Fail-fast, in two places:** if lockdown is on but the network can't be
+  created or the gateway can't be attached (e.g. a non-standard gateway
+  container name, or the gateway isn't running), the kernel **refuses to
+  start** and surfaces a clear error — it never silently falls back to open
+  egress. The same fail-fast applies to a conflicting override: setting
+  `NANOCLAW_KERNEL_DOCKER_NETWORK` to a *different* network while lockdown is
+  on also refuses to start, rather than silently picking one — this is a hard
+  requirement under lockdown, not just an implementation detail, so treat a
+  startup failure naming that variable as "fix the conflict," not "retry and
+  hope." Fix the cause (or set `NANOCLAW_EGRESS_LOCKDOWN=false`) and restart
+  the kernel. The host-sweep re-heal above is the one exception to "fail
+  loud": a heal failure there is logged but not fatal, since already-running
   agents stay on the internal net (no leak) until the gateway returns.
 
 **Default: egress is open.** Lockdown is **off** unless you opt in; by default
