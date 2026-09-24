@@ -43,6 +43,7 @@ export default mergeConfig(
           'scripts/check-go-inbound.ts',
           'scripts/detect-driver-migration.ts',
           'scripts/ec07-live-host-smoke.ts',
+          'scripts/ec08-egress-lockdown-live-smoke.ts',
           'scripts/p3-06-mock-provider.ts',
           'scripts/sanity-live-poll.ts',
           'scripts/seed-discord.ts',
