@@ -5,12 +5,17 @@ on:
     branches: [main]
   # P9-05 (Phase 9/10 hardening): the upstream-watch job below needs its own
   # trigger, independent of this repo's own PR cadence — a new nanocoai/
-  # nanoclaw release can land on any day, PR or not. Weekly is deliberately
-  # loose (this is a "time for a human to look" signal, not a build gate;
-  # see docs/version-compatibility.md) with workflow_dispatch for an
-  # on-demand check (e.g. right after a Discord/release announcement).
+  # nanoclaw release can land on any day, PR or not. Originally weekly;
+  # moved to daily once sync-sibling-branches started sharing this same
+  # trigger, since that job actually pushes fast-forward updates to the
+  # channels/providers branches (not just a "time for a human to look"
+  # signal the way upstream-watch/egress-image-watch are) and a week-long
+  # gap between a channel/provider fix landing upstream and it reaching
+  # this project's mirror is a real cost, not just a stale docs pin. Still
+  # loose enough not to be a build gate; workflow_dispatch remains for an
+  # on-demand run (e.g. right after a Discord/release announcement).
   schedule:
-    - cron: "0 13 * * 1" # every Monday, 13:00 UTC
+    - cron: "0 13 * * *" # every day, 13:00 UTC
   workflow_dispatch: {}
 
 jobs:
@@ -873,7 +878,7 @@ jobs:
   # substituted (a deterministic provider, for the same reason EC-06 used
   # one).
   #
-  # Runs on every PR, plus weekly and on demand. That was NOT the original
+  # Runs on every PR, plus daily and on demand. That was NOT the original
   # decision. This job was first written as schedule + workflow_dispatch
   # only, on the stated assumption that building the agent image (apt +
   # chromium + bun + pnpm globals) would cost minutes of runner time on
@@ -1005,7 +1010,7 @@ jobs:
   # Deliberately narrow scope: this job does NOT clone nanocoai/nanoclaw,
   # rebuild it, or run its test suite against this project's Go behavior —
   # that would need real upstream checkout/build infrastructure this
-  # project doesn't have yet, and would turn a lightweight weekly signal
+  # project doesn't have yet, and would turn a lightweight daily signal
   # into a heavy, flaky job (the exact "running a check and requiring a
   # check to pass are different things" distinction this file's own
   # go-lint/go-vulncheck/semgrep comment already draws). What it DOES do:
@@ -1063,7 +1068,7 @@ jobs:
   # digest does NOT receive Alpine's routine security patches automatically
   # the way a floating tag would. This job is the automated "detect" half
   # of the policy that keeps that pin from silently going stale: same
-  # cadence and posture as upstream-watch above (weekly + on-demand,
+  # cadence and posture as upstream-watch above (daily + on-demand,
   # report-only, continue-on-error: true) — a mismatch here is not a
   # failure of this project, it's a prompt for a human to run
   # version-compatibility.md §5's review/decide/promote steps. Also meant
@@ -1097,3 +1102,40 @@ jobs:
           else
             echo "Up to date — the pinned digest still matches the live alpine:3.20 tag."
           fi
+
+  # sync-sibling-branches: keeps this project's own `channels` and
+  # `providers` branches (see CLAUDE.md's "Channels and Providers"
+  # section) fast-forwarded to nanocoai/nanoclaw's same-named branches.
+  # These two branches carry no Isthmus-specific commits -- /add-<channel>
+  # and /add-opencode/add-codex skills only ever copy individual files out
+  # of them via `git show <branch>:path`, never merge them into main -- so
+  # this project's copy is a pure mirror and keeping it current is safe to
+  # fully automate, unlike upstream-watch/egress-image-watch above (which
+  # only ever report, never act) because a fast-forward can't discard
+  # anything: scripts/sync-sibling-branch.sh refuses to push anything that
+  # isn't a strict fast-forward, and additionally skips the push (leaving
+  # only a ::warning::) if adopting upstream's tip would raise the
+  # branch's own whole-tree typecheck error count beyond its existing
+  # baseline (see that script's own comment for why a nonzero baseline is
+  # normal there). Same cadence and posture otherwise: daily + on-demand,
+  # report-only, continue-on-error: true -- a skipped sync is a prompt for
+  # a human, not a failure of this project.
+  sync-sibling-branches:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Sync channels
+        run: bash scripts/sync-sibling-branch.sh channels
+      - name: Sync providers
+        run: bash scripts/sync-sibling-branch.sh providers
