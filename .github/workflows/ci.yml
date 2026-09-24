@@ -5,12 +5,17 @@ on:
     branches: [main]
   # P9-05 (Phase 9/10 hardening): the upstream-watch job below needs its own
   # trigger, independent of this repo's own PR cadence — a new nanocoai/
-  # nanoclaw release can land on any day, PR or not. Weekly is deliberately
-  # loose (this is a "time for a human to look" signal, not a build gate;
-  # see docs/version-compatibility.md) with workflow_dispatch for an
-  # on-demand check (e.g. right after a Discord/release announcement).
+  # nanoclaw release can land on any day, PR or not. Originally weekly;
+  # moved to daily once sync-sibling-branches started sharing this same
+  # trigger, since that job actually pushes fast-forward updates to the
+  # channels/providers branches (not just a "time for a human to look"
+  # signal the way upstream-watch/egress-image-watch are) and a week-long
+  # gap between a channel/provider fix landing upstream and it reaching
+  # this project's mirror is a real cost, not just a stale docs pin. Still
+  # loose enough not to be a build gate; workflow_dispatch remains for an
+  # on-demand run (e.g. right after a Discord/release announcement).
   schedule:
-    - cron: "0 13 * * 1" # every Monday, 13:00 UTC
+    - cron: "0 13 * * *" # every day, 13:00 UTC
   workflow_dispatch: {}
 
 jobs:
@@ -362,7 +367,7 @@ jobs:
   ci:
     if: always()
     needs:
-      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check]
+      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -374,6 +379,7 @@ jobs:
           test "${{ needs.performance-gate.result }}" = success
           test "${{ needs.live-egress-lockdown.result }}" = success
           test "${{ needs.wiring-registry-check.result }}" = success
+          test "${{ needs.sync-sibling-branch-script-test.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
@@ -873,7 +879,7 @@ jobs:
   # substituted (a deterministic provider, for the same reason EC-06 used
   # one).
   #
-  # Runs on every PR, plus weekly and on demand. That was NOT the original
+  # Runs on every PR, plus daily and on demand. That was NOT the original
   # decision. This job was first written as schedule + workflow_dispatch
   # only, on the stated assumption that building the agent image (apt +
   # chromium + bun + pnpm globals) would cost minutes of runner time on
@@ -1005,7 +1011,7 @@ jobs:
   # Deliberately narrow scope: this job does NOT clone nanocoai/nanoclaw,
   # rebuild it, or run its test suite against this project's Go behavior —
   # that would need real upstream checkout/build infrastructure this
-  # project doesn't have yet, and would turn a lightweight weekly signal
+  # project doesn't have yet, and would turn a lightweight daily signal
   # into a heavy, flaky job (the exact "running a check and requiring a
   # check to pass are different things" distinction this file's own
   # go-lint/go-vulncheck/semgrep comment already draws). What it DOES do:
@@ -1063,7 +1069,7 @@ jobs:
   # digest does NOT receive Alpine's routine security patches automatically
   # the way a floating tag would. This job is the automated "detect" half
   # of the policy that keeps that pin from silently going stale: same
-  # cadence and posture as upstream-watch above (weekly + on-demand,
+  # cadence and posture as upstream-watch above (daily + on-demand,
   # report-only, continue-on-error: true) — a mismatch here is not a
   # failure of this project, it's a prompt for a human to run
   # version-compatibility.md §5's review/decide/promote steps. Also meant
@@ -1097,3 +1103,111 @@ jobs:
           else
             echo "Up to date — the pinned digest still matches the live alpine:3.20 tag."
           fi
+
+  # sync-sibling-branch-script-test: a Copilot PR review caught a real bug
+  # in scripts/sync-sibling-branch.sh (count_errors piped `tsc --noEmit`
+  # straight into `wc -l` with no `|| true`, so `set -euo pipefail` turned
+  # tsc's ordinary non-zero exit -- which happens on every real run
+  # against these branches -- into a script-aborting failure; the
+  # warn-and-skip path the script exists to reach could never be
+  # exercised) that only a live run of sync-sibling-branches below, which
+  # only fires on schedule/workflow_dispatch, would ever have surfaced.
+  # This job runs scripts/sync-sibling-branch.test.sh -- a stub-`pnpm`
+  # regression test for exactly that failure mode -- on every PR instead,
+  # so a future edit to the sync script that reintroduces this class of
+  # bug is caught before merge, not on the next scheduled run. Needs
+  # neither Node nor pnpm: the test's stub `pnpm` on PATH fully replaces
+  # the real one, and the only other command the script under test uses is
+  # `git worktree add` against this checkout's own HEAD.
+  sync-sibling-branch-script-test:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/sync-sibling-branch.test.sh
+
+  # sync-sibling-branches-{check,push}: keeps this project's own `channels`
+  # and `providers` branches (see CLAUDE.md's "Channels and Providers"
+  # section) fast-forwarded to nanocoai/nanoclaw's same-named branches.
+  # These two branches carry no Isthmus-specific commits -- /add-<channel>
+  # and /add-opencode/add-codex skills only ever copy individual files out
+  # of them via `git show <branch>:path`, never merge them into main -- so
+  # this project's copy is a pure mirror and keeping it current is safe to
+  # fully automate, unlike upstream-watch/egress-image-watch above (which
+  # only ever report, never act) because a fast-forward can't discard
+  # anything: scripts/sync-sibling-branch.sh refuses to push anything that
+  # isn't a strict fast-forward, and additionally skips the push (leaving
+  # only a ::warning::) if adopting upstream's tip would raise the
+  # branch's own whole-tree typecheck error count beyond its existing
+  # baseline (see that script's own comment for why a nonzero baseline is
+  # normal there). Same cadence and posture otherwise: daily + on-demand,
+  # report-only, continue-on-error: true -- a skipped sync is a prompt for
+  # a human, not a failure of this project.
+  #
+  # Split into a read-only "check" job and a write-only "push" job -- not
+  # a stylistic choice, a security boundary a Copilot PR review correctly
+  # called a merge blocker on the original single-job design: that design
+  # ran `pnpm install`/`pnpm exec tsc` (to run the typecheck health check)
+  # against upstream's fetched tree in the SAME job that held a
+  # `contents: write` token for the eventual push. `pnpm install` can
+  # execute arbitrary lifecycle scripts from fetched package metadata,
+  # from either branch or any transitive dependency of theirs; a
+  # compromise there could have pushed unauthorized refs or exfiltrated
+  # the token, regardless of how much this project trusts nanocoai/
+  # nanoclaw's own maintainers specifically -- their dependency tree is a
+  # much larger, less-vetted trust boundary than the maintainers
+  # themselves. check runs under `permissions: contents: read` with
+  # checkout credentials not persisted at all (nothing worth stealing is
+  # available to whatever executes in the fetched worktrees) and never
+  # pushes; push runs under `contents: write` but never installs or
+  # executes anything it fetched -- only `git fetch`/`git push` against
+  # ref names and SHAs, and it independently re-verifies (fails closed,
+  # ::warning:: not error) that upstream's tip still matches exactly what
+  # check verified before pushing, rather than trusting a SHA carried
+  # across the job boundary. See scripts/sync-sibling-branch.sh's own
+  # header for the full check/push contract.
+  sync-sibling-branches-check:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      channels_should_push: ${{ steps.channels.outputs.should_push }}
+      channels_target_sha: ${{ steps.channels.outputs.target_sha }}
+      providers_should_push: ${{ steps.providers.outputs.should_push }}
+      providers_target_sha: ${{ steps.providers.outputs.target_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Check channels
+        id: channels
+        run: bash scripts/sync-sibling-branch.sh check channels
+      - name: Check providers
+        id: providers
+        run: bash scripts/sync-sibling-branch.sh check providers
+
+  sync-sibling-branches-push:
+    needs: sync-sibling-branches-check
+    if: needs.sync-sibling-branches-check.outputs.channels_should_push == 'true' || needs.sync-sibling-branches-check.outputs.providers_should_push == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push channels
+        if: needs.sync-sibling-branches-check.outputs.channels_should_push == 'true'
+        run: bash scripts/sync-sibling-branch.sh push channels "${{ needs.sync-sibling-branches-check.outputs.channels_target_sha }}"
+      - name: Push providers
+        if: needs.sync-sibling-branches-check.outputs.providers_should_push == 'true'
+        run: bash scripts/sync-sibling-branch.sh push providers "${{ needs.sync-sibling-branches-check.outputs.providers_target_sha }}"
