@@ -242,7 +242,10 @@ describe('a line typed at the CLI socket reaches the kernel', () => {
       });
       client.write(JSON.stringify({ text: 'smoke: hello from the terminal' }) + '\n');
 
-      await eventually('the kernel to receive a container.wake', () => kernel.requestsFor('container.wake').length === 1);
+      await eventually(
+        'the kernel to receive a container.wake',
+        () => kernel.requestsFor('container.wake').length === 1,
+      );
 
       // 1. The message became a real inbound row for a real session.
       const session = await findSessionForAgent(AGENT_GROUP_ID, MESSAGING_GROUP_ID, null);

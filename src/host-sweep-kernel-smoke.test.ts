@@ -72,7 +72,10 @@ const sweepTickCallbacks: Array<() => void> = [];
 let setTimeoutSpy: ReturnType<typeof vi.spyOn>;
 
 async function waitForFullSweepTick(): Promise<void> {
-  await eventually('the sweep tick to fully complete (self-reschedule captured)', () => sweepTickCallbacks.length === 1);
+  await eventually(
+    'the sweep tick to fully complete (self-reschedule captured)',
+    () => sweepTickCallbacks.length === 1,
+  );
 }
 
 let kernel: RecordingKernel;
@@ -154,7 +157,10 @@ describe('a sweep tick with a due message reaches the kernel over a real socket'
   it('wakes the session through a real wakeContainer call', async () => {
     startHostSweep();
 
-    await eventually('the kernel to receive a container.wake for the due session', () => kernel.requestsFor('container.wake').length === 1);
+    await eventually(
+      'the kernel to receive a container.wake for the due session',
+      () => kernel.requestsFor('container.wake').length === 1,
+    );
     const wake = kernel.requestsFor('container.wake')[0];
     expect(wake.payload.session?.key).toMatchObject({
       agentGroupId: AGENT_GROUP_ID,
