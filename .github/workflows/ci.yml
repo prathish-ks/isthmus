@@ -1143,10 +1143,21 @@ jobs:
   # normal there). Same cadence and posture otherwise: daily + on-demand,
   # report-only, continue-on-error: true -- a skipped sync is a prompt for
   # a human, not a failure of this project.
+  #
+  # timeout-minutes: 30 -- same live-host-docker precedent above (bound a
+  # report-only job's worst case explicitly rather than rely on the
+  # 360-minute platform default; continue-on-error only keeps a failure
+  # here from blocking the `ci` gate, it does nothing about a runner
+  # hanging indefinitely). This job does up to two `pnpm install`s and two
+  # `tsc --noEmit` runs per branch (before/after the pull), times two
+  # branches -- a stalled package-registry request or a hung compiler
+  # process could otherwise pin a runner well past any plausible real
+  # duration for this work.
   sync-sibling-branches:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
