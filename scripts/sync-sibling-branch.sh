@@ -46,7 +46,12 @@ count_errors() {
 
 main() {
   local branch="${1:?usage: sync-sibling-branch.sh <branch-name>}"
-  local upstream_url="https://github.com/nanocoai/nanoclaw.git"
+  # Overridable so sync-sibling-branch.test.sh can point main() at a local
+  # throwaway repo instead of the real network -- see that file's
+  # "end-to-end, real git" test for why this matters more than it looks:
+  # it's what lets that test exercise this exact function for real, rather
+  # than just its count_errors() helper in isolation.
+  local upstream_url="${SYNC_SIBLING_UPSTREAM_URL:-https://github.com/nanocoai/nanoclaw.git}"
 
   echo "=== ${branch} ==="
 
@@ -80,7 +85,31 @@ main() {
   # signal is whether the pull grows that baseline, not whether it's zero.
   local tmp_root
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' RETURN
+  # RETURN, not EXIT: this function is called from sync-sibling-branch.test.sh
+  # after sourcing the script, where an EXIT trap set here would silently
+  # clobber whatever EXIT trap the calling test script had already
+  # installed for its own cleanup (bash traps are one slot per signal).
+  # RETURN fires once, when *this* function (main) returns -- not when a
+  # function it calls, like count_errors, returns: RETURN/DEBUG traps are
+  # not inherited by called functions unless the function has the trace
+  # attribute (`declare -t`) or `set -o functrace` is on, neither of which
+  # this script does. Verified by hand and covered by this file's own
+  # end-to-end test in sync-sibling-branch.test.sh, which calls main() for
+  # real (two real count_errors invocations sharing one $tmp_root) rather
+  # than only asserting the trap-timing claim in the abstract.
+  #
+  # Also removes both worktrees explicitly, not just $tmp_root's files:
+  # `rm -rf` alone deletes a worktree's checkout directory but leaves its
+  # entry in this repo's own .git/worktrees/ metadata dangling (visible as
+  # a broken entry in `git worktree list` until something runs `git
+  # worktree prune`) -- harmless in a throwaway CI checkout that's
+  # discarded after the job, but worth doing properly regardless.
+  cleanup_tmp_root() {
+    git worktree remove --force "${tmp_root}/before" 2>/dev/null || true
+    git worktree remove --force "${tmp_root}/after" 2>/dev/null || true
+    rm -rf "$tmp_root"
+  }
+  trap cleanup_tmp_root RETURN
 
   local before_errors=0
   if [ -n "$origin_sha" ]; then
@@ -88,9 +117,6 @@ main() {
   fi
   local after_errors
   after_errors="$(count_errors "refs/remotes/sibling-upstream/${branch}" "${tmp_root}/after")"
-
-  git worktree remove --force "${tmp_root}/before" 2>/dev/null || true
-  git worktree remove --force "${tmp_root}/after" 2>/dev/null || true
 
   echo "${branch}: typecheck error count before=${before_errors} after=${after_errors}"
 
