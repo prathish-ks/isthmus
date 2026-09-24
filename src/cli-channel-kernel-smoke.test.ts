@@ -86,10 +86,8 @@ import {
   runMigrations,
 } from './db/index.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
-import { DockerSessionDriver } from './drivers/docker-driver.js';
 import { FakeCli } from './drivers/fake-cli.js';
-import { mountPolicy, resetSessionDriver, withSessionEvents } from './drivers/index.js';
-import { resetGatewayProvider, type GatewayProvider } from './gateway-providers/index.js';
+import { setUpSeamRealDriver, tearDownSeamRealDriver } from './drivers/seam-real-setup.js';
 import { RecordingKernel, eventually } from './kernel/fake-server.js';
 import { KERNEL_PROTOCOL_VERSION } from './kernel/protocol.js';
 import { inboundDbPath, outboundDbPath } from './mailbox/sqlite/paths.js';
@@ -188,29 +186,7 @@ beforeEach(async () => {
     created_at: now(),
   });
 
-  // No gateway on a CI runner, and the gateway's contribution is not what
-  // this seam is about. `resetGatewayProvider` is the module's own declared
-  // test seam, not a reach-in.
-  const noGateway: GatewayProvider = {
-    kind: 'none',
-    contribute: async () => ({ env: {}, mounts: [] }),
-  };
-  resetGatewayProvider(noGateway);
-
-  // The REAL DockerSessionDriver — real validateSpec, real KernelClient
-  // against the mocked KERNEL_SOCKET_PATH — with only the docker binary
-  // faked. `resetSessionDriver` is the module's own declared test seam.
-  fakeCli = new FakeCli('docker');
-  // `prepare` runs an idempotency pre-check before the wake: it predicts the
-  // container name and asks docker whether something already wears it. A
-  // FakeCli with no scripted answer returns '' WITHOUT throwing, which
-  // `#existingSession` reads as "a container exists, with labels that are not
-  // this session's" — a name collision, refused before the kernel is ever
-  // dialled. Real docker exits non-zero for a name that does not exist, and
-  // that throw is exactly what the check catches as "no container". Scripting
-  // it is what makes the fake honest rather than convenient.
-  fakeCli.responses = [{ match: /^inspect /, throws: 'Error: No such object' }];
-  resetSessionDriver(withSessionEvents(new DockerSessionDriver({ ...mountPolicy(), cli: fakeCli })));
+  fakeCli = setUpSeamRealDriver();
 
   kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'), {
     allowed: true,
@@ -225,8 +201,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await teardownChannelAdapters();
-  resetSessionDriver(null);
-  resetGatewayProvider(null);
+  tearDownSeamRealDriver();
   await kernel.close();
   await closeDb();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });

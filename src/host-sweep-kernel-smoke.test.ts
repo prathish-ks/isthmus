@@ -40,10 +40,7 @@ vi.mock('./config.js', async () => {
 
 import { closeDb, createAgentGroup, ensureContainerConfig, initTestDb, runMigrations } from './db/index.js';
 import { createSession } from './db/sessions.js';
-import { DockerSessionDriver } from './drivers/docker-driver.js';
-import { FakeCli } from './drivers/fake-cli.js';
-import { mountPolicy, resetSessionDriver, withSessionEvents } from './drivers/index.js';
-import { resetGatewayProvider, type GatewayProvider } from './gateway-providers/index.js';
+import { setUpSeamRealDriver, tearDownSeamRealDriver } from './drivers/seam-real-setup.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { RecordingKernel, eventually } from './kernel/fake-server.js';
 import { initSessionFolder, writeSessionMessage } from './session-manager.js';
@@ -128,12 +125,7 @@ beforeEach(async () => {
     content: '{"text":"hi"}',
   });
 
-  const noGateway: GatewayProvider = { kind: 'none', contribute: async () => ({ env: {}, mounts: [] }) };
-  resetGatewayProvider(noGateway);
-
-  const fakeCli = new FakeCli('docker');
-  fakeCli.responses = [{ match: /^inspect /, throws: 'Error: No such object' }];
-  resetSessionDriver(withSessionEvents(new DockerSessionDriver({ ...mountPolicy(), cli: fakeCli })));
+  setUpSeamRealDriver();
 
   kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'), {
     allowed: true,
@@ -146,8 +138,7 @@ beforeEach(async () => {
 afterEach(async () => {
   stopHostSweep();
   setTimeoutSpy.mockRestore();
-  resetSessionDriver(null);
-  resetGatewayProvider(null);
+  tearDownSeamRealDriver();
   await kernel.close();
   await closeDb();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
