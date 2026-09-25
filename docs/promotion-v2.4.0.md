@@ -309,12 +309,12 @@ routine version bump," above.
 
 | # | Task | Status |
 |---|---|---|
-| A1 | `internal/mount`: add `MountClass` value `gateway-trust`, `Policy.GatewayTrustRoot`, admission rule (ro-only, agent-role-allowed) mirroring `types.ts`'s new rule exactly | Not started |
+| A1 | `internal/mount`: add `MountClass` value `gateway-trust`, `Policy.GatewayTrustRoot`, admission rule (ro-only, agent-role-allowed) mirroring `types.ts`'s new rule exactly | **Done** — `feat/mount-gateway-trust-class`, commit `5dd6ec64`. Ported class/policy field/admission rule/class-pinning in `ValidateSpec`, `ClassRequiredByPath`, `mountAllowed`, exact TS ordering (gateway-trust checked before identity-material). Also extended this package's own Go-only symlink-escape hardening to the new pinned root. Real bug found and fixed via LAW-06 (run existing suite before assuming correctness): `underRoot(path, "")` matches every absolute path, so unset `GatewayTrustRoot` silently misclassified every mount — fixed with an explicit empty-root fail-closed guard, verified via negative control (reverted the guard, confirmed 3 tests catch it, restored). Full `go-host` suite (`go build`, `go vet`, `gofmt`, `go test -race ./...`, all packages) green |
 | A2 | `internal/kernel`: extend the wire payload (`CapabilityRequestPayload`) to carry `networkAccess` and multi-container `SessionSpec.containers`. Produce the **mixed-version compatibility matrix** below as part of this task, not just a yes/no bump decision | Not started |
 | A3 | `internal/kernel` executor: implement per-session `docker network create --internal` + auxiliary container spawn, mirroring upstream's `docker-driver.ts` logic in Go (no upstream Go source exists to port from — this is original implementation work, not translation) | Not started |
 | A4 | `internal/containerdefaults`: assess whether auxiliary/gateway-proxy containers need a different hardening posture than the agent container (they're not the agent, but they're not fully trusted either) | Not started |
-| A5 | Live-Docker tests proving a multi-container session actually gets a working, correctly-isolated private network — real container membership and isolation, not just that the generated argv looks right. **Must be PASSED + REQUIRED per "What 'the gate passed' means," above** — a report-only run does not satisfy this row. This is the `go-multi-container-live-docker` job named under Workstream G; not "Done" until `ci.yml`'s `needs:` actually names it (G1's Definition of done) | Not started |
-| A6 | Unit tests for the new mount class, table-driven, matching `internal/mount`'s existing style | Not started |
+| A5 | Live-Docker tests proving a multi-container session actually gets a working, correctly-isolated private network — real container membership and isolation, not just that the generated argv looks right. **Must be PASSED + REQUIRED per "What 'the gate passed' means," above** — a report-only run does not satisfy this row. This is the `go-multi-container-live-docker` job named under Workstream G; not "Done" until `ci.yml`'s `needs:` actually names it (G1's Definition of done) | Not started — blocked on A3 (no multi-container executor to test against yet) |
+| A6 | Unit tests for the new mount class, table-driven, matching `internal/mount`'s existing style | **Done** — `feat/mount-gateway-trust-class`, commit `5dd6ec64`. Table-driven admission suite, a two-container test proving gateway-trust works on a non-agent (auxiliary proxy) role — the real Iron Proxy shape — the empty-root fail-closed regression test, and a `ResolveSymlinks` escape test |
 
 **A2's mixed-version compatibility matrix (fill in before deciding the
 `ProtocolVersion` question, not after)**:
@@ -352,8 +352,8 @@ didn't cover (it only checked data shapes).
 | File | Data-shape impact (from prior pass) | Call-sequencing impact | Status |
 |---|---|---|---|
 | `container-runner.ts` | Major — gateway-session-lifecycle wrapping (load-bearing) + durable-host shadow-writes (upstream-confirmed inert) tangled in one ~900-line diff | Not yet assessed | Not started |
-| `drivers/docker-driver.ts` | Major — see Workstream A | N/A, IS the seam | In progress (A) |
-| `drivers/types.ts` | Major — see Workstream A | N/A | In progress (A) |
+| `drivers/docker-driver.ts` | Major — see Workstream A | N/A, IS the seam | In progress (A) — Go-side A3 (executor) not started; this TS file itself untouched so far |
+| `drivers/types.ts` | Major — see Workstream A | N/A | In progress (A) — Go-side mount-class port (A1) done in `internal/mount`; this TS file itself untouched so far (Isthmus's own `types.ts` doesn't yet declare `gateway-trust`/`networkAccess` — that's part of actually wiring A2/A3 through, not A1's scope) |
 | `drivers/index.ts` | Minor (wiring) | Not yet assessed | Not started |
 | `drivers/session-events.ts` | Minor | Not yet assessed | Not started |
 | `drivers/spec-fixture.ts` | Test fixture only | N/A | Not started |
@@ -696,3 +696,16 @@ the final pin-move PR.
   invented beyond reusing that existing section). Both carried into
   `go-host/docs/upstream-promotion-playbook.md`'s Step 9 and the
   per-promotion instance template.
+- 2026-09-25 — Execution begins. Workstream A1/A6 done:
+  `feat/mount-gateway-trust-class`, commit `5dd6ec64` (separate worktree/
+  branch, per "PR boundaries" — not this planning branch). Ported the
+  `gateway-trust` `MountClass` to `internal/mount`, found and fixed a
+  real bug the port itself exposed (an unset `GatewayTrustRoot` silently
+  misclassified every mount, caught by running the existing test suite
+  before assuming the port was correct), added table-driven tests
+  including a genuine two-container case proving the class works on a
+  non-agent auxiliary role. Full `go-host` suite green including
+  `-race`. A2 (wire payload + mixed-version compatibility matrix), A3
+  (executor: network creation + multi-container spawn — no upstream Go
+  source to port from), A4 (hardening posture), and A5 (live-Docker
+  tests, blocked on A3) remain. Continuing sequentially.
