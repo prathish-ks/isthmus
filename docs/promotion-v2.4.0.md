@@ -389,10 +389,11 @@ outside `drivers/docker-driver.ts`.
 
 | # | Task | Status |
 |---|---|---|
-| C1 | Trace `ensureGatewaySession`/`stopGatewaySessionsForUnavailability` (`container-runner.ts`) end to end: can a session reach the gateway, or keep reaching it after the gateway becomes unavailable, through any path that skips this function? | Not started |
-| C2 | Trace `permitsConfiguredGatewayRead` (`gateway-read-policy.ts`): is the `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` env-var allowlist the *only* gate on read-only gateway destinations, and is it consulted on every code path that makes an outbound gateway request? | Not started |
-| C3 | Confirm the OneCLI-as-skill restructuring doesn't change *how* credentials reach a container — still exclusively via a kernel-admitted `gateway-trust`/`identity-material` mount, never a new env-var or volume path the kernel doesn't validate | Not started |
-| C4 | Full re-sweep of the 21 gateway files plus a fresh repo-wide grep (not scoped to `src/` this time — check `container/agent-runner/src/` and `setup/` too) for new `docker`/`exec`/credential-handling code introduced anywhere in the v2.4.0 diff that this plan hasn't already accounted for. Cross-reference against the Workstream D file inventory once it exists, rather than re-deriving file lists independently | Not started |
+| C0 | **New (2026-09-25), gates C1**: record, via ADR, whether/how Isthmus adopts upstream's gateway-session-lifecycle behavior (`claimSessionRun`/`ensureGatewaySession`/`stopGatewaySessionsForUnavailability`/`watchGatewayAvailability` — verbatim, a narrower Isthmus-specific design, or deferred entirely). This was already flagged as an open decision in the plan's own Non-goals section but had no numbered task; added because C1 as originally written traces functions that don't exist anywhere in this tree today (confirmed: neither at Isthmus's current HEAD nor upstream's v2.3.0 — they're new in v2.4.0, and Isthmus hasn't adopted them) | Not started |
+| C1 | Once C0 lands and only if it decides to adopt: trace `ensureGatewaySession`/`stopGatewaySessionsForUnavailability` (`container-runner.ts`) end to end: can a session reach the gateway, or keep reaching it after the gateway becomes unavailable, through any path that skips this function? | Blocked on C0 |
+| C2 | Trace `permitsConfiguredGatewayRead` (`gateway-read-policy.ts`): is the `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` env-var allowlist the *only* gate on read-only gateway destinations, and is it consulted on every code path that makes an outbound gateway request? | **Blocked on C0** — confirmed `gateway-read-policy.ts` is itself entirely new in v2.4.0 (absent from v2.3.0), part of the same not-yet-adopted gateway-session-lifecycle feature bundle as C1's functions |
+| C3 | Confirm the OneCLI-as-skill restructuring doesn't change *how* credentials reach a container — still exclusively via a kernel-admitted `gateway-trust`/`identity-material` mount, never a new env-var or volume path the kernel doesn't validate | Independently executable, not gated on C0 — Isthmus still has `src/gateway-providers/onecli.ts` baked into core (matches v2.3.0's layout; upstream v2.4.0 moved it to `.claude/skills/add-onecli/payload/`). Not started |
+| C4 | Full re-sweep of the 21 gateway files plus a fresh repo-wide grep (not scoped to `src/` this time — check `container/agent-runner/src/` and `setup/` too) for new `docker`/`exec`/credential-handling code introduced anywhere in the v2.4.0 diff that this plan hasn't already accounted for. Cross-reference against the Workstream D file inventory once it exists, rather than re-deriving file lists independently | Independently executable, not gated on C0. Not started |
 | C5 | For each finding: either close it (route through the kernel, or an existing guard) or produce a full **acceptance record** (see below) — never a bare "accepted and documented" note | Not started |
 | C6 | Security-focused review pass using the `code-review` skill, scoped specifically to trust-boundary findings on this diff (not general bug-hunting) | Not started |
 
@@ -474,6 +475,33 @@ promotion gate's "zero unclassified rows" requirement.
 The full-repo sweep this inventory is built from must cover `src/`,
 `container/agent-runner/src/`, `setup/`, and `.claude/skills/` — not `src/`
 alone, per the same lesson.
+
+**Findings already known going into D0** (from Workstream B's audit, 2026-09-25
+— seed these rows rather than re-deriving from scratch):
+
+- `src/container-runner.ts`'s `buildMounts`: a **provider-host-contract
+  mount-composition rewrite** (`getProviderHostContract`/
+  `realizeProviderSpawnSurfaces`, `contract.stateVolumes`/`.skillViews`/
+  `.skillBackings`), replacing the old `providerProvidesAgentSurfaces`/
+  `providerContribution.mounts` callback pattern. Orthogonal to
+  gateway-trust — affects every provider's mount composition, not just a
+  gateway's. Bucket **A-adjacent**: its output still terminates in the same
+  kernel-validated `MountSpec[]` (A1's admission rules apply regardless of
+  how the array was built), so it is not itself a new bypass path, but it
+  is a substantial feature decision requiring its own reconciliation pass —
+  D3's "genuinely independent vs. needs manual reconciliation" question,
+  at real scale.
+- `src/cli/resources/groups.ts`: a new `--speed` inference-tier flag
+  (`provider-contracts/registry.ts`-declared) and a new `connect` custom
+  operation (`src/gateway-connections.ts`, core, not skill-payload). Bucket
+  **C**, unrelated to each other and to the gateway work.
+- `src/modules/agent-to-agent/agent-route.ts`, `create-agent.ts`,
+  `src/cli/resources/groups.ts` (restart handler): `wakeContainer` →
+  `requestWake(session, reason)`. Bucket **C**, confirmed behavior-inert
+  (upstream's own `request-wake.ts` doc comment: "byte-equivalent...
+  no logging, no signal writes, no behavior" until the durable rows become
+  authoritative) — same classification as the already-`Done` `host-sweep.ts`/
+  `reconcile.ts`/`request-wake.ts` row in Workstream B's table.
 
 | # | Task | Status |
 |---|---|---|
