@@ -131,7 +131,7 @@ jobs:
 
       - name: Assume the read-only role
         if: steps.pin.outcome == 'success'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AGENT_IMAGE_CI_ROLE_ARN }}
           aws-region: us-east-1
@@ -170,7 +170,7 @@ jobs:
         id: approver
         if: steps.sig.outcome == 'success'
         continue-on-error: true
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.AGENT_IMAGE_APPROVER_APP_ID }}
           private-key: ${{ secrets.AGENT_IMAGE_APPROVER_PRIVATE_KEY }}

@@ -38,6 +38,14 @@ beforeEach(() => {
     GROUPS_DIR: groupsDir,
     KERNEL_SOCKET_PATH: socketPath,
     MOUNT_ALLOWLIST_PATH: allowlistPath,
+    EGRESS_LOCKDOWN: false,
+  }));
+  // Safe, inert default for every test that doesn't care about egress
+  // lockdown specifically — the "egress-lockdown network wiring" describe
+  // block below overrides this per-test.
+  vi.doMock('../../egress-lockdown.js', () => ({
+    EGRESS_NETWORK: 'unused-in-this-test',
+    ensureEgressNetwork: vi.fn().mockReturnValue(false),
   }));
 });
 
@@ -265,4 +273,163 @@ describe('kernel-supervisor: serve config file', () => {
       await cb();
     }
   }, 10_000);
+});
+
+describe('kernel-supervisor: egress-lockdown network wiring', () => {
+  // Regression coverage for the EC-02 gap: once wake moved behind the
+  // kernel, drivers/index.ts's dockerNetworkArgs(spec) stopped participating
+  // in container creation at all (see docker-driver.ts's own comment on
+  // `networkArgsFor`), so NANOCLAW_EGRESS_LOCKDOWN=true stopped attaching
+  // any container to the isolated network — the network was still created
+  // (host-sweep.ts keeps calling ensureEgressNetwork()), so it looked
+  // active while doing nothing. These tests pin the fix: the kernel's own
+  // process-wide `-docker-network` flag must reflect the lockdown decision.
+  //
+  // Most tests below pass DockerNetworkDeps directly to
+  // dockerNetworkArgs/buildServeArgs/spawnKernel rather than re-mocking
+  // config.js/egress-lockdown.js via vi.doMock + dynamic import per case.
+  // The doMock approach was tried first and proved genuinely flaky under
+  // vitest with this many sequential per-test overrides of the same two
+  // specifiers in one file (reproduced directly: 60-80% failure rates
+  // across repeated full-file runs, with wrong values from one test
+  // leaking into another) — not a one-off, and not worth chasing further
+  // as a test-infrastructure problem when the function itself was easy to
+  // make injectable. Only the "falls back to the real wiring" test still
+  // needs module mocking, since it specifically tests that fallback.
+
+  afterEach(() => {
+    delete process.env.NANOCLAW_KERNEL_DOCKER_NETWORK;
+  });
+
+  it('passes -docker-network for the egress network when lockdown is on, and establishes it', async () => {
+    const ensureEgressNetwork = vi.fn().mockReturnValue(true);
+    const mod = await import('./index.js');
+    const args = mod.dockerNetworkArgs({ egressLockdown: true, egressNetwork: 'nanoclaw-egress', ensureEgressNetwork });
+    expect(args).toEqual(['-docker-network', 'nanoclaw-egress']);
+    expect(ensureEgressNetwork).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates EgressLockdownError (or any establish failure) rather than starting the kernel on open egress', async () => {
+    class EgressLockdownError extends Error {}
+    const ensureEgressNetwork = vi.fn().mockImplementation(() => {
+      throw new EgressLockdownError('gateway container is not running');
+    });
+    const mod = await import('./index.js');
+    expect(() =>
+      mod.dockerNetworkArgs({ egressLockdown: true, egressNetwork: 'nanoclaw-egress', ensureEgressNetwork }),
+    ).toThrow('gateway container is not running');
+  });
+
+  it('spawnKernel reports failure (not a crash) when buildServeArgs throws', async () => {
+    const lifecycle = await import('../../host-lifecycle.js');
+    const mod = await import('./index.js');
+    const deps = {
+      egressLockdown: true,
+      egressNetwork: 'nanoclaw-egress',
+      ensureEgressNetwork: vi.fn().mockImplementation(() => {
+        throw new Error('gateway unreachable');
+      }),
+    };
+    // nanogoPath is never read on this path: buildServeArgs() throws before
+    // spawn() would use it, so a placeholder (not a real fixture script)
+    // correctly signals that.
+    await expect(mod.spawnKernel('unused-nanogo-path', deps)).resolves.toBe(false);
+    // spawnKernel's catch now calls scheduleRestart (see the next test),
+    // which arms a real setTimeout — must be cleared via shutdown before
+    // this test ends, or it fires ~1s later during a LATER test.
+    for (const cb of lifecycle.getHostShutdownCallbacks()) {
+      await cb();
+    }
+  });
+
+  it('re-arms the restart loop when buildServeArgs throws, instead of permanently ending kernel supervision', async () => {
+    // Regression test for the bug code review found in this fix's own first
+    // draft: the catch in spawnKernel returned false without ever calling
+    // spawn(), so proc.on('exit', ...) — the only other place that counts a
+    // failure and calls scheduleRestart — never fired, silently ending all
+    // retries after one transient failure. Asserted via the state mutation
+    // directly (getConsecutiveFailuresForTests): only true if
+    // scheduleRestart's own failure-counting path actually ran.
+    const lifecycle = await import('../../host-lifecycle.js');
+    const mod = await import('./index.js');
+    const deps = {
+      egressLockdown: true,
+      egressNetwork: 'nanoclaw-egress',
+      ensureEgressNetwork: vi.fn().mockImplementation(() => {
+        throw new Error('gateway not up yet');
+      }),
+    };
+    const before = mod.getConsecutiveFailuresForTests();
+    const result = await mod.spawnKernel('unused-nanogo-path', deps);
+    expect(result).toBe(false);
+    expect(mod.getConsecutiveFailuresForTests()).toBe(before + 1);
+    for (const cb of lifecycle.getHostShutdownCallbacks()) {
+      await cb();
+    }
+  });
+
+  it('refuses a conflicting NANOCLAW_KERNEL_DOCKER_NETWORK rather than silently picking one', async () => {
+    process.env.NANOCLAW_KERNEL_DOCKER_NETWORK = 'some-other-network';
+    const mod = await import('./index.js');
+    expect(() =>
+      mod.dockerNetworkArgs({
+        egressLockdown: true,
+        egressNetwork: 'nanoclaw-egress',
+        ensureEgressNetwork: vi.fn().mockReturnValue(true),
+      }),
+    ).toThrow(/conflicting network/);
+  });
+
+  it('still honors NANOCLAW_KERNEL_DOCKER_NETWORK when lockdown is off (no behavior change for non-lockdown installs)', async () => {
+    process.env.NANOCLAW_KERNEL_DOCKER_NETWORK = 'custom-net';
+    const ensureEgressNetwork = vi.fn();
+    const mod = await import('./index.js');
+    const args = mod.dockerNetworkArgs({
+      egressLockdown: false,
+      egressNetwork: 'nanoclaw-egress',
+      ensureEgressNetwork,
+    });
+    expect(args).toEqual(['-docker-network', 'custom-net']);
+    expect(ensureEgressNetwork).not.toHaveBeenCalled();
+  });
+
+  it('passes no -docker-network flag when lockdown is off and no override is set (default bridge, unchanged)', async () => {
+    const mod = await import('./index.js');
+    const args = mod.dockerNetworkArgs({
+      egressLockdown: false,
+      egressNetwork: 'nanoclaw-egress',
+      ensureEgressNetwork: vi.fn(),
+    });
+    expect(args).toEqual([]);
+  });
+
+  it('buildServeArgs threads dockerNetworkDeps through to dockerNetworkArgs', async () => {
+    const mod = await import('./index.js');
+    const args = mod.buildServeArgs({
+      egressLockdown: true,
+      egressNetwork: 'nanoclaw-egress',
+      ensureEgressNetwork: vi.fn().mockReturnValue(true),
+    });
+    expect(args).toEqual(expect.arrayContaining(['-docker-network', 'nanoclaw-egress']));
+  });
+
+  it('falls back to the real EGRESS_LOCKDOWN/ensureEgressNetwork wiring when no deps are passed', async () => {
+    // Verifies defaultDockerNetworkDeps() actually reads config.js/
+    // egress-lockdown.js — i.e. that production callers (which never pass
+    // deps) are wired to the real thing, not just that the injected-deps
+    // logic is correct in isolation (the other tests in this block).
+    // Deliberately does NOT call vi.doMock itself — relies solely on the
+    // shared beforeEach's own registration for these two specifiers, so
+    // there's only ever one doMock per specifier in play for this test.
+    // A second, test-local override of the same specifiers (tried first)
+    // proved flaky under vitest — reproduced directly, not a one-off — so
+    // this checks the wiring by reading back what the shared mock already
+    // provides instead.
+    const egressLockdown = await import('../../egress-lockdown.js');
+    const mod = await import('./index.js');
+    const deps = mod.defaultDockerNetworkDeps();
+    expect(deps.egressLockdown).toBe(false); // the shared beforeEach's own default
+    expect(deps.egressNetwork).toBe('unused-in-this-test');
+    expect(deps.ensureEgressNetwork).toBe(egressLockdown.ensureEgressNetwork);
+  });
 });
