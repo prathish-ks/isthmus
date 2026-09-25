@@ -47,12 +47,23 @@ not just absorbing them passively — while:
 
 - This is not a general "catch up with upstream forever" project. LAW-09
   stays in force: one pinned baseline at a time, promoted deliberately.
-- Not scoped to also adopt `add-iron-proxy`'s own CI verification job
-  (`iron-front`) or the `channels`/`providers` sibling-branch drift this
-  produces (Mattermost, Codex/OpenCode contract work) — those are separate,
-  already-tracked threads (see `.github/workflows/ci.yml`'s
-  `sync-sibling-branches-*` jobs, merged 2026-09-25). This plan is scoped to
-  the **core pin** only.
+- Not scoped to **install** the `add-iron-proxy` **skill** itself — that's
+  a separate, optional, user-facing feature (an operator opting into Iron
+  Proxy as their gateway), along with that skill's own vendored-source CI
+  job (`iron-front`) and the `channels`/`providers` sibling-branch drift
+  this produces (Mattermost, Codex/OpenCode contract work). Those are
+  separate, already-tracked threads (see `.github/workflows/ci.yml`'s
+  `sync-sibling-branches-*` jobs, merged 2026-09-25).
+  **This does NOT mean CI coverage for the core pin's own new surfaces is
+  out of scope** — the opposite: Workstream G below is a required part of
+  this promotion, not optional. Whatever new privileged surface the pin
+  itself introduces to Isthmus's core (the Go kernel's mount class and
+  multi-container executor, the gateway subsystem, any new seam call
+  shape) must get equivalent CI coverage before the pin moves, the same
+  way `wiring-registry-check` became a required gate when that surface
+  grew. The line being drawn here is: adopting the *skill* that lets an
+  operator turn Iron Proxy on is optional; making sure the *underlying
+  capability* the pin brings in is safe and CI-verified is not.
 - Not scoped to decide, up front, whether Isthmus adopts upstream's full
   gateway-session-lifecycle behavior (lease-managed sessions, fail-closed
   shutdown, approval coordination) verbatim, vs. a narrower Isthmus-specific
@@ -283,13 +294,24 @@ plus whatever the full-repo diff (`container/agent-runner/`, `setup/`,
 | F5 | `CLAUDE.md`'s "Secrets / Credentials / OneCLI" section updated if Workstream C/D's OneCLI decision changes how it's documented | Not started |
 | F6 | This document's own findings folded into `go-host/docs/ADR-017`-style closure, or superseded by a new numbered ADR referencing it | Not started |
 
-### Workstream G — CI / PR-check uplift
+### Workstream G — CI / PR-check uplift (required, not optional)
+
+Every new privileged surface this promotion introduces to Isthmus's own
+core (Workstreams A and C's findings) must have equivalent CI coverage
+before the pin moves — not "consider adding a check," but "identify the
+gap and close it," the same way `wiring-registry-check` became a required
+gate the last time a comparably-sized surface (the wiring/recurrence-
+prevention registry) was added. This explicitly excludes adopting the
+`add-iron-proxy` *skill* or its own `iron-front` CI job (see Non-goals) —
+this workstream is about covering what the *core pin itself* adds, not
+about a downstream optional feature.
 
 | # | Task | Status |
 |---|---|---|
-| G1 | Assess whether the new Go kernel surface (multi-container sessions, gateway-trust mounts) needs new required CI jobs, mirroring how `wiring-registry-check` was added as a required gate for the last major surface addition | Not started |
-| G2 | Assess whether `sync-sibling-branch-script-test`-style regression coverage is warranted for any new script/automation this promotion introduces | Not started |
-| G3 | Update `docs/upstream-pin.json`'s `$comment`/fields and `docs/baseline.md`'s "Stable Baseline" section together, in the same commit as the closing ADR (per LAW-09's own discipline, already established) | Not started (final step) |
+| G1 | For each new Go kernel surface from Workstream A (multi-container sessions, `gateway-trust` mount class, network-creation executor logic): identify what a required CI job needs to verify, and add it — mirroring `wiring-registry-check`'s precedent, not just noting the gap | Not started |
+| G2 | For each Workstream C finding that gets closed via a new guard/check rather than accepted-and-documented: confirm that guard/check has its own CI coverage (unit test at minimum; a dedicated required job if the finding's severity warrants it, matching G1's bar) | Not started |
+| G3 | For any new script/automation this promotion introduces (e.g. a migration-continuity check, Workstream H): add `sync-sibling-branch-script-test`-style regression coverage, run on every PR — required, not report-only, unless there's a specific reason it can't be (state the reason if so) | Not started |
+| G4 | Update `docs/upstream-pin.json`'s `$comment`/fields and `docs/baseline.md`'s "Stable Baseline" section together, in the same commit as the closing ADR (per LAW-09's own discipline, already established) | Not started (final step) |
 
 ### Workstream H — Migration continuity (nanoclaw → Isthmus)
 
@@ -316,7 +338,7 @@ plus whatever the full-repo diff (`container/agent-runner/`, `setup/`,
 - [ ] Workstream D: every file classified and reconciled
 - [ ] Workstream E: full suite green on real CI, not local-only
 - [ ] Workstream F: ADR(s) merged, compatibility docs current
-- [ ] Workstream G: CI uplift assessed and applied where warranted
+- [ ] Workstream G: CI coverage added for every new privileged surface this promotion introduces (required, not merely considered)
 - [ ] Workstream H: migration continuity verified for both source versions
 - [ ] Final re-validation: re-run this plan's Workstream B/C classification against the actual v2.4.0 tag one more time immediately before promoting, to catch anything that changed between planning and execution
 - [ ] `docs/upstream-pin.json` + `docs/baseline.md` updated together with the closing ADR (G3)
@@ -355,3 +377,11 @@ plus whatever the full-repo diff (`container/agent-runner/`, `setup/`,
   reference the playbook rather than carrying the methodology inline.
   Workstream I's remaining task is confirming the playbook holds up once
   Workstreams A–H actually execute.
+- 2026-09-25 — Clarified the second non-goal, which read as excluding CI
+  coverage for the core pin's own new surfaces (it did not mean that —
+  it excludes adopting the optional `add-iron-proxy` *skill* and its own
+  `iron-front` job, a separate downstream decision). Strengthened
+  Workstream G from "assess whether" to a required deliverable (renumbered
+  G1–G4), updated the promotion-gate checklist line to match, and carried
+  the same correction into the reusable playbook's Step 6 so it holds for
+  every future promotion, not just this one.

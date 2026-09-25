@@ -155,7 +155,7 @@ skill's stated "config values, a few edited files" use case) needs a
 bespoke process. Decide this fresh each promotion — Isthmus's divergence
 from upstream may itself grow or shrink over time as architecture evolves.
 
-## Step 6 — Testing, docs, CI uplift
+## Step 6 — Testing, docs, CI uplift (required, not optional)
 
 - Full suite green on **real CI**, not local-only (this project's
   established "real CI evidence over local" principle — local sandboxes
@@ -165,9 +165,18 @@ from upstream may itself grow or shrink over time as architecture evolves.
   ratings, `docs/traceability.md`, and any CLAUDE.md sections whose
   documented architecture changed (e.g. a credential-provider
   trunk-vs-skill placement decision).
-- Assess whether the new surface needs a new required CI gate, mirroring
-  how `wiring-registry-check` was added when the wiring/recurrence-
-  prevention surface grew.
+- **Every new privileged surface Steps 1–4 found must get equivalent CI
+  coverage before the pin moves** — not "assess whether a gate is
+  warranted," but "identify the gap and close it," mirroring how
+  `wiring-registry-check` became a *required* gate when the wiring/
+  recurrence-prevention surface grew, not a report-only job someone could
+  ignore. This is about the surface the **pin itself** brings into
+  Isthmus's own core — it is separate from, and does not depend on,
+  whether any optional adjacent skill (e.g. a specific gateway-provider
+  skill a given release happens to introduce) also gets adopted. Adopting
+  an optional skill is a separate decision each promotion can make
+  independently; closing the CI gap for whatever the pin itself adds to
+  the trust boundary is not optional.
 
 ## Step 7 — Migration continuity
 
