@@ -264,6 +264,17 @@ async function decide(request: GatewayApprovalRequest): Promise<GatewayApprovalD
     title: request.title,
     question: request.question,
     options_json: JSON.stringify(options),
+    // request.approverUserId, when the gateway names one, is the contract's
+    // "exact verified channel identity selected by the gateway policy" — it
+    // already narrows `approvers` to that single id above, but the row
+    // itself must carry the same restriction, or isAuthorizedApprovalClick
+    // falls through to hasAdminPrivilege and lets ANY admin for the group
+    // resolve a decision the gateway meant to name one specific approver
+    // for. When unset, this stays null on purpose: `resolvedTarget.userId`
+    // is only whichever admin pickApprovalDelivery happened to reach first,
+    // and pinning the row to that one admin would wrongly narrow "any
+    // admin may decide" down to "only the one who got the DM."
+    approver_user_id: request.approverUserId ?? null,
   });
 
   let platformMessageId: string | undefined;

@@ -10,19 +10,28 @@
  * rather than through a real provider's translation layer — this is the
  * coordinator's own decision logic under test, not any provider's.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createAgentGroup } from './db/agent-groups.js';
 import { ensureContainerConfig } from './db/container-configs.js';
 import { closeDb, initTestDb, runMigrations } from './db/index.js';
+import { createMessagingGroup } from './db/messaging-groups.js';
+import { getPendingApprovalsByAction } from './db/sessions.js';
 import type { ChannelDeliveryAdapter } from './delivery.js';
-import { startGatewayApprovalCoordinator, stopGatewayApprovalCoordinator } from './gateway-approval-coordinator.js';
+import {
+  GATEWAY_APPROVAL_ACTION,
+  resolveGatewayApproval,
+  startGatewayApprovalCoordinator,
+  stopGatewayApprovalCoordinator,
+} from './gateway-approval-coordinator.js';
 import {
   getGatewayProviderFactory,
   registerGatewayProvider,
   type GatewayApprovalRequest,
 } from './gateway-providers/gateway-provider-registry.js';
 import { resetGatewayProvider } from './gateway-providers/index.js';
+import { grantRole } from './modules/permissions/db/user-roles.js';
+import { upsertUser } from './modules/permissions/db/users.js';
 
 const AGENT_GROUP_ID = 'ag-default-approval';
 
@@ -133,5 +142,72 @@ describe('default-model-traffic auto-approval', () => {
   it('never auto-approves when trigger is missing (older-adapter compatibility default)', async () => {
     const decision = await decideFn!(baseRequest({ destination: { host: 'api.anthropic.com', method: 'POST' } }));
     expect(decision).toBe('deny');
+  });
+});
+
+// Regression coverage for a real gap found during the v2.4.0 promotion's
+// Workstream C6 security review: the contract's `approverUserId` ("Exact
+// verified channel identity selected by the gateway policy") narrowed which
+// user got the notification, but the persisted row never carried it — so
+// isAuthorizedApprovalClick fell through to hasAdminPrivilege and let ANY
+// admin for the group resolve a decision the gateway meant to restrict to
+// one specific, already-verified identity. OneCLI never sets
+// approverUserId (unreachable through the real OneCLI flow, same reason as
+// the auto-approval suite above), so this is driven through the stub
+// gateway directly.
+describe('approverUserId is persisted to the approval row', () => {
+  it('carries a gateway-named approver onto the row', async () => {
+    await createMessagingGroup({
+      id: 'mg-approver-persist',
+      channel_type: 'slack',
+      platform_id: 'D-named',
+      name: 'Named approver DM',
+      is_group: 0,
+      unknown_sender_policy: 'strict',
+      created_at: now(),
+    });
+    void decideFn!(
+      baseRequest({ approverUserId: 'slack:named-approver', delivery: { messagingGroupId: 'mg-approver-persist' } }),
+    );
+    const rows = await vi.waitFor(async () => {
+      const found = await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION);
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(rows[0].approver_user_id).toBe('slack:named-approver');
+    await resolveGatewayApproval(rows[0].approval_id, 'approve');
+  });
+
+  it('stays null when the gateway names no specific approver (any admin may still decide)', async () => {
+    await upsertUser({ id: 'slack:group-admin', kind: 'slack', display_name: 'Group Admin', created_at: now() });
+    await grantRole({
+      user_id: 'slack:group-admin',
+      role: 'admin',
+      agent_group_id: AGENT_GROUP_ID,
+      granted_by: null,
+      granted_at: now(),
+    });
+    await createMessagingGroup({
+      id: 'mg-no-approver-persist',
+      channel_type: 'slack',
+      platform_id: 'D-none',
+      name: 'No named approver DM',
+      is_group: 0,
+      unknown_sender_policy: 'strict',
+      created_at: now(),
+    });
+    void decideFn!(baseRequest({ delivery: { messagingGroupId: 'mg-no-approver-persist' } }));
+    const rows = await vi.waitFor(async () => {
+      const found = await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION);
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    // pickApprover found the group-scoped admin and delivery succeeded —
+    // proving this is a real persisted row, not a deny-before-write — yet
+    // approver_user_id is null because the gateway named no one, which is
+    // exactly what lets hasAdminPrivilege's "any admin for the group" stay
+    // the authorization rule for this case.
+    expect(rows[0].approver_user_id).toBeNull();
+    await resolveGatewayApproval(rows[0].approval_id, 'approve');
   });
 });
