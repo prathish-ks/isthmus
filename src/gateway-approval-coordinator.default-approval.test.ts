@@ -17,7 +17,11 @@ import { ensureContainerConfig } from './db/container-configs.js';
 import { closeDb, initTestDb, runMigrations } from './db/index.js';
 import type { ChannelDeliveryAdapter } from './delivery.js';
 import { startGatewayApprovalCoordinator, stopGatewayApprovalCoordinator } from './gateway-approval-coordinator.js';
-import { getGatewayProviderFactory, registerGatewayProvider, type GatewayApprovalRequest } from './gateway-providers/gateway-provider-registry.js';
+import {
+  getGatewayProviderFactory,
+  registerGatewayProvider,
+  type GatewayApprovalRequest,
+} from './gateway-providers/gateway-provider-registry.js';
 import { resetGatewayProvider } from './gateway-providers/index.js';
 
 const AGENT_GROUP_ID = 'ag-default-approval';
