@@ -16,7 +16,16 @@ import {
 import { closeDb, createAgentGroup, getDb, initTestDb, runMigrations } from './db/index.js';
 import { PERSONA_PREPEND_FILE } from './group-persona.js';
 import { log } from './log.js';
-import { composeGroupProjectDoc, DEFAULT_PROJECT_DOC, type ProjectDocSpec } from './project-doc-compose.js';
+import {
+  BASE_INSTRUCTIONS_PATH,
+  composeGroupProjectDoc,
+  DEFAULT_PROJECT_DOC,
+  MEMORY_NOTE_PLACEHOLDER,
+  renderBaseInstructions,
+  renderNativeSkillsSection,
+  type ProjectDocSpec,
+  type ProviderInstructionFacts,
+} from './project-doc-compose.js';
 import type { AgentGroup } from './types.js';
 
 const CLAUDE_SPEC: ProjectDocSpec = {
@@ -385,5 +394,108 @@ describe('composeGroupProjectDoc size cap', () => {
     expect(doc).not.toContain('# Omitted for size');
     expect(log.warn).toHaveBeenCalled();
     expect(log.error).not.toHaveBeenCalled();
+  });
+});
+
+// v2.4.0 promotion, Workstream C14: the provider-host-contract layer added on
+// top of this composer. Purely additive — every test above already proves
+// the legacy `baseDocPath` shape (what DEFAULT_PROJECT_DOC still uses) is
+// unaffected byte-for-byte.
+describe('provider instruction facts (Workstream C14)', () => {
+  it('renderBaseInstructions is a no-op when the template has no placeholder', () => {
+    const template = 'Some prose.\n\nMore prose.\n';
+    expect(renderBaseInstructions(template)).toBe(template);
+    expect(renderBaseInstructions(template, { nativeOverrideFiles: ['AGENTS.md'] })).toBe(template);
+  });
+
+  it('renderBaseInstructions substitutes the memory-note placeholder', () => {
+    const template = `Intro.\n\n${MEMORY_NOTE_PLACEHOLDER}\n\nOutro.`;
+
+    expect(renderBaseInstructions(template)).toBe('Intro.\n\nOutro.');
+    expect(renderBaseInstructions(template, { nativeOverrideFiles: ['CODEX.md', 'AGENTS.md'] })).toBe(
+      'Intro.\n\nDo not use `CODEX.md` or `AGENTS.md` for memory.\n\nOutro.',
+    );
+  });
+
+  it('renderNativeSkillsSection is undefined without declared native skills', () => {
+    expect(renderNativeSkillsSection()).toBeUndefined();
+    expect(renderNativeSkillsSection({})).toBeUndefined();
+  });
+
+  it('renderNativeSkillsSection renders discovery paths and persistent roots', () => {
+    const facts: ProviderInstructionFacts = {
+      nativeSkills: {
+        discoveryPath: '/home/node/.claude/skills',
+        sharedSource: '/app/container/skills',
+        selfAuthoredHome: '~/.claude/skills',
+        persistentRoots: ['~/.claude/skills', '.claude-shared/skills'],
+      },
+    };
+
+    const section = renderNativeSkillsSection(facts);
+
+    expect(section?.name).toBe('Native Runtime Skills');
+    expect(section?.body).toContain('/home/node/.claude/skills');
+    expect(section?.body).toContain('/app/container/skills');
+    expect(section?.body).toContain('~/.claude/skills/<name>/SKILL.md');
+    expect(section?.body).not.toContain('instructions.md` instead');
+  });
+
+  it('renderNativeSkillsSection mentions inlined rule-bearing skills only when declared', () => {
+    const facts: ProviderInstructionFacts = {
+      nativeSkills: {
+        discoveryPath: '/x',
+        sharedSource: '/y',
+        selfAuthoredHome: '~/z',
+        persistentRoots: ['~/z'],
+        ruleBearingInlined: true,
+      },
+    };
+
+    expect(renderNativeSkillsSection(facts)?.body).toContain('instructions.md` instead');
+  });
+
+  it('a non-legacy spec (no baseDocPath) resolves the canonical template and adds a native-skills section', async () => {
+    const ag = await seed('ag-canon', 'canon-group');
+    const spec: ProjectDocSpec = {
+      fileName: 'CLAUDE.md',
+      instructions: {
+        nativeSkills: {
+          discoveryPath: '/home/node/.claude/skills',
+          sharedSource: '/app/container/skills',
+          selfAuthoredHome: '~/.claude/skills',
+          persistentRoots: ['~/.claude/skills'],
+        },
+      },
+    };
+
+    const doc = await compose(ag, spec);
+    const legacyDoc = await compose(ag, CLAUDE_SPEC);
+
+    // Isthmus's current container/CLAUDE.md has no memory-note placeholder,
+    // so the base-document section itself is unaffected either way — the
+    // canonical-path resolution (BASE_INSTRUCTIONS_PATH) and the legacy path
+    // (explicit baseDocPath, same value) must read the identical file.
+    expect(doc).toContain('# NanoClaw Runtime Contract');
+    expect(legacyDoc.includes('# NanoClaw Runtime Contract') && doc.includes('# NanoClaw Runtime Contract')).toBe(
+      true,
+    );
+    expect(doc).toContain('# Native Runtime Skills');
+    expect(doc).toContain('/home/node/.claude/skills');
+    expect(legacyDoc).not.toContain('# Native Runtime Skills');
+  });
+
+  it('BASE_INSTRUCTIONS_PATH matches the legacy default baseDocPath value', () => {
+    expect(BASE_INSTRUCTIONS_PATH).toBe(DEFAULT_PROJECT_DOC.baseDocPath);
+  });
+
+  it('an explicit runtimeSkills argument overrides the stored skill selection', async () => {
+    const ag = await seed('ag-runtime-skills', 'runtime-skills-group');
+    await updateContainerConfigJson(ag.id, 'skills', []);
+
+    await composeGroupProjectDoc(ag, groupDirOf(ag.folder), CLAUDE_SPEC, ['onecli-gateway']);
+    const doc = fs.readFileSync(path.join(groupDirOf(ag.folder), CLAUDE_SPEC.fileName), 'utf-8');
+
+    expect(doc).toContain('NanoClaw Skill: onecli-gateway');
   });
 });
