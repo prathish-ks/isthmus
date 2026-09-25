@@ -14,6 +14,15 @@ promotion will need to re-issue), `docs/upstream-pin.json` /
 promotion is the sequel to — that review found v2.3.0 still current with no
 admission-checked feature work cleared; this one finds the opposite).
 
+**This is the first applied instance of
+`go-host/docs/upstream-promotion-playbook.md`** — a version-agnostic
+procedure written directly out of this promotion's own findings, so the
+*next* nanocoai/nanoclaw release doesn't require re-deriving this
+methodology from scratch. That playbook document is the durable artifact;
+this document is this specific promotion's findings and tracking against
+it. `docs/design-laws.md`'s LAW-09 annotation records why the reusable
+process lives there rather than as a new numbered law.
+
 ## Goal
 
 Move the pinned upstream baseline from `nanocoai/nanoclaw` **v2.3.0**
@@ -120,19 +129,23 @@ uses when a law needs sharpening rather than duplication — see "LAW-07 /
 OBJ-04, annotated" in that same file, a dated, evidence-grounded annotation
 under the existing law number, not a new one.
 
-**This plan's closing workstream (I) is therefore not "author LAW-10" as a
-foregone conclusion.** It is: execute this promotion, then assess honestly
-against that same bar. LAW-09 already states almost exactly what this
-promotion is a test of — "a NanoClaw release that does not change a contract
-consumed by the Go kernel should require zero Go source changes... Pin
-stable releases for development and use a separate upstream watch track."
-The most likely honest outcome is a **LAW-09 annotation** (mirroring the
-LAW-07 precedent) recording the concrete, repeatable methodology this
-promotion executes — the three-way classification (seam / bypass-risk /
-pure-TS), the ADR-per-architectural-decision discipline, the re-validation
-step before pinning. A new law number is only warranted if this promotion
-surfaces a genuinely distinct principle LAW-01–09 don't already cover — to
-be judged at the end, against real evidence, not decided now.
+**Resolved 2026-09-25, ahead of the rest of this plan's execution** (the
+user explicitly confirmed this direction rather than waiting for
+Workstream I's close): no new law number. Instead:
+
+- `docs/design-laws.md` now carries a **LAW-09 annotation** ("LAW-09,
+  annotated: a repeatable promotion procedure"), mirroring the existing
+  LAW-07 annotation's structure and evidence bar.
+- `go-host/docs/upstream-promotion-playbook.md` is the actual reusable
+  procedure the annotation points to — a version-agnostic, ten-step process
+  extracted directly from this promotion's own findings, written so the
+  *next* nanocoai/nanoclaw release doesn't require re-deriving this
+  methodology from a long investigation the way this one did.
+
+This document remains this specific promotion's findings and tracking; the
+playbook is the durable artifact reused every future release. Workstream I
+below is now "confirm the playbook holds up once this promotion is actually
+executed," not "decide whether to write it."
 
 ## Migration continuity — open question, needs discovery before design
 
@@ -287,13 +300,13 @@ plus whatever the full-repo diff (`container/agent-runner/`, `setup/`,
 | H3 | Verify that path handles a source install on nanoclaw v2.4.0 (new — didn't exist as a migration source before this promotion) | Not started |
 | H4 | Confirm it's acceptable and correctly handled for that path to carry a v2.3.0-sourced user forward to Isthmus's new v2.4.0-pinned baseline as part of migrating in (per this plan's stated goal) | Not started |
 
-### Workstream I — Design Law closure (see the note above — not a foregone LAW-10)
+### Workstream I — Design Law closure (resolved: LAW-09 annotation + playbook, not a new law)
 
 | # | Task | Status |
 |---|---|---|
-| I1 | Once A–H are complete, write up the actually-executed methodology against `docs/design-laws.md`'s stated bar | Not started |
-| I2 | Default expectation: a dated annotation under LAW-09 (mirroring the LAW-07 annotation precedent), not a new law number | Not started |
-| I3 | Only if genuinely warranted: propose a new law, with the same evidence bar the declined 2026-08-30 LAW-10 proposal was held to | Not started |
+| I1 | Write up the methodology as a reusable, version-agnostic procedure | **Done** — `go-host/docs/upstream-promotion-playbook.md` |
+| I2 | Record why an annotation, not a new law, under the existing LAW-09 rule | **Done** — `docs/design-laws.md`, "LAW-09, annotated: a repeatable promotion procedure" |
+| I3 | Confirm the playbook actually holds up once Workstreams A–H are executed for real; amend it (it's a living document too) if any step proves wrong or incomplete in practice | Not started — depends on A–H |
 
 ## Promotion gate — do not move the pin until every box below is checked
 
@@ -334,3 +347,11 @@ plus whatever the full-repo diff (`container/agent-runner/`, `setup/`,
   restructuring, migration-continuity open question, Design Law governance
   note) and the four-workstream (plus testing/docs/CI/migration/law-closure)
   structure. No implementation work started yet.
+- 2026-09-25 — Design Law question resolved (confirmed by the user, ahead
+  of Workstream I's original "decide at the end" scoping): no new law.
+  Wrote `go-host/docs/upstream-promotion-playbook.md` (the reusable,
+  version-agnostic procedure) and the LAW-09 annotation in
+  `docs/design-laws.md` that points to it. This document updated to
+  reference the playbook rather than carrying the methodology inline.
+  Workstream I's remaining task is confirming the playbook holds up once
+  Workstreams A–H actually execute.
