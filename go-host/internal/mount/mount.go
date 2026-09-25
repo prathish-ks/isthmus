@@ -69,11 +69,18 @@ import (
 // Class mirrors drivers/types.ts's MountClass.
 type Class string
 
-// The four mount classes drivers/types.ts's MountClass enumerates.
+// The five mount classes drivers/types.ts's MountClass enumerates. 'gateway-trust'
+// was added by the v2.4.0 promotion (nanocoai/nanoclaw's "Iron Proxy gateway"
+// architectural effort, PRs #3815/#3816/#3817/#3825, refactor(gateway):
+// centralize the credential gateway contract, commit 249bbe93). Per that
+// commit's own types.ts comment: "public CA material pinned to the install's
+// dedicated gateway-trust root. Read-only and allowed in the agent role" —
+// unlike identity-material, which is never permitted on the agent container.
 const (
 	ClassGroupState       Class = "group-state"
 	ClassInstallSurface   Class = "install-surface"
 	ClassIdentityMaterial Class = "identity-material"
+	ClassGatewayTrust     Class = "gateway-trust"
 	ClassAllowlistedExtra Class = "allowlisted-extra"
 )
 
@@ -177,6 +184,11 @@ type Policy struct {
 	DataRoot      string
 	SurfaceRoots  []string
 	MaterialsRoot string
+	// GatewayTrustRoot mirrors MountPolicy.gatewayTrustRoot (v2.4.0 promotion,
+	// commit 249bbe93 — see the ClassGatewayTrust doc comment). Public CA
+	// material for the gateway; read-only, unlike MaterialsRoot, allowed on
+	// the agent container.
+	GatewayTrustRoot string
 
 	// AllowlistedExtraCheck, when set, re-checks an 'allowlisted-extra'
 	// mount's host path independently rather than trusting the class label
@@ -262,6 +274,9 @@ func ValidateSpec(spec Session, policy Policy, capabilities *Capabilities) error
 
 			if m.Class == ClassInstallSurface && m.Mode != ModeRO {
 				return deniedByPolicy("install-surface mount %s must be ro", m.HostPath)
+			}
+			if m.Class == ClassGatewayTrust && m.Mode != ModeRO {
+				return deniedByPolicy("gateway-trust mount %s must be ro", m.HostPath)
 			}
 			if m.Class == ClassIdentityMaterial && (m.Mode != ModeRO || container.Role == "agent") {
 				return deniedByPolicy("identity-material mount %s invalid on role %s", m.HostPath, container.Role)
@@ -349,6 +364,8 @@ func rootForClass(class Class, m Spec, policy Policy) string {
 	switch class {
 	case ClassIdentityMaterial:
 		return policy.MaterialsRoot
+	case ClassGatewayTrust:
+		return policy.GatewayTrustRoot
 	case ClassInstallSurface:
 		// Multiple candidate roots; a resolved path need only be under ONE.
 		// Handled specially: return "" here and let the caller's underRoot
@@ -400,6 +417,15 @@ func mountAllowed(m Spec, spec Session, policy Policy) (bool, string) {
 		return false, ""
 	case ClassIdentityMaterial:
 		return underRoot(m.HostPath, policy.MaterialsRoot), ""
+	case ClassGatewayTrust:
+		// Same empty-root guard as ClassRequiredByPath, and for the same
+		// fail-closed reason: an unconfigured GatewayTrustRoot must deny a
+		// gateway-trust-labeled mount, not implicitly allow it via
+		// underRoot's empty-root-matches-everything behavior.
+		if policy.GatewayTrustRoot == "" {
+			return false, "gateway-trust mount requires a configured GatewayTrustRoot"
+		}
+		return underRoot(m.HostPath, policy.GatewayTrustRoot), ""
 	case ClassGroupState:
 		if m.GroupScope != spec.Key.AgentGroupID {
 			return false, ""
@@ -424,8 +450,31 @@ func underRoot(hostPath, root string) bool {
 	return hostPath == root || strings.HasPrefix(hostPath, root+"/")
 }
 
-// ClassRequiredByPath ports types.ts:565-569 verbatim.
+// ClassRequiredByPath ports types.ts:565-569 (pre-v2.4.0 baseline) plus the
+// gateway-trust root check commit 249bbe93 added ahead of the
+// identity-material check — same order as the TS source's own
+// classRequiredByPath. Three roots now carry this "the class is not the
+// composer's to choose" pinning (was two before v2.4.0) — see the package
+// doc comment and ClassGatewayTrust's own comment for why.
+//
+// The `policy.GatewayTrustRoot != ""` guard is a deliberate Go-only
+// addition, found by running this package's own existing test suite
+// against this change before assuming it was correct (LAW-06): underRoot's
+// empty-root case (root="" makes every absolute hostPath match, since
+// root+"/" reduces to "/", a prefix every canonical path has) is a latent
+// footgun TS's own underRoot shares — production TS code simply never
+// constructs a MountPolicy with an empty gatewayTrustRoot, so it never
+// surfaces there. Go's test fixtures, written before this field existed,
+// do exercise the empty case, and the guard here is what keeps a caller
+// who hasn't set GatewayTrustRoot yet (a Go-side migration-in-progress
+// state, or simply an unrelated test) from having every mount
+// misclassified as gateway-trust. Never changes behavior once
+// GatewayTrustRoot is actually configured, which every real deployment
+// does.
 func ClassRequiredByPath(hostPath string, policy Policy) Class {
+	if policy.GatewayTrustRoot != "" && underRoot(hostPath, policy.GatewayTrustRoot) {
+		return ClassGatewayTrust
+	}
 	if underRoot(hostPath, policy.MaterialsRoot) {
 		return ClassIdentityMaterial
 	}
