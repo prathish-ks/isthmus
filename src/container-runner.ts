@@ -59,7 +59,11 @@ import './providers/index.js';
 // provider's own credential adapter need. Separate from providers/index.js
 // above; see provider-contracts/registry.ts's own header for why.
 import './provider-contracts/index.js';
-import { realizeProviderSpawnSurfaces, providerStateVolumePath, type ProviderSpawnRealization } from './provider-contracts/realize.js';
+import {
+  realizeProviderSpawnSurfaces,
+  providerStateVolumePath,
+  type ProviderSpawnRealization,
+} from './provider-contracts/realize.js';
 import { getProviderHostContract, hasProviderMountSurface } from './provider-contracts/registry.js';
 import {
   getProviderContainerConfig,
@@ -771,7 +775,8 @@ export async function buildMounts(
     }
     for (const view of contract.skillViews ?? []) {
       const hostPath = skillBackingPaths.get(view.backingId);
-      if (!hostPath) throw new Error(`Provider '${provider}' skill view references unknown backing '${view.backingId}'`);
+      if (!hostPath)
+        throw new Error(`Provider '${provider}' skill view references unknown backing '${view.backingId}'`);
       const mount: VolumeMount = {
         hostPath,
         containerPath: view.containerPath,

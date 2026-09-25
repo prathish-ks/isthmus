@@ -59,13 +59,22 @@ function session(id: string, agentGroupId: string, provider: string = PROVIDER):
   return { id, agent_group_id: agentGroupId, agent_provider: provider } as Session;
 }
 function containerConfig(): ContainerConfig {
-  return { mcpServers: {}, packages: { apt: [], npm: [] }, additionalMounts: [], skills: [] } as unknown as ContainerConfig;
+  return {
+    mcpServers: {},
+    packages: { apt: [], npm: [] },
+    additionalMounts: [],
+    skills: [],
+  } as unknown as ContainerConfig;
 }
 
 function registerTestContract(): void {
   registerProviderHostContract(PROVIDER, {
     seamVersion: PROVIDER_HOST_CONTRACT_SEAM_VERSION,
-    projectDocument: { fileName: 'CONTRACT.md', containerPath: '/workspace/agent/CONTRACT.md', mountClass: 'group-state' },
+    projectDocument: {
+      fileName: 'CONTRACT.md',
+      containerPath: '/workspace/agent/CONTRACT.md',
+      mountClass: 'group-state',
+    },
     stateVolumes: [
       {
         id: 'home',
@@ -93,7 +102,9 @@ function registerTestContract(): void {
         templateCopies: 'in-place',
       },
     ],
-    skillViews: [{ backingId: 'skills', containerPath: '/home/node/.contract/skills', mode: 'ro', mountClass: 'group-state' }],
+    skillViews: [
+      { backingId: 'skills', containerPath: '/home/node/.contract/skills', mode: 'ro', mountClass: 'group-state' },
+    ],
   });
 }
 
@@ -127,9 +138,7 @@ function specFrom(agentGroup: AgentGroup, mounts: Awaited<ReturnType<typeof buil
   return {
     key: { installSlug: INSTALL_SLUG, agentGroupId: agentGroup.id, sessionId: 'sess' },
     labels: { [GROUP_FOLDER_LABEL]: agentGroup.folder },
-    containers: [
-      { role: 'agent', image: 'nanoclaw-agent:test', env: {}, mounts: toMountSpecs(mounts, agentGroup.id) },
-    ],
+    containers: [{ role: 'agent', image: 'nanoclaw-agent:test', env: {}, mounts: toMountSpecs(mounts, agentGroup.id) }],
     network: 'shared-private',
     hardening: 'standard',
     resources: {},
