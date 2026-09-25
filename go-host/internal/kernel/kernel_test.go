@@ -88,9 +88,37 @@ func dispatch(t *testing.T, k *Kernel, op Op, payload any) ResponseEnvelope {
 
 func TestDispatch_RejectsUnsupportedVersion(t *testing.T) {
 	k := New(testPolicy(), withExecutor(&fakeExecutor{}))
-	resp := k.Dispatch(context.Background(), Envelope{Version: "v2", Op: OpStatusTrace, RequestID: "r"})
+	// Deliberately not a hardcoded literal (a prior version of this test
+	// used "v2", which broke the moment the real ProtocolVersion became
+	// "v2" for real — see the v2.4.0 promotion's Workstream A2 commit): any
+	// string that isn't the CURRENT ProtocolVersion must still be rejected,
+	// regardless of which version that currently is, so derive the "wrong"
+	// value from the real constant instead of guessing a specific string.
+	wrongVersion := ProtocolVersion + "-nonexistent"
+	resp := k.Dispatch(context.Background(), Envelope{Version: wrongVersion, Op: OpStatusTrace, RequestID: "r"})
 	if resp.OK || resp.Error == nil || resp.Error.Code != ErrUnsupportedVersion {
-		t.Fatalf("expected unsupported-version denial, got %+v", resp)
+		t.Fatalf("expected unsupported-version denial for version %q, got %+v", wrongVersion, resp)
+	}
+}
+
+// The concrete real-world case the v2.4.0 promotion's mixed-version
+// compatibility question resolves to (see ProtocolVersion's own doc
+// comment): an old TS host, still speaking the pre-NetworkAccess "v1"
+// wire contract, talking to this (now "v2") kernel gets a clean,
+// explicit rejection naming both versions -- never a silent
+// misinterpretation of a v1-shaped payload as if it were v2, because the
+// version string is checked before any payload is ever decoded.
+func TestDispatch_OldV1HostAgainstNewKernel_RejectedNotMisparsed(t *testing.T) {
+	k := New(testPolicy(), withExecutor(&fakeExecutor{}))
+	resp := k.Dispatch(context.Background(), Envelope{Version: "v1", Op: OpStatusTrace, RequestID: "r"})
+	if resp.OK {
+		t.Fatalf("expected an old v1 envelope to be rejected by the v2 kernel, got success: %+v", resp)
+	}
+	if resp.Error == nil || resp.Error.Code != ErrUnsupportedVersion {
+		t.Fatalf("expected ErrUnsupportedVersion specifically (not some other failure mode), got: %+v", resp)
+	}
+	if resp.Error.Detail == "" {
+		t.Fatal("expected a non-empty detail message naming the version mismatch, for operator diagnosability")
 	}
 }
 

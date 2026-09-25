@@ -155,18 +155,65 @@ type SessionKey struct {
 	SessionID    string `json:"sessionId"`
 }
 
+// NetworkAccessTarget mirrors drivers/types.ts's NetworkAccessIntent.target
+// (v2.4.0 promotion, commit 249bbe93), a discriminated union on Kind — 'host'
+// | 'runtime' (carries Identity) | 'session-container' (carries Role). Wire
+// shape kept flat (one struct, Kind plus whichever field the kind uses)
+// rather than this package's own GuardContext-style "one of several typed
+// pointer fields" convention: TS's own discriminated union serializes as one
+// flat JSON object with a kind tag, and this type exists to round-trip that
+// exact wire shape, not to introduce a Go-side taxonomy TS doesn't have.
+// Identity/Role are meaningless (and ignored) for Kind == "host", matching
+// this package's established "unused fields are ignored, never an alternate
+// path" discipline (see CapabilityRequestPayload's doc comment).
+type NetworkAccessTarget struct {
+	Kind     string `json:"kind"`
+	Identity string `json:"identity,omitempty"`
+	Role     string `json:"role,omitempty"`
+}
+
+// The three NetworkAccessTarget.Kind values types.ts's own union enumerates.
+const (
+	NetworkTargetHost             = "host"
+	NetworkTargetRuntime          = "runtime"
+	NetworkTargetSessionContainer = "session-container"
+)
+
+// NetworkAccessIntent mirrors drivers/types.ts's NetworkAccessIntent
+// (v2.4.0 promotion, commit 249bbe93): "Typed network destination. Drivers
+// realize it or reject it; no argv crosses the seam" (types.ts's own
+// comment). ValidateSpec does not read this type at all, matching TS's own
+// division of labor exactly: types.ts's validateSpec doesn't validate
+// networkAccess either — docker-driver.ts's prepare() does (target-kind
+// consistency with auxiliary containers, etc.). This package's own
+// executor-level port of that logic is a separate task (Workstream A3, not
+// this one) — this type exists here only so the wire shape (Session,
+// carried whole across CapabilityRequestPayload) can round-trip it.
+type NetworkAccessIntent struct {
+	Endpoint string              `json:"endpoint"`
+	Target   NetworkAccessTarget `json:"target"`
+}
+
 // Session mirrors the subset of SessionSpec this package's rules read, plus
 // (EC-02, Phase 9) StopGraceSeconds — a realization-only field
 // (SessionSpec.stopGraceSeconds, types.ts:142) ValidateSpec never reads,
 // recorded by the kernel at wake time so a later kill can read the real
 // grace period from its own registry rather than trusting a caller-supplied
-// value at kill time (see lifecycle.Runtime.StopGraceSeconds).
+// value at kill time (see lifecycle.Runtime.StopGraceSeconds). NetworkAccess
+// (v2.4.0 promotion) is realization-only in the exact same sense —
+// ValidateSpec never reads it; see NetworkAccessIntent's own doc comment.
+// Not a pointer despite being realization-only: TS's own SessionSpec.
+// networkAccess is required (no `?`), so a Go caller either populates it or
+// gets the zero value (Endpoint "", Target.Kind "") — never nil, matching
+// how this struct already treats RuntimeTier (also TS-required) as a plain
+// field rather than a pointer.
 type Session struct {
-	Key              SessionKey        `json:"key"`
-	Labels           map[string]string `json:"labels,omitempty"`
-	Containers       []Container       `json:"containers,omitempty"`
-	RuntimeTier      string            `json:"runtimeTier"`
-	StopGraceSeconds int               `json:"stopGraceSeconds,omitempty"`
+	Key              SessionKey          `json:"key"`
+	Labels           map[string]string   `json:"labels,omitempty"`
+	Containers       []Container         `json:"containers,omitempty"`
+	RuntimeTier      string              `json:"runtimeTier"`
+	StopGraceSeconds int                 `json:"stopGraceSeconds,omitempty"`
+	NetworkAccess    NetworkAccessIntent `json:"networkAccess,omitempty"`
 }
 
 // Capabilities mirrors the subset of DriverCapabilities validateSpec reads.

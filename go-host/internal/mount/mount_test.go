@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -550,5 +551,87 @@ func TestGatewayTrust_ResolveSymlinksEscapeDenied(t *testing.T) {
 	spec := baseSpec([]Spec{m(ClassGatewayTrust, symlinkPath, "/etc/ssl/gateway-ca.pem", ModeRO)})
 	if err := ValidateSpec(spec, policy, caps()); err == nil {
 		t.Fatal("expected denial: symlink under GatewayTrustRoot resolves outside it")
+	}
+}
+
+// ---------- NetworkAccessIntent (v2.4.0 promotion, Workstream A2) ----------
+
+// The actual wire-contract concern A2 exists for: TS's NetworkAccessIntent
+// serializes as {"endpoint":"...","target":{"kind":"...","identity":"..."}}
+// (a discriminated union flattened into one object with a "kind" tag) --
+// this proves Go's mirror produces and consumes exactly that shape, field
+// names included, not just that the Go types compile.
+func TestNetworkAccessIntent_JSONRoundTrip(t *testing.T) {
+	cases := []struct {
+		name       string
+		intent     NetworkAccessIntent
+		wantFields map[string]any
+	}{
+		{
+			"host-target-has-no-identity-or-role-field",
+			NetworkAccessIntent{Endpoint: "gateway.internal:443", Target: NetworkAccessTarget{Kind: NetworkTargetHost}},
+			map[string]any{"endpoint": "gateway.internal:443", "target": map[string]any{"kind": "host"}},
+		},
+		{
+			"runtime-target-carries-identity",
+			NetworkAccessIntent{Endpoint: "gateway.internal:443", Target: NetworkAccessTarget{Kind: NetworkTargetRuntime, Identity: "fly-machine-abc123"}},
+			map[string]any{"endpoint": "gateway.internal:443", "target": map[string]any{"kind": "runtime", "identity": "fly-machine-abc123"}},
+		},
+		{
+			"session-container-target-carries-role",
+			NetworkAccessIntent{Endpoint: "gateway.internal:443", Target: NetworkAccessTarget{Kind: NetworkTargetSessionContainer, Role: "proxy"}},
+			map[string]any{"endpoint": "gateway.internal:443", "target": map[string]any{"kind": "session-container", "role": "proxy"}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.intent)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatalf("unmarshal into generic map: %v", err)
+			}
+			if !reflect.DeepEqual(decoded, tc.wantFields) {
+				t.Fatalf("wire shape mismatch:\n got:  %#v\n want: %#v\n raw:  %s", decoded, tc.wantFields, raw)
+			}
+
+			// Round-trip back into the typed struct and confirm equality —
+			// proves decoding is as faithful as encoding.
+			var roundTripped NetworkAccessIntent
+			if err := json.Unmarshal(raw, &roundTripped); err != nil {
+				t.Fatalf("unmarshal into NetworkAccessIntent: %v", err)
+			}
+			if roundTripped != tc.intent {
+				t.Fatalf("round-trip mismatch: got %+v, want %+v", roundTripped, tc.intent)
+			}
+		})
+	}
+}
+
+// Session.NetworkAccess rides the same "carried whole across
+// CapabilityRequestPayload" wire path as everything else in Session — this
+// confirms it actually appears under the "networkAccess" key TS expects
+// when a whole Session is marshaled, not just when NetworkAccessIntent is
+// marshaled in isolation.
+func TestSession_NetworkAccessFieldName(t *testing.T) {
+	spec := baseSpec(nil)
+	spec.NetworkAccess = NetworkAccessIntent{Endpoint: "gateway.internal:443", Target: NetworkAccessTarget{Kind: NetworkTargetHost}}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	na, ok := decoded["networkAccess"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a \"networkAccess\" object key in the marshaled Session, got: %s", raw)
+	}
+	if na["endpoint"] != "gateway.internal:443" {
+		t.Fatalf("expected networkAccess.endpoint to round-trip, got: %#v", na)
 	}
 }
