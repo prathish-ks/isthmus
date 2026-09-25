@@ -380,11 +380,11 @@ src/container-runner.claims.test.ts,added,,,,,,,,,
 src/container-runner.test.ts,modified,,,,,,,,,
 src/container-runner.ts,modified,,,A,,,"docs/promotion-v2.4.0.md Workstream B table, container-runner.ts row (2026-09-25 finding)",,,
 src/db/container-configs.ts,modified,,,,,,,,,
-src/db/coordination.test.ts,added,,,,,,,,,
-src/db/coordination.ts,added,,,,,,,,,
+src/db/coordination.test.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
+src/db/coordination.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
 src/db/db-v2.test.ts,modified,,,,,,,,,
 src/db/index.ts,modified,,,,,,,,,
-src/db/migrations/024-host-coordination.ts,added,,,,,,,,,
+src/db/migrations/024-host-coordination.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
 src/db/migrations/025-container-config-speed.ts,added,,,,,,,,,
 src/db/migrations/concurrency.test.ts,added,,,,,,,,,
 src/db/migrations/fixtures/migrate.ts,added,,,,,,,,,
@@ -417,19 +417,19 @@ src/gateway-availability.test.ts,added,,,,,,,,,
 src/gateway-availability.ts,added,,,,,,,,,
 src/gateway-connections.test.ts,added,,,C,,,,,,
 src/gateway-connections.ts,added,,,C,,,backs cli/resources/groups.ts's new connect operation; not yet assessed beyond existence,,,
-src/gateway-providers/gateway-provider-registry.test.ts,added,,,,,,,,,
-src/gateway-providers/gateway-provider-registry.ts,modified,,,,,,,,,
+src/gateway-providers/gateway-provider-registry.test.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
+src/gateway-providers/gateway-provider-registry.ts,modified,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
 src/gateway-providers/gateway-registration-wiring.test.ts,added,,,,,,,,,
 src/gateway-providers/index.ts,modified,,,,,,,,,
 src/gateway-providers/installed.ts,modified,,,,,,,,,
 src/gateway-providers/onecli.test.ts,deleted,,,,,,,,,
-src/gateway-read-policy.test.ts,added,,,B,,,Workstream C task C2 — blocked on C0,,,
-src/gateway-read-policy.ts,added,,,B,,,Workstream C task C2 — blocked on C0 (gateway-session-lifecycle adoption ADR),,,
-src/gateway-session-lifecycle.test.ts,added,,,,,,,,,
-src/gateway-session-lifecycle.ts,added,,,,,,,,,
+src/gateway-read-policy.test.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
+src/gateway-read-policy.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
+src/gateway-session-lifecycle.test.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
+src/gateway-session-lifecycle.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
 src/group-init.ts,modified,,,,,,,,,
-src/host-instance.test.ts,added,,,,,,,,,
-src/host-instance.ts,added,,,,,,,,,
+src/host-instance.test.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
+src/host-instance.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
 src/host-lifecycle.test.ts,modified,,,,,,,,,
 src/host-lifecycle.ts,modified,,,,,,,,,
 src/host-sweep-grace.test.ts,modified,,,,,,,,,
