@@ -150,3 +150,42 @@ A response from nanocoai clarifying that fork traffic against
 `portal.nanoclaw.dev` is unwelcome or against their terms would reopen this
 decision — that is a policy question this ADR could not resolve from
 reading client-side code alone, and remains the one open unknown.
+
+## Addendum, 2026-09-25: `src/modules/community-portal/` — adopt, with modification
+
+Workstream D1's file-inventory sweep found a fourth piece of the
+community-portal feature that C10/C11 never touched: `src/modules/
+community-portal/` (`index.ts`, `runtime.ts`, plus tests). Unlike
+`src/community-portal/` (the client library) and `setup/portal.ts`/
+`setup/slack-worker.ts` (the setup-wizard-only flow), this module hooks
+into the **main host process's own lifecycle**
+(`onHostStart`/`onHostShutdown` in `src/host-lifecycle.ts`) — active for
+as long as the production host runs, not just during setup.
+
+Read directly (not inferred): the module is genuinely inert until a
+checkout has signed in via the portal (`data/community-portal.json`
+absent means every tick no-ops). Once signed in, `startPortalRuntime`
+opens a persistent `CellLink` WebSocket to the account cell and
+`launchSlackJob` only *resumes* an already-approved, already-user-
+-initiated Slack install (the actual approval happened out-of-band, in
+Slack's own workspace-admin flow) — this is not remote-triggered
+installation or arbitrary remote code execution.
+
+**Decision: adopt, with one modification.** Per this document's
+Non-goals policy (a genuinely-shipped v2.4.0 feature is in scope, full
+stop) this module is real v2.4.0 surface and belongs in a v2.4.0-pinned
+Isthmus. But a persistent, always-open WebSocket from the running
+production host to an external, upstream-operated service — for the
+life of the process, not bounded to a single setup session — is a
+materially different posture than everything else this ADR already
+evaluated, and the founder's explicit direction is to close that gap:
+**replace the persistent `CellLink` connection with on-demand polling**.
+Concretely: `startPortalRuntime`'s `wake()`/`setInterval(wake, intervalMs)`
+loop already re-checks identity and calls `client.reconcile()` on a
+timer independent of the link; the fix is to drop `CellLink` entirely
+from this runtime and drive every check (perk-credential reconciliation,
+resuming a saved Slack job) from that same timer alone, over the
+existing bearer-authenticated `DeviceClient` request/response calls
+already used elsewhere in `src/community-portal/`. No standing
+connection, no server-push surface, same eventual-consistency behavior
+at a coarser interval. Implementation is a new Workstream C task, C12.
