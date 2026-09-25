@@ -54,6 +54,11 @@ import { validateAdditionalMounts } from './modules/mount-security/index.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
 import './providers/index.js';
+// Provider gateway-facts barrel (v2.4.0 promotion, Workstream C8) — model
+// domains/endpoints the gateway-approval coordinator and a gateway
+// provider's own credential adapter need. Separate from providers/index.js
+// above; see provider-contracts/registry.ts's own header for why.
+import './provider-contracts/index.js';
 import {
   getProviderContainerConfig,
   providerProvidesAgentSurfaces,

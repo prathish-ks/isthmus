@@ -25,16 +25,20 @@ import {
 import { getGatewayProvider } from './gateway-providers/index.js';
 import { pickApprovalDelivery, pickApprover } from './modules/approvals/primitive.js';
 import { getAgentGroup } from './db/agent-groups.js';
+import { getContainerConfig } from './db/container-configs.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createPendingApproval,
   deletePendingApproval,
   getPendingApprovalsByAction,
+  getSession,
   setPendingApprovalPlatformMessageId,
   transitionPendingApprovalStatus,
 } from './db/sessions.js';
 import type { ChannelDeliveryAdapter } from './delivery.js';
+import { resolveProviderName } from './container-runner.js';
 import { log } from './log.js';
+import { getProviderHostContract } from './provider-contracts/index.js';
 import type { MessagingGroup, PendingApproval } from './types.js';
 
 /** Only one gateway provider is ever active per install, so one action name suffices. */
@@ -154,8 +158,46 @@ export function stopGatewayApprovalCoordinator(): void {
  * Never called directly by anything else — a provider's translation layer
  * is the only caller, and it never decides anything itself.
  */
+
+/**
+ * The session's pinned provider, falling back to its group's configured
+ * default — same resolution `container-runner.ts`'s own spawn path uses
+ * (`resolveProviderName`), so a request's auto-approve check agrees with
+ * whichever provider the session actually runs.
+ */
+async function resolveSessionProvider(request: GatewayApprovalRequest): Promise<string> {
+  const session = request.sessionId ? await getSession(request.sessionId) : undefined;
+  const containerConfig = request.agentGroupId ? await getContainerConfig(request.agentGroupId) : undefined;
+  return resolveProviderName(session?.agent_provider, containerConfig?.provider);
+}
+
+/** Exact domain or any subdomain of a declared model domain. */
+function isDefaultApprovedModelHost(host: string, providerName: string): boolean {
+  const domains = getProviderHostContract(providerName)?.modelDomains ?? [];
+  return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
 async function decide(request: GatewayApprovalRequest): Promise<GatewayApprovalDecision> {
   if (!adapterRef) return 'unavailable';
+
+  // A `default` hold is a generic network-traffic hold a gateway raises for
+  // any outbound request; `trigger` missing or `'policy'` is an EXPLICIT
+  // hold the provider itself decided needs a human (`GatewayApprovalRequest`'s
+  // own doc comment: "Missing means explicit policy approval for
+  // compatibility with older adapters"). Only `'default'` ever auto-approves
+  // — a policy hold is never silently overridden by this check, whatever the
+  // destination is.
+  if (request.trigger === 'default' && request.destination?.host) {
+    const provider = await resolveSessionProvider(request);
+    if (isDefaultApprovedModelHost(request.destination.host, provider)) {
+      log.info('Gateway request auto-approved: declared provider model traffic', {
+        id: request.id,
+        host: request.destination.host,
+        provider,
+      });
+      return 'approve';
+    }
+  }
 
   // '' is this codebase's existing sentinel for "no known scope" (see
   // `MountPolicy.gatewayTrustRoot`) — a request that never carried an origin
