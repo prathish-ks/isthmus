@@ -18,7 +18,7 @@
   "devDependencies": {
     "@types/bun": "^1.4.2",
     "@types/node": "^26.6.2",
-    "typescript": "^5.7.3"
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "$comment": "Forces express-rate-limit past @modelcontextprotocol/sdk's natural ^8.2.1 resolution (8.3.2), which pins its own ip-address dependency to an exact vulnerable 10.1.0 (GHSA-mwp4-54f8-5fhr, high: SSRF via octal/decimal IP-octet confusion; GHSA-v2v4-37r5-5v8g, moderate: XSS). 8.4.0+ declares ip-address as ^10.2.0 instead, resolving to a patched version. Safe to remove once @modelcontextprotocol/sdk's own package.json naturally depends on express-rate-limit >=8.4.0 — check `bun audit` after any @modelcontextprotocol/sdk bump before removing this.",
