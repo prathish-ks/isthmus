@@ -87,7 +87,7 @@ func TestLive_Wake_NormalMountSet_MatchesRequestExactlyAndConfinesReads(t *testi
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = newDockerExecutor("").Kill(ctx, payload.ContainerName, 1)
+		_ = newDockerExecutor("").Kill(ctx, payload.ContainerName, nil, "", 1)
 	})
 
 	// 1. The real, inspected mount list matches intent exactly — not just

@@ -23,18 +23,25 @@ import (
 // "the response was a denial" but "exec was never reached" — the actual
 // claim doc.go's enforcement design makes.
 type fakeExecutor struct {
-	wakeCalls    int
-	buildCalls   int
-	killCalls    int
-	killedName   string
-	killedGrace  int
-	dockerfileIn string
+	wakeCalls         int
+	buildCalls        int
+	killCalls         int
+	killedName        string
+	killedGrace       int
+	killedAuxiliaries []string
+	killedNetwork     string
+	dockerfileIn      string
+	// wakeAuxiliaries/wakeNetwork, when set, are what Wake returns — lets a
+	// test simulate a multi-container wake without a real Wake
+	// implementation (v2.4.0 promotion, Workstream A3).
+	wakeAuxiliaries []string
+	wakeNetwork     string
 }
 
-func (f *fakeExecutor) Wake(ctx context.Context, spec mount.Session, runAs containerdefaults.RunAs, resources containerdefaults.Resources) (string, string, error) {
+func (f *fakeExecutor) Wake(ctx context.Context, spec mount.Session, runAs containerdefaults.RunAs, resources containerdefaults.Resources) (string, string, []string, string, error) {
 	f.wakeCalls++
 	name := "container-" + spec.Key.SessionID
-	return name, name, nil
+	return name, name, f.wakeAuxiliaries, f.wakeNetwork, nil
 }
 
 func (f *fakeExecutor) BuildImage(ctx context.Context, contextDir, imageTag, dockerfile string) (string, error) {
@@ -43,9 +50,11 @@ func (f *fakeExecutor) BuildImage(ctx context.Context, contextDir, imageTag, doc
 	return imageTag, nil
 }
 
-func (f *fakeExecutor) Kill(ctx context.Context, containerName string, graceSeconds int) error {
+func (f *fakeExecutor) Kill(ctx context.Context, containerName string, auxiliaryNames []string, privateNetwork string, graceSeconds int) error {
 	f.killCalls++
 	f.killedName = containerName
+	f.killedAuxiliaries = auxiliaryNames
+	f.killedNetwork = privateNetwork
 	f.killedGrace = graceSeconds
 	return nil
 }

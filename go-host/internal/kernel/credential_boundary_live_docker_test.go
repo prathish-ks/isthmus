@@ -89,7 +89,7 @@ func TestLive_Wake_CredentialShapedContributedEnv_NeverReachesDocker(t *testing.
 		t.Cleanup(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			_ = newDockerExecutor("").Kill(ctx, wantName, 1)
+			_ = newDockerExecutor("").Kill(ctx, wantName, nil, "", 1)
 		})
 		t.Fatalf("SECURITY: expected a credential-shaped contributed-env value to be denied, got success %+v", resp)
 	}
@@ -136,7 +136,7 @@ func TestLive_Wake_OrdinaryContributedEnv_LandsInRealContainerEnv(t *testing.T) 
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = newDockerExecutor("").Kill(ctx, payload.ContainerName, 1)
+		_ = newDockerExecutor("").Kill(ctx, payload.ContainerName, nil, "", 1)
 	})
 
 	env := dockerInspectEnv(t, payload.ContainerName)
