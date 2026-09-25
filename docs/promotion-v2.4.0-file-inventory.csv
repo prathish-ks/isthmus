@@ -7,44 +7,44 @@ path,status,source,destination,bucket,consumed_contract_row,security_review_stat
 .claude/skills/add-dial-tool/SKILL.md,modified,,,,,,,,,
 .claude/skills/add-dial/SKILL.md,modified,,,,,,,,,
 .claude/skills/add-dial/apply-fixtures.json,modified,,,,,,,,,
-.claude/skills/add-iron-proxy/REMOVE.md,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/SKILL.md,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/assets/entrypoint.sh,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/assets/managed-proxy.Dockerfile,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/evals/evals.json,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/front-proxy/go.mod,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/front-proxy/go.sum,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/front-proxy/main.go,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/front-proxy/security_test.go,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/gateway.json,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/payload/container/skills/iron-proxy-gateway/SKILL.md,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/payload/container/skills/iron-proxy-gateway/instructions.md,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy-approval.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy-approval.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy-transform.proto,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/references/control-plane.md,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/auth-resume.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/auth.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/auth.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/build-managed-proxy.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/capture-claude-token.sh,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/control.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/control.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/credential-isolation.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/credential-isolation.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/credential-store.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/credential-store.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/detect.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/detect.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/install-claude.sh,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/install-command.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/install-command.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/provider-credentials.test.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/provider-credentials.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/scripts/setup.ts,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
-.claude/skills/add-iron-proxy/versions.json,added,,,C,,,"plan's own Non-goals section: ""Not scoped to install the add-iron-proxy skill itself""",declined:non-goal,,
+.claude/skills/add-iron-proxy/REMOVE.md,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/SKILL.md,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/assets/entrypoint.sh,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/assets/managed-proxy.Dockerfile,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/evals/evals.json,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/front-proxy/go.mod,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/front-proxy/go.sum,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/front-proxy/main.go,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/front-proxy/security_test.go,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/gateway.json,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/payload/container/skills/iron-proxy-gateway/SKILL.md,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/payload/container/skills/iron-proxy-gateway/instructions.md,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy-approval.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy-approval.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy-transform.proto,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/payload/src/gateway-providers/iron-proxy.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/references/control-plane.md,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/auth-resume.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/auth.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/auth.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/build-managed-proxy.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/capture-claude-token.sh,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/control.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/control.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/credential-isolation.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/credential-isolation.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/credential-store.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/credential-store.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/detect.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/detect.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/install-claude.sh,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/install-command.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/install-command.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/provider-credentials.test.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/provider-credentials.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/scripts/setup.ts,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
+.claude/skills/add-iron-proxy/versions.json,added,,,C,,,"ADR-030: adopted, Workstream C8 (install on par with upstream)",,,ADR-030
 .claude/skills/add-mattermost/REMOVE.md,added,,,C,,,"plan's own Non-goals section: ""channels/providers sibling-branch drift this produces (Mattermost, Codex/OpenCode contract work)... already-tracked threads (see .github/workflows/ci.yml's sync-sibling-branches-* jobs)""",declined:out-of-scope-tracked-by-sync-sibling-branch-mechanism,,
 .claude/skills/add-mattermost/SERVER_SETUP.md,added,,,C,,,"plan's own Non-goals section: ""channels/providers sibling-branch drift this produces (Mattermost, Codex/OpenCode contract work)... already-tracked threads (see .github/workflows/ci.yml's sync-sibling-branches-* jobs)""",declined:out-of-scope-tracked-by-sync-sibling-branch-mechanism,,
 .claude/skills/add-mattermost/SKILL.md,added,,,C,,,"plan's own Non-goals section: ""channels/providers sibling-branch drift this produces (Mattermost, Codex/OpenCode contract work)... already-tracked threads (see .github/workflows/ci.yml's sync-sibling-branches-* jobs)""",declined:out-of-scope-tracked-by-sync-sibling-branch-mechanism,,
@@ -66,7 +66,7 @@ path,status,source,destination,bucket,consumed_contract_row,security_review_stat
 .claude/skills/add-onecli/payload/src/gateway-providers/onecli-files.ts,added,,,,,,,,,
 .claude/skills/add-onecli/payload/src/gateway-providers/onecli-install.test.ts,added,,,,,,,,,
 .claude/skills/add-onecli/payload/src/gateway-providers/onecli.test.ts,added,,,,,,,,,
-.claude/skills/add-onecli/payload/src/gateway-providers/onecli.ts,renamed,src/gateway-providers/onecli.ts,.claude/skills/add-onecli/payload/src/gateway-providers/onecli.ts,C,,,docs/promotion-v2.4.0.md Workstream C task C3 (not started),,,
+.claude/skills/add-onecli/payload/src/gateway-providers/onecli.ts,renamed,src/gateway-providers/onecli.ts,.claude/skills/add-onecli/payload/src/gateway-providers/onecli.ts,C,,,Workstream C7 (ADR-030): reference implementation to port OneCLI against,,,ADR-030
 .claude/skills/add-onecli/scripts/auth.ts,added,,,,,,,,,
 .claude/skills/add-onecli/scripts/credential-store.test.ts,added,,,,,,,,,
 .claude/skills/add-onecli/scripts/credential-store.ts,added,,,,,,,,,
@@ -380,11 +380,11 @@ src/container-runner.claims.test.ts,added,,,,,,,,,
 src/container-runner.test.ts,modified,,,,,,,,,
 src/container-runner.ts,modified,,,A,,,"docs/promotion-v2.4.0.md Workstream B table, container-runner.ts row (2026-09-25 finding)",,,
 src/db/container-configs.ts,modified,,,,,,,,,
-src/db/coordination.test.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
-src/db/coordination.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
+src/db/coordination.test.ts,added,,,A,,,ADR-030: adopted; Workstream C7/C9,,,ADR-030
+src/db/coordination.ts,added,,,A,,,ADR-030: adopted; Workstream C7/C9,,,ADR-030
 src/db/db-v2.test.ts,modified,,,,,,,,,
 src/db/index.ts,modified,,,,,,,,,
-src/db/migrations/024-host-coordination.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
+src/db/migrations/024-host-coordination.ts,added,,,A,,,ADR-030: adopted; Workstream C7/C9,,,ADR-030
 src/db/migrations/025-container-config-speed.ts,added,,,,,,,,,
 src/db/migrations/concurrency.test.ts,added,,,,,,,,,
 src/db/migrations/fixtures/migrate.ts,added,,,,,,,,,
@@ -417,19 +417,19 @@ src/gateway-availability.test.ts,added,,,,,,,,,
 src/gateway-availability.ts,added,,,,,,,,,
 src/gateway-connections.test.ts,added,,,C,,,,,,
 src/gateway-connections.ts,added,,,C,,,backs cli/resources/groups.ts's new connect operation; not yet assessed beyond existence,,,
-src/gateway-providers/gateway-provider-registry.test.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
-src/gateway-providers/gateway-provider-registry.ts,modified,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
+src/gateway-providers/gateway-provider-registry.test.ts,added,,,A,,,ADR-030: adopted; Workstream C7/C9,,,ADR-030
+src/gateway-providers/gateway-provider-registry.ts,modified,,,A,,,ADR-030: adopted; Workstream C7/C9,,,ADR-030
 src/gateway-providers/gateway-registration-wiring.test.ts,added,,,,,,,,,
 src/gateway-providers/index.ts,modified,,,,,,,,,
 src/gateway-providers/installed.ts,modified,,,,,,,,,
 src/gateway-providers/onecli.test.ts,deleted,,,,,,,,,
-src/gateway-read-policy.test.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
-src/gateway-read-policy.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
-src/gateway-session-lifecycle.test.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
-src/gateway-session-lifecycle.ts,added,,,B,,,ADR-029: gateway-provider orchestration deferred until a real gateway provider is adopted; C1/C2 stay blocked,declined:non-goal,,ADR-029
+src/gateway-read-policy.test.ts,added,,,B,,,ADR-030: adopted; C1/C2 trace this file directly,,,ADR-030
+src/gateway-read-policy.ts,added,,,B,,,ADR-030: adopted; C1/C2 trace this file directly,,,ADR-030
+src/gateway-session-lifecycle.test.ts,added,,,B,,,ADR-030: adopted; C1/C2 trace this file directly,,,ADR-030
+src/gateway-session-lifecycle.ts,added,,,B,,,ADR-030: adopted; C1/C2 trace this file directly,,,ADR-030
 src/group-init.ts,modified,,,,,,,,,
-src/host-instance.test.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
-src/host-instance.ts,added,,,C,,,"ADR-029 (gateway-session-lifecycle adoption): multi-host claim/lease machinery declined outright, LAW-05",declined:non-goal,,ADR-029
+src/host-instance.test.ts,added,,,A,,,ADR-030: adopted; Workstream C7/C9,,,ADR-030
+src/host-instance.ts,added,,,A,,,ADR-030: adopted; Workstream C7/C9,,,ADR-030
 src/host-lifecycle.test.ts,modified,,,,,,,,,
 src/host-lifecycle.ts,modified,,,,,,,,,
 src/host-sweep-grace.test.ts,modified,,,,,,,,,

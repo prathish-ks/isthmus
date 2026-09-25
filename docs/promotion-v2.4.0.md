@@ -67,28 +67,30 @@ not just absorbing them passively — while:
 
 - This is not a general "catch up with upstream forever" project. LAW-09
   stays in force: one pinned baseline at a time, promoted deliberately.
-- Not scoped to **install** the `add-iron-proxy` **skill** itself — that's
-  a separate, optional, user-facing feature (an operator opting into Iron
-  Proxy as their gateway), along with that skill's own vendored-source CI
-  job (`iron-front`) and the `channels`/`providers` sibling-branch drift
-  this produces (Mattermost, Codex/OpenCode contract work). Those are
-  separate, already-tracked threads (see `.github/workflows/ci.yml`'s
-  `sync-sibling-branches-*` jobs, merged 2026-09-25).
-  **This does NOT mean CI coverage for the core pin's own new surfaces is
-  out of scope** — the opposite: Workstream G below is a required part of
-  this promotion, not optional. Whatever new privileged surface the pin
-  itself introduces to Isthmus's core (the Go kernel's mount class and
-  multi-container executor, the gateway subsystem, any new seam call
-  shape) must get equivalent CI coverage before the pin moves, the same
-  way `wiring-registry-check` became a required gate when that surface
-  grew. The line being drawn here is: adopting the *skill* that lets an
-  operator turn Iron Proxy on is optional; making sure the *underlying
-  capability* the pin brings in is safe and CI-verified is not.
-- Not scoped to decide, up front, whether Isthmus adopts upstream's full
-  gateway-session-lifecycle behavior (lease-managed sessions, fail-closed
-  shutdown, approval coordination) verbatim, vs. a narrower Isthmus-specific
-  design achieving the same trust properties. That decision is Workstream
-  C's output, recorded in an ADR — not assumed here.
+- **Revised 2026-09-25 (ADR-030) — installing `add-iron-proxy` IS in
+  scope**, on par with upstream v2.4.0's own gateway catalog (OneCLI as the
+  default `GatewayProviderDefinition`, Iron Proxy as the second, opt-in
+  one). This reverses this section's original stance, recorded when this
+  plan was first drafted, under the belief that gateway-provider adoption
+  was a separate, optional, later decision. It isn't — see ADR-030 for why.
+  The `channels`/`providers` sibling-branch drift a *different* set of
+  skills produces (Mattermost, Codex/OpenCode contract work — unrelated to
+  gateways) remains a separate, already-tracked thread (see
+  `.github/workflows/ci.yml`'s `sync-sibling-branches-*` jobs, merged
+  2026-09-25) and is still out of this promotion's scope.
+  Workstream G's CI-coverage requirement is unchanged and, if anything,
+  more directly load-bearing now: whatever new privileged surface the pin
+  introduces — the Go kernel's mount class and multi-container executor,
+  the gateway-provider contract itself, any new seam call shape — must get
+  equivalent CI coverage before the pin moves, the same way
+  `wiring-registry-check` became a required gate when that surface grew.
+- **Resolved 2026-09-25 ([ADR-030](../go-host/docs/ADR-030-gateway-adoption-and-multi-host-coordination.md), superseding
+  [ADR-029](../go-host/docs/ADR-029-gateway-session-lifecycle-adoption.md))**
+  — Isthmus adopts upstream's gateway-session-lifecycle behavior
+  (lease-managed sessions, fail-closed shutdown, approval coordination) and
+  its multi-host claim/lease coordination, checked against all nine design
+  laws; see the ADR for the full reasoning and the new Workstream C7/C8/C9
+  tasks this produced. No Go kernel changes result from either decision.
 
 ## PR boundaries
 
@@ -389,13 +391,16 @@ outside `drivers/docker-driver.ts`.
 
 | # | Task | Status |
 |---|---|---|
-| C0 | Record, via ADR, whether/how Isthmus adopts upstream's gateway-session-lifecycle behavior | **Done** — [`ADR-029-gateway-session-lifecycle-adoption.md`](../go-host/docs/ADR-029-gateway-session-lifecycle-adoption.md), decided 2026-09-25 against all nine design laws. **Decision: decline the multi-host claim/lease layer outright (LAW-05 — solves a problem Isthmus's single-host architecture doesn't have); defer the gateway-provider orchestration layer (contribution, availability-watching, its own parallel approval subsystem) until a real gateway provider is actually being adopted, and build it narrower then — single-host, routed through Isthmus's existing `guard()`/approvals pipeline rather than a second approval surface (LAW-04).** The kernel-side admission work (Workstream A/B) needs no changes either way — it was already correctly scoped to just the mount/network shape, independent of who composes it (LAW-07). |
-| C1 | Trace `ensureGatewaySession`/`stopGatewaySessionsForUnavailability` (`container-runner.ts`) end to end: can a session reach the gateway, or keep reaching it after the gateway becomes unavailable, through any path that skips this function? | **Stays blocked, correctly, per ADR-029** — deferred until a real gateway provider is adopted; not applicable to Isthmus's current (empty) gateway-provider registry |
-| C2 | Trace `permitsConfiguredGatewayRead` (`gateway-read-policy.ts`): is the `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` env-var allowlist the *only* gate on read-only gateway destinations, and is it consulted on every code path that makes an outbound gateway request? | **Stays blocked, correctly, per ADR-029** — same reason as C1 |
+| C0 | Record, via ADR, whether/how Isthmus adopts upstream's gateway-session-lifecycle behavior | **Done, revised** — [ADR-029](../go-host/docs/ADR-029-gateway-session-lifecycle-adoption.md) (2026-09-25) decided to decline/defer; superseded the same day by [ADR-030](../go-host/docs/ADR-030-gateway-adoption-and-multi-host-coordination.md) after two factual corrections (the approval subsystem is not duplicative; gateway-provider selection is mandatory for a ported v2.4.0 host to start) and confirmation that multi-tenant/multi-replica cloud hosting is a real near-term direction. **Decision: adopt all of it** — OneCLI restructured into `GatewayProviderDefinition` (C7), Iron Proxy installed as the second catalogued option (C8), multi-host claim/lease coordination ported in TypeScript (C9). Zero Go kernel changes under either ADR: the kernel admits only the mount/network shape a contribution produces, unchanged since Workstream A/B, one kernel per node regardless of how many TS replicas run. |
+| C1 | Trace `ensureGatewaySession`/`stopGatewaySessionsForUnavailability` (`container-runner.ts`) end to end: can a session reach the gateway, or keep reaching it after the gateway becomes unavailable, through any path that skips this function? | **Unblocked by ADR-030** — real diligence once C7/C8 land a working gateway provider; a LAW-08 obligation, not optional. Not started |
+| C2 | Trace `permitsConfiguredGatewayRead` (`gateway-read-policy.ts`): is the `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` env-var allowlist the *only* gate on read-only gateway destinations, and is it consulted on every code path that makes an outbound gateway request? | **Unblocked by ADR-030** — same reason as C1. Not started |
 | C3 | Confirm the OneCLI-as-skill restructuring doesn't change *how* credentials reach a container — still exclusively via a kernel-admitted `gateway-trust`/`identity-material` mount, never a new env-var or volume path the kernel doesn't validate | Independently executable, not gated on C0 — Isthmus still has `src/gateway-providers/onecli.ts` baked into core (matches v2.3.0's layout; upstream v2.4.0 moved it to `.claude/skills/add-onecli/payload/`). Not started |
 | C4 | Full re-sweep of the 21 gateway files plus a fresh repo-wide grep (not scoped to `src/` this time — check `container/agent-runner/src/` and `setup/` too) for new `docker`/`exec`/credential-handling code introduced anywhere in the v2.4.0 diff that this plan hasn't already accounted for. Cross-reference against the Workstream D file inventory once it exists, rather than re-deriving file lists independently | Independently executable, not gated on C0. Not started |
 | C5 | For each finding: either close it (route through the kernel, or an existing guard) or produce a full **acceptance record** (see below) — never a bare "accepted and documented" note | Not started |
 | C6 | Security-focused review pass using the `code-review` skill, scoped specifically to trust-boundary findings on this diff (not general bug-hunting) | Not started |
+| C7 | **New (ADR-030), sequence first — load-bearing.** Restructure `src/gateway-providers/onecli.ts`/`onecli-approvals.ts` into upstream's `GatewayProviderDefinition` contract (`sessions.ensure`/`approvals.subscribe`, matching `gateway.json`'s `"kind": "onecli", "default": true`). Without this, a ported v2.4.0 `container-runner.ts` refuses to start — there is no implicit default and no open-egress fallback. Stays 100% TypeScript; ports session identity and credential-injection logic Isthmus already has, doesn't invent new logic | Not started |
+| C8 | **New (ADR-030), sequence third.** Install `/add-iron-proxy` on par with upstream v2.4.0's own catalog: the provider payload, the approval-bridge middleware, the local Docker-built proxy + Iron Control console, `NANOCLAW_IRON_PROXY_PORT`/`NANOCLAW_IRON_CONTROL_PORT` wiring, the gRPC bridge dependencies. First real consumer of Workstream A's `gateway-trust` mount class and multi-container/`networkAccess` executor | Not started |
+| C9 | **New (ADR-030), sequence second — independent of C7/C8.** Port the multi-host claim/lease coordination (`db/coordination.ts`, `host-instance.ts`, the `session_claims`/`host_instances` tables and migration) in TypeScript, including `availability.publish`/`.read` for the separated-process case. No Go kernel changes — coordination happens over the existing central DB; each host process still only ever talks to its own local kernel once it wins the claim | Not started |
 
 **Acceptance-record requirements (C5)** — every accepted bypass or TS-only
 security decision must record all of the following, in
@@ -888,3 +893,41 @@ the final pin-move PR.
   `gateway-provider-registry.ts`/`gateway-read-policy.ts`/
   `gateway-session-lifecycle.ts` and their tests) classified in the CSV
   citing this ADR. C3/C4 remain open and independently executable.
+- 2026-09-25 — **ADR-029 superseded by ADR-030, same day.** Reading
+  upstream's actual `docs/gateway-seam.md` contract doc (rather than
+  inferring from the `GatewayProviderDefinition` type signatures alone, as
+  ADR-029 had) surfaced two corrections: the gateway-provider's approval
+  subsystem is not a second, parallel approval engine — it's a thin
+  protocol translator feeding the single core-owned
+  `gateway-approval-coordinator.ts` flow every provider shares, so ADR-029's
+  LAW-04 concern doesn't hold; and gateway-provider selection turns out to
+  be **mandatory**, not optional, for a ported v2.4.0 host to start at all
+  ("With no provider registered, the host refuses to start: there is no
+  implicit default and no open-egress fallback" — upstream, verbatim),
+  which invalidates ADR-029's LAW-03 "defer, nothing consumes it yet"
+  reasoning. Separately, direct confirmation landed that multi-tenant,
+  multi-replica cloud hosting is a real near-term direction, not
+  speculative — which flips the LAW-05 calculus on the multi-host
+  claim/lease layer specifically, since a confirmed real use case changes
+  "unjustified distributed-system complexity" into "cheap, already-tested
+  infrastructure worth adopting now rather than rebuilding later." **New
+  decision, [ADR-030](../go-host/docs/ADR-030-gateway-adoption-and-multi-host-coordination.md):
+  adopt all of it** — OneCLI restructured into `GatewayProviderDefinition`
+  (new task C7, sequenced first since it's load-bearing for the host to
+  start), the multi-host claim/lease coordination ported in TypeScript (C9,
+  independent of C7/C8), and `/add-iron-proxy` installed on par with
+  upstream's own gateway catalog (C8, sequenced last as the most involved:
+  a local Docker-built proxy, an Iron Control console, gRPC bridge
+  dependencies). The Go kernel needs zero changes under this decision
+  either — confirmed again directly against `go-host/internal/kernel/
+  server.go`'s `net.Listen("unix", socketPath)`: the kernel is inherently
+  machine-local, one per node regardless of how many TypeScript host
+  replicas run, and none of C7/C8/C9 asks it to become anything else. The
+  Non-goals section's stance against installing `add-iron-proxy` is
+  reversed; 49 file-inventory rows reclassified from `declined:non-goal`
+  (citing ADR-029) to adopted (citing ADR-030) — 38 the `add-iron-proxy`
+  skill payload itself (Bucket C, Workstream C8), 11 the ADR-029-tagged
+  gateway/multi-host files (2 moved to Bucket B where they're literally
+  C1/C2's subject — `gateway-read-policy.ts`, `gateway-session-lifecycle.ts`
+  — the rest to Bucket A as seam-adjacent). C7/C8/C9 are real, substantial
+  implementation work, not documentation — none of it has been written yet.

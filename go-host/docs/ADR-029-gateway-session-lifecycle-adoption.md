@@ -1,7 +1,14 @@
 # ADR-029: Gateway-session-lifecycle adoption (v2.4.0 promotion, Workstream C0)
 
-Status: decided 2026-09-25. Gates `docs/promotion-v2.4.0.md` Workstream C's
-tasks C1/C2.
+Status: **SUPERSEDED 2026-09-25 by
+[ADR-030](ADR-030-gateway-adoption-and-multi-host-coordination.md)**, the
+same day this was written. Two factual errors were found after this ADR
+was recorded — the approval subsystem is not duplicative, and
+gateway-provider selection turns out to be mandatory rather than optional
+for a ported v2.4.0 host to start — and the multi-tenant cloud-hosting
+direction this ADR treated as unconfirmed was confirmed. Kept here,
+unedited, as the honest record of what was decided and why at the time;
+read ADR-030 for the current decision.
 
 ## Context
 
