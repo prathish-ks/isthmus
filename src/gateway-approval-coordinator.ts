@@ -277,9 +277,7 @@ async function decide(request: GatewayApprovalRequest): Promise<GatewayApprovalD
 }
 
 async function expireApproval(approvalId: string, reason: ExpiryReason): Promise<void> {
-  const rows = (await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).filter(
-    (r) => r.approval_id === approvalId,
-  );
+  const rows = (await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).filter((r) => r.approval_id === approvalId);
   const row = rows[0];
   if (!row) return;
 

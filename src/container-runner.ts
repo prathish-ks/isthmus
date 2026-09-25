@@ -9,6 +9,7 @@
  */
 import { exec } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 
@@ -29,8 +30,10 @@ import { updateContainerConfigScalars } from './db/container-configs.js';
 import { CONTAINER_RUNTIME_BIN } from './container-runtime.js';
 import { composeGroupProjectDoc, DEFAULT_PROJECT_DOC } from './project-doc-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
+import { getLiveHostInstance, getSessionClaim, releaseSessionClaim, shadowWrite, tryClaimSession } from './db/coordination.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getSession } from './db/sessions.js';
+import { getHostInstanceId } from './host-instance.js';
 import { getSessionDriver, isSessionEventsDriver } from './drivers/index.js';
 import type { SupervisedHandle, SupervisedSnapshot } from './drivers/session-events.js';
 import { GROUP_FOLDER_LABEL, labelValueLegal, specInvalid } from './drivers/types.js';
@@ -98,9 +101,69 @@ interface ActiveSessionRuntime {
   finishedPromise: Promise<void>;
   resolveFinished: () => void;
   stopReason?: string;
+  /** Incarnation this process claimed in session_claims, if the write landed. */
+  claimIncarnation?: number;
 }
 
 const activeContainers = new Map<string, ActiveSessionRuntime>();
+
+// Claimant identity for the session_claims rows: the host's durable lease
+// instance id when the lease is running, else a process-scoped fallback
+// (tests, tools). The lease id is what makes claims answerable against
+// host_instances liveness below. v2.4.0 promotion, Workstream C9 (ADR-030).
+function claimantId(): string {
+  return getHostInstanceId() ?? `${os.hostname()}:${process.pid}`;
+}
+
+/**
+ * Claim a session this process is about to run. The `session_claims` row is
+ * the authority for which process/incarnation owns a session: losing the
+ * compare-and-set means another live claimant got there first, and the
+ * caller must not start a container for it. Returns the claimed incarnation,
+ * or null when the claim was lost. Throws on a failed write — a claim that
+ * cannot be recorded is a claim not held.
+ *
+ * A claim held by a LIVE peer host (a host_instances row that is not stopped
+ * and whose lease is unexpired) is refused outright — two live hosts must
+ * never trade a session back and forth. A claim whose holder is stopped,
+ * lease-expired, or unknown (older claimant-id schemes) stays takeover-able:
+ * a crashed claimant must never wedge a session.
+ */
+async function claimSessionRun(sessionId: string, containerRef: string): Promise<number | null> {
+  const current = await getSessionClaim(sessionId);
+  const self = claimantId();
+  if (current?.claimed_by && current.claimed_by !== self) {
+    const holder = await getLiveHostInstance(current.claimed_by, new Date().toISOString());
+    if (holder) {
+      log.warn('Refusing session claim held by a live peer host', {
+        sessionId,
+        holder: current.claimed_by,
+        claimant: self,
+      });
+      return null;
+    }
+  }
+  return tryClaimSession({
+    sessionId,
+    instanceId: self,
+    expectedIncarnation: current?.incarnation ?? 0,
+    containerRef,
+    now: new Date().toISOString(),
+  });
+}
+
+/** Release our claim at this incarnation. Never throws — a failed release is
+ *  self-healing (the next claimant's CAS supersedes it). */
+async function releaseClaimQuietly(sessionId: string, incarnation: number): Promise<void> {
+  await shadowWrite('session-claim-release', () =>
+    releaseSessionClaim({
+      sessionId,
+      instanceId: claimantId(),
+      incarnation,
+      now: new Date().toISOString(),
+    }),
+  );
+}
 
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
@@ -248,15 +311,32 @@ async function spawnContainer(session: Session): Promise<void> {
 
   log.info('Spawning session', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
 
-  // Clear any orphan heartbeat from a previous container instance — the sweep's
-  // ceiling check treats a missing file as "fresh spawn, give grace". Without
-  // this, the stale mtime can trigger an immediate kill before the new container
-  // touches the file itself.
-  fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
+  // Claim before touching runtime state. Another host may already own the
+  // session (v2.4.0 promotion, Workstream C9 — ADR-030). Any failure from
+  // here through driver.prepare releases the claim so a takeover-able retry
+  // (this host or a peer) isn't blocked by a claim nothing is running under.
+  let claimIncarnation: number | null = null;
+  let handle: SupervisedHandle;
+  try {
+    claimIncarnation = await claimSessionRun(session.id, containerName);
+    if (claimIncarnation === null) {
+      throw new Error(`session ${session.id} is claimed by another live host process — not spawning a duplicate`);
+    }
 
-  const handle = await driver.prepare(spec);
+    // Clear any orphan heartbeat from a previous container instance — the sweep's
+    // ceiling check treats a missing file as "fresh spawn, give grace". Without
+    // this, the stale mtime can trigger an immediate kill before the new container
+    // touches the file itself.
+    fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
+
+    handle = await driver.prepare(spec);
+  } catch (err) {
+    if (claimIncarnation !== null) await releaseClaimQuietly(session.id, claimIncarnation);
+    throw err;
+  }
 
   const runtime = registerRuntime(session.id, handle, containerName, false);
+  runtime.claimIncarnation = claimIncarnation;
 
   try {
     await armSessionLifecycle({
@@ -269,6 +349,7 @@ async function spawnContainer(session: Session): Promise<void> {
       },
     });
   } catch (err) {
+    if (runtime.claimIncarnation !== undefined) await releaseClaimQuietly(session.id, runtime.claimIncarnation);
     if (activeContainers.get(session.id) === runtime && !runtime.finished) {
       activeContainers.delete(session.id);
       runtime.resolveFinished();
@@ -438,7 +519,25 @@ export async function adoptRunningSessions(): Promise<{ adopted: number; stopped
       stopped += 1;
       continue;
     }
+    // Claim-fence adoption too — a session a live peer host is already
+    // running must not also be tracked here (v2.4.0 promotion, Workstream C9
+    // — ADR-030). Neither adopted nor stopped: the container is left exactly
+    // as found, since it is either genuinely owned by a live peer (calling
+    // stop() would kill a session that host is legitimately supervising) or
+    // the claim store was unreachable (safer to leave a possibly-live
+    // container untracked than to risk two hosts supervising the same one).
+    let claimIncarnation: number | null;
+    try {
+      claimIncarnation = await claimSessionRun(session.id, handle.name);
+    } catch (err) {
+      log.warn('Failed to claim session at adoption — leaving it unadopted', { sessionId: session.id, err });
+      claimIncarnation = null;
+    }
+    if (claimIncarnation === null) {
+      continue;
+    }
     const runtime = registerRuntime(session.id, handle, handle.name, true);
+    runtime.claimIncarnation = claimIncarnation;
     runtime.stopReason = undefined;
     handle.onTerminal((failure) => {
       void finishAndResolve(session.id, failure);
