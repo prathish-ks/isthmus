@@ -4,11 +4,20 @@ import {
   getGatewayProviderFactory,
   listGatewayProviderKinds,
   registerGatewayProvider,
-  type GatewayProvider,
+  type GatewayProviderDefinition,
 } from './gateway-provider-registry.js';
 
-function provider(kind: string): GatewayProvider {
-  return { kind, contribute: async () => ({}) };
+function provider(kind: string): GatewayProviderDefinition {
+  return {
+    kind,
+    agentSkills: [],
+    sessions: {
+      ensure: async () => ({ contribution: { networkAccess: { endpoint: '', target: { kind: 'host' } } } }),
+    },
+    approvals: {
+      subscribe: async () => {},
+    },
+  };
 }
 
 describe('gateway provider registry', () => {

@@ -36,7 +36,7 @@ import type { SupervisedHandle, SupervisedSnapshot } from './drivers/session-eve
 import { GROUP_FOLDER_LABEL, labelValueLegal, specInvalid } from './drivers/types.js';
 import type { ContainerSpec, GuardContext, MountSpec, SessionFailure, SessionSpec } from './drivers/types.js';
 import { KernelClient, type KernelClientLike } from './kernel/client.js';
-import { getGatewayProvider, type GatewayContribution } from './gateway-providers/index.js';
+import { gatewayRuntimeIdentity, getGatewayProvider, type GatewayContribution } from './gateway-providers/index.js';
 import { initGroupFilesystem } from './group-init.js';
 import { getAgentMailbox } from './mailbox/index.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
@@ -195,17 +195,37 @@ async function spawnContainer(session: Session): Promise<void> {
   const mailboxEnvironment = await mailbox.runnerEnvironment(mailboxKey);
 
   const driver = getSessionDriver();
-  // The gateway's per-session contribution — typed env and mounts (and, on a
-  // driver that manages them, auxiliary containers), merged into the spec
-  // BEFORE validation so admission sees the whole session. Fail-closed exactly
-  // as the old wiring was: contribute() throwing aborts the spawn, the inbound
-  // row stays pending, and the sweep retries. Network selection is NOT here —
-  // topology is driver-private (see `drivers/index.ts`).
-  const gateway = await getGatewayProvider().contribute({
-    key: { installSlug: INSTALL_SLUG, agentGroupId: agentGroup.id, sessionId: session.id },
-    groupName: agentGroup.name,
-    capabilities: driver.capabilities(),
-  });
+  const sessionKey = { installSlug: INSTALL_SLUG, agentGroupId: agentGroup.id, sessionId: session.id };
+  // The gateway's per-session lease — its typed contribution (env, mounts,
+  // networkAccess, and, on a driver that manages them, auxiliary containers)
+  // is merged into the spec BEFORE validation so admission sees the whole
+  // session. Fail-closed exactly as the old wiring was: `ensure` throwing
+  // aborts the spawn, the inbound row stays pending, and the sweep retries.
+  // Driver-topology selection is NOT here — that stays driver-private (see
+  // `drivers/index.ts`); `networkAccess` is an intent the driver realizes or
+  // rejects, never a topology itself.
+  const lease = await getGatewayProvider().sessions.ensure(
+    {
+      key: sessionKey,
+      disposition: 'create',
+      runtimeIdentity: gatewayRuntimeIdentity(sessionKey),
+      groupName: agentGroup.name,
+      containerName,
+      capabilities: driver.capabilities(),
+    },
+    // A throwaway signal, not a tracked one: this step of the C7 restructuring
+    // wires the new sessions.ensure() shape in place of the old contribute()
+    // call without yet threading the lease's own lifetime (release on
+    // teardown, onUnavailable mid-session watching) through
+    // ActiveSessionRuntime — OneCLI's own lease declares neither capability,
+    // so nothing observes this signal today. A future change ties this to a
+    // real per-session AbortController, stored the same way upstream's own
+    // `ActiveSessionRuntime.gateway` field does, once a gateway that actually
+    // uses release/onUnavailable (Iron Proxy, Workstream C8) exists to prove
+    // it against.
+    new AbortController().signal,
+  );
+  const gateway = lease.contribution;
   if (gateway.containers?.length && !driver.capabilities().auxiliaryContainers) {
     // Named at composition, where the error can say which side to change —
     // not left for the driver's refusal backstop to discover.
@@ -731,11 +751,12 @@ export function composeSessionSpec(input: ComposeSessionSpecInput): SessionSpec 
 
   return {
     key: { installSlug: INSTALL_SLUG, agentGroupId: agentGroup.id, sessionId: session.id },
-    labels: { 'nanoclaw-container-name': containerName, [GROUP_FOLDER_LABEL]: agentGroup.folder },
+    labels: { ...gateway.labels, 'nanoclaw-container-name': containerName, [GROUP_FOLDER_LABEL]: agentGroup.folder },
     // The gateway's auxiliary containers ride beside the agent; capability-
     // gated in the spawn path before composition ever runs.
     containers: [agent, ...(gateway.containers ?? [])],
     network: 'shared-private',
+    networkAccess: gateway.networkAccess,
     hardening: 'standard',
     resources: {
       cpus: CONTAINER_CPU_LIMIT || undefined,

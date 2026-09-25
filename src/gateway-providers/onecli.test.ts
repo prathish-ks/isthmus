@@ -45,6 +45,10 @@ describe('contributionFromArgs', () => {
         origin: 'provider',
       },
     ]);
+    // OneCLI runs on the install's own host, never in a driver-managed
+    // container — a no-op for the kernel's network executor, but still a
+    // required, correctly-shaped field on the contribution.
+    expect(contribution.networkAccess).toEqual({ endpoint: 'http://localhost:1', target: { kind: 'host' } });
   });
 
   it('refuses argv outside the grammar — nothing rides raw around the spec again', () => {
