@@ -392,8 +392,8 @@ outside `drivers/docker-driver.ts`.
 | # | Task | Status |
 |---|---|---|
 | C0 | Record, via ADR, whether/how Isthmus adopts upstream's gateway-session-lifecycle behavior | **Done, revised** — [ADR-029](../go-host/docs/ADR-029-gateway-session-lifecycle-adoption.md) (2026-09-25) decided to decline/defer; superseded the same day by [ADR-030](../go-host/docs/ADR-030-gateway-adoption-and-multi-host-coordination.md) after two factual corrections (the approval subsystem is not duplicative; gateway-provider selection is mandatory for a ported v2.4.0 host to start) and confirmation that multi-tenant/multi-replica cloud hosting is a real near-term direction. **Decision: adopt all of it** — OneCLI restructured into `GatewayProviderDefinition` (C7), Iron Proxy installed as the second catalogued option (C8), multi-host claim/lease coordination ported in TypeScript (C9). Zero Go kernel changes under either ADR: the kernel admits only the mount/network shape a contribution produces, unchanged since Workstream A/B, one kernel per node regardless of how many TS replicas run. |
-| C1 | Trace `ensureGatewaySession`/`stopGatewaySessionsForUnavailability` (`container-runner.ts`) end to end: can a session reach the gateway, or keep reaching it after the gateway becomes unavailable, through any path that skips this function? | **Unblocked by ADR-030** — real diligence once C7/C8 land a working gateway provider; a LAW-08 obligation, not optional. Not started |
-| C2 | Trace `permitsConfiguredGatewayRead` (`gateway-read-policy.ts`): is the `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` env-var allowlist the *only* gate on read-only gateway destinations, and is it consulted on every code path that makes an outbound gateway request? | **Unblocked by ADR-030** — same reason as C1. Not started |
+| C1 | Trace `ensureGatewaySession`/`stopGatewaySessionsForUnavailability` (`container-runner.ts`) end to end: can a session reach the gateway, or keep reaching it after the gateway becomes unavailable, through any path that skips this function? | **Done, traced against the actual code (not the upstream names, which C7 never ported verbatim).** Isthmus's C7 has no `ensureGatewaySession`/`stopGatewaySessionsForUnavailability` wrapper functions at all — `spawnContainer` (`container-runner.ts`) calls `getGatewayProvider().sessions.ensure(...)` directly, once, inline. Confirmed by grep that `driver.prepare(spec)` has exactly two call sites in the whole tree: `spawnContainer` itself, and `drivers/session-events.ts`'s `withSessionEvents` wrapper — read in full, it is a transparent pass-through (`prepare: async (spec) => { const handle = await driver.prepare(spec); hub.trackPrepared(handle); return new HubHandle(handle, hub); }`) that only adds terminal-event tracking around whatever spec `spawnContainer` already built; it does not construct or rebuild a spec itself. No code path composes a `SessionSpec` or reaches `driver.prepare` without first going through `spawnContainer`'s single `sessions.ensure()` call. **Real gap found, but it's the one already named in C7's own status row, not a new one**: the returned `lease.release`/`lease.onUnavailable` hooks are never called anywhere in `container-runner.ts` (confirmed: zero references outside the inline comment noting the deferral) — a session that starts while the gateway is reachable is not un-spawned if the gateway later goes unavailable mid-session. Not a bypass today: OneCLI's own `sessions.ensure` (`onecli.ts`) returns a lease with no `release`/`onUnavailable` fields at all, so there is nothing being skipped — the hooks don't exist on the one active provider. This becomes a real, must-close item the moment C8's Iron Proxy (which needs them) goes live; tracked there, not re-opened here as a fresh finding |
+| C2 | Trace `permitsConfiguredGatewayRead` (`gateway-read-policy.ts`): is the `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` env-var allowlist the *only* gate on read-only gateway destinations, and is it consulted on every code path that makes an outbound gateway request? | **Not applicable — confirmed by direct search, not assumption.** `gateway-read-policy.ts`, `permitsConfiguredGatewayRead`, and `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` do not exist anywhere in Isthmus's tree (`grep -rn` across `src/` returns zero matches). C7 never ported upstream's read-only-gateway-destination allowlist feature — OneCLI's own contribution path (`contributionFromArgs`) has no concept of a "read-only destination" distinct from any other mount/env it contributes. There is currently no gate to audit because the feature it would gate was not adopted. This is a real, named gap in porting coverage (distinct from a security bypass — a bypass requires the guarded capability to exist first), worth a line in Workstream D's inventory rather than silently closing this row as done; revisit if/when Iron Proxy (C8) or any future gateway actually introduces a read-only-destination concept |
 | C3 | Confirm the OneCLI-as-skill restructuring doesn't change *how* credentials reach a container — still exclusively via a kernel-admitted `gateway-trust`/`identity-material` mount, never a new env-var or volume path the kernel doesn't validate | **Done** — confirmed by direct code trace, not inference, following C7's own restructuring: `onecli.ts`'s `contributionFromArgs` parses the SDK's argv into a typed `GatewayContribution` and **fails closed on any flag it doesn't recognize** (`onecli.test.ts`'s own "refuses argv outside the grammar" case). That contribution's `mounts` merge into `composeSessionSpec`'s output and pass through `validateSpec` — the same admission gate every other mount goes through, no shortcut — before `driver.prepare` ever sees the spec. Its `env` merges into `contributedEnv`, which `validateSpec` independently runs through `looksLikeCredential()` — "Credential VALUES have no sanctioned channel, from anyone: real material rides mounts by reference" (the check's own comment, `drivers/types.ts`). Isthmus never moved OneCLI to a skill (C7 kept it core, matching upstream's own default-gateway shape) so the literal premise ("skill restructuring") doesn't apply, but the invariant it was checking for holds. |
 | C4 | Full re-sweep of the 21 gateway files plus a fresh repo-wide grep (not scoped to `src/` this time — check `container/agent-runner/src/` and `setup/` too) for new `docker`/`exec`/credential-handling code introduced anywhere in the v2.4.0 diff that this plan hasn't already accounted for. Cross-reference against the Workstream D file inventory once it exists, rather than re-deriving file lists independently | **Done, one substantial finding.** Swept the full v2.4.0 diff (`src/`, `container/agent-runner/src/`, `setup/`) for process-spawning and credential-shaped code. Nothing new beyond what's already tracked (C7/C8/C9, the sibling-branch-tracked skills) — **except `src/community-portal/`, entirely new, ~2,990 lines, not previously mentioned anywhere in this plan.** It is a client for `https://portal.nanoclaw.dev` — an **upstream-operated hosted service** ("NanoClaw community portal") — generating a per-machine ECDSA P-256 device identity key (`~/.config/nanoclaw/device-key.json`, self-generated, doesn't leave the machine, so not itself a credential-leak vector), registering the device with the portal, and running a detached worker (`slack-job.ts`, uses `child_process.spawn`) for a "managed Slack app install" flow. **Recommendation: do not adopt as part of this promotion.** This is a separate, more clearly out-of-scope decision than gateway-session-lifecycle ever was — it's not a compatibility question, it's "should Isthmus installs register a device identity with and phone home to nanocoai's own hosted infrastructure," a product/trust decision with no bearing on kernel compatibility or the gateway work already decided. Flagging for the founder rather than silently porting or silently ignoring it. |
 | C5 | For each finding: either close it (route through the kernel, or an existing guard) or produce a full **acceptance record** (see below) — never a bare "accepted and documented" note | Nothing to process yet — C3 found no gap (credentials stay kernel-admitted), C4's one finding (`community-portal`) is declined/not-adopted, not an accepted bypass, so it doesn't need an acceptance record (there is nothing running to accept a gap in). Stays open pending C1/C2, which are blocked on a real gateway provider existing (C8) |
@@ -1019,3 +1019,51 @@ the final pin-move PR.
   genuinely done. The formal GitHub Actions run of `go-multi-container-
   live-docker` is still the actual required-CI gate (G1), but there is now
   real local evidence behind it where there was only reasoning before.
+- 2026-09-25 — **C7/C9 verified live against the real TS host + real
+  `nanogo` kernel + real Docker container** (`feat/gateway-provider-seam`,
+  commit `18194f42`), complementing A5/E2's Go-level live-Docker evidence
+  with the TS-side path those tests don't reach: `gateway-approval-
+  coordinator.ts` (C7) and `container-runner.ts`'s claim/spawn wiring (C9)
+  driven by an actual running kernel, not the fake NDJSON one the vitest
+  suite uses. Found and fixed a real regression in the process: `scripts/
+  ec07-live-host-smoke.sh` and `scripts/ec08-egress-lockdown-live-smoke.sh`
+  each registered a `'none'` stand-in `GatewayProviderDefinition` using the
+  pre-C7 single-`contribute()` shape; C7 widened the contract to
+  `sessions.ensure()`/`approvals.subscribe()`, and since these are `tsx`
+  scripts with no type-check step, the mismatch went undetected until a
+  live run threw `Cannot read properties of undefined (reading 'subscribe'/
+  'ensure')` out of `startGatewayApprovalCoordinator` and `spawnContainer`.
+  Fixed both stubs to match the shape `drivers/seam-real-setup.ts`'s
+  `noGateway` already uses correctly. After the fix: `ec07` passes 2/2
+  (real kernel-mediated container wake, message round trip, kernel-mediated
+  kill, confirmed gone); `ec08` passes (real container confirmed attached
+  to exactly the internal `nanoclaw-egress` network with no default route
+  out, round trip completes fully network-isolated, gateway-attach path
+  exercised against a stand-in OneCLI container — the real `onecli`
+  gateway container on this machine was identified via `docker inspect`
+  before running anything and deliberately not touched, using
+  `ONECLI_GATEWAY_CONTAINER` to point the harness at a disposable stand-in
+  name instead).
+- 2026-09-25 — **C1 and C2 resolved.** C1: traced end to end against the
+  actual C7 code (upstream's `ensureGatewaySession`/
+  `stopGatewaySessionsForUnavailability` names don't exist in this port —
+  C7 calls `getGatewayProvider().sessions.ensure()` directly, once, inline
+  in `spawnContainer`). Confirmed by grep that `driver.prepare(spec)` has
+  exactly two call sites tree-wide: `spawnContainer` itself, and
+  `session-events.ts`'s `withSessionEvents` wrapper, read in full and
+  confirmed to be a transparent pass-through that adds event tracking only
+  — it does not build or rebuild a spec, so it is not an independent path
+  into the driver. No bypass found. The one real gap — `lease.release`/
+  `lease.onUnavailable` never called anywhere — is the same one C7's own
+  status row already named as a deliberate deferral (OneCLI's lease
+  declares neither hook, so nothing is currently being skipped); becomes a
+  must-close item once C8's Iron Proxy needs them, not a new finding today.
+  C2: `gateway-read-policy.ts`, `permitsConfiguredGatewayRead`, and
+  `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` do not exist anywhere in this tree
+  (confirmed by repo-wide grep, zero matches) — upstream's read-only-
+  gateway-destination allowlist was never ported, so there is no gate to
+  audit yet. Recorded as a real porting-coverage gap for Workstream D's
+  inventory, not silently closed as though the row's question had been
+  answered. Both rows move C5 closer to processable but do not themselves
+  add anything to C5 — C1 found no bypass to close, C2 found no feature to
+  gate. C6 (security-review pass) is next.
