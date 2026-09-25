@@ -30,7 +30,13 @@ import { updateContainerConfigScalars } from './db/container-configs.js';
 import { CONTAINER_RUNTIME_BIN } from './container-runtime.js';
 import { composeGroupProjectDoc, DEFAULT_PROJECT_DOC } from './project-doc-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
-import { getLiveHostInstance, getSessionClaim, releaseSessionClaim, shadowWrite, tryClaimSession } from './db/coordination.js';
+import {
+  getLiveHostInstance,
+  getSessionClaim,
+  releaseSessionClaim,
+  shadowWrite,
+  tryClaimSession,
+} from './db/coordination.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getSession } from './db/sessions.js';
 import { getHostInstanceId } from './host-instance.js';
