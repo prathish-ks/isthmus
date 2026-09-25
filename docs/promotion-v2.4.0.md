@@ -359,19 +359,19 @@ didn't cover (it only checked data shapes).
 
 | File | Data-shape impact (from prior pass) | Call-sequencing impact | Status |
 |---|---|---|---|
-| `container-runner.ts` | Major — gateway-session-lifecycle wrapping (load-bearing) + durable-host shadow-writes (upstream-confirmed inert) tangled in one ~900-line diff | Not yet assessed | Not started |
+| `container-runner.ts` | **Revised, larger than the prior pass found** — the ~900-line diff is not two concerns but (at least) **three**: (1) gateway-session-lifecycle wrapping (`claimSessionRun`, `ensureGatewaySession`, `stopGatewaySessionsForUnavailability`, `watchGatewayAvailability`, `abortGatewaySessionObservers` — load-bearing, lease-managed), (2) durable-host shadow-writes (upstream-confirmed inert, same as the `request-wake.ts` row), and (3) **newly found**: a "provider host contract" mount-composition rewrite in `buildMounts` (`getProviderHostContract`, `realizeProviderSpawnSurfaces`, `contract.stateVolumes`/`.skillViews`/`.skillBackings`) that replaces the old `providerProvidesAgentSurfaces`/`providerContribution.mounts` callback pattern with a declarative per-provider mount contract — **this is orthogonal to gateway-trust entirely**, a separate provider-abstraction upgrade affecting how *every* provider's mounts (not just gateway ones) get composed | `composeSessionSpec`'s own diff is small and directly gateway-seam-relevant: `labels: {...gateway.labels, ...}`, `containers: [agent, ...(gateway.containers ?? [])]`, new `networkAccess: gateway.networkAccess` field — this is the actual production call site `drivers/types.ts`'s new `SessionSpec.networkAccess`/gateway-trust support exists to receive, currently unreachable because nothing populates a non-empty `gateway` object (confirms the "composer doesn't yet build gateway-provider specs" premise Workstream A/B's TS changes were built on) | **Not portable in the scope of this promotion's remaining budget without a real architectural decision.** (1) and (3) are each substantial, independent features — (3) especially, since it is NOT part of the gateway/Iron-Proxy work the plan's Non-goals section already scoped out, and was not visible in the prior data-shape-only pass. Recommend: split into two explicit follow-on efforts, each gated on its own ADR — gateway-session-lifecycle adoption (already anticipated by Workstream C's Non-goals carve-out) and, newly, a provider-host-contract adoption decision. Flagging this to the user rather than proceeding to port (3) unreviewed: it changes how every session's mounts are composed, on a fork whose entire premise is a hardened mount/trust boundary |
 | `drivers/docker-driver.ts` | Major — see Workstream A | N/A, IS the seam | **Done** (commit `79465865`) — `capabilities().auxiliaryContainers` flipped to `true`; the `prepare()` refusal for non-agent roles removed (Go's `Wake`/A3 now realizes every container in the spec, so the TS-side refusal was a stale backstop); `assertMountSourcesExist` extended from `agent.mounts` to every container's mounts |
 | `drivers/types.ts` | Major — see Workstream A | N/A | **Done** (commit `79465865`) — `MountClass` gained `'gateway-trust'`; added `NetworkAccessTarget`/`NetworkAccessIntent`, mirroring the Go/wire types field-for-field; `SessionSpec.networkAccess` added as **optional** (deliberate divergence from Go's required field — this tree's composer doesn't yet build gateway-provider specs, documented inline); `MountPolicy.gatewayTrustRoot` added as required, with the same empty-root fail-closed guard A1 needed on the Go side ported into `classRequiredByPath`/`mountAllowed`; ro-only admission rule added to `validateSpec` |
 | `drivers/index.ts` | Minor (wiring) | Not yet assessed | **Done** (commit `79465865`) — `mountPolicy()` supplies a real `gatewayTrustRoot` default (`NANOCLAW_GATEWAY_TRUST_ROOT` env override, mirroring `materialsRoot`'s own pattern); `SETTINGS` allowlist updated |
-| `drivers/session-events.ts` | Minor | Not yet assessed | Not started |
+| `drivers/session-events.ts` | Minor | Assessed — upstream's 2-line addition wires an optional `driver.reconcileNetworkAccess` passthrough onto `withSessionEvents`'s wrapper, mirroring the existing `ensureReady`/`reapResidue` optional-method pattern | **Deferred to Workstream C** — `reconcileNetworkAccess` is part of upstream's durable, lease-managed gateway-session-lifecycle machinery, which the plan's own Non-goals section explicitly leaves to Workstream C's ADR ("not scoped to decide... whether Isthmus adopts upstream's full gateway-session-lifecycle behavior... verbatim, vs. a narrower Isthmus-specific design"). No `SessionDriver` in this tree declares `reconcileNetworkAccess` today, so the passthrough is dead code if ported now with nothing to call — porting the wiring ahead of the C decision would be scope creep, not compatibility work. Zero TS compile/test impact either way (optional method, present or absent) |
 | `drivers/spec-fixture.ts` | Test fixture only | N/A | **Done** (commit `79465865`) — `FIXTURE_POLICY` carries `gatewayTrustRoot` |
 | `drivers/conformance.test.ts`, `docker-driver.test.ts`, `driver-selection.test.ts` | Test files — compare against Isthmus's own equivalents for coverage gaps | Not yet assessed | `conformance.test.ts` **done** (commit `79465865`) — capability assertion flipped to `true`, stale "refuses whole" comments corrected; the file's own conditional multi-container contract test (`a driver that does not manage auxiliary containers refuses the spec whole`) already covered the realize-them path once the capability flipped, no test code change needed there. `docker-driver.test.ts`/`driver-selection.test.ts` checked — neither references the removed refusal path, no change needed |
 | `kernel/client.ts`, `kernel/protocol.ts` | Isthmus-only files (don't exist upstream) — confirm they still model the wire contract correctly once A2 lands | N/A | **Done** (commit `79465865`) — `protocol.ts`: `KERNEL_PROTOCOL_VERSION` bumped to `'v2'` alongside Go's own bump (A2, commit `41af3c5f`), `WireMountSpec.class` gained `'gateway-trust'`, added `WireNetworkAccessTarget`/`WireNetworkAccessIntent`, `WireSession.networkAccess?`. `client.ts`: added `toWireNetworkAccessIntent`, threaded `networkAccess` through `toWireSession` via the file's existing optional-field spread pattern. Full `pnpm exec tsc --noEmit` + `pnpm test` (3972 tests) green after these changes |
 | `cli/dispatch.ts`, `cli/guard.ts`, `cli/registry.ts` | Clean (zero commits in range) | Clean | Done — no change needed |
-| `cli/resources/groups.ts` | Not yet checked | Not yet assessed | Not started |
+| `cli/resources/groups.ts` | Assessed (48-line diff) — three unrelated concerns bundled: (1) `wakeContainer`→`requestWake(s, 'cli')` in the restart handler (2) a new `--speed` inference-tier flag on `groups config update`, reading `provider-contracts/registry.ts`'s declared tiers — a genuine new feature, unrelated to the gateway/kernel work (3) a new `connect` custom operation calling `connectGatewayAccount` (new core file `src/gateway-connections.ts`, confirmed NOT under `.claude/skills/add-iron-proxy/` — core infra, not the optional skill) | (1) is the only kernel-seam-relevant piece — see request-wake row below, inert | **Kernel-seam piece: clean, no change needed.** (2) and (3) are pure-TS feature additions with zero kernel/mount/wire-protocol involvement — out of Workstream B's scope entirely; **flagged for Workstream D's file inventory** (D0/D1) as two real, unclassified upstream additions Isthmus hasn't ported, neither gated on this promotion's kernel-compatibility goal |
 | `self-mod/apply.ts` | Clean — shadow-write + wake-routing only, upstream's own commit message: "byte-equivalent by construction" | Clean | Done — no change needed |
-| `modules/agent-to-agent/agent-route.ts`, `create-agent.ts` | Not yet checked | Not yet assessed | Not started |
-| `modules/kernel-supervisor/index.ts` | Not yet checked (kernel process supervision itself) | Not yet assessed | Not started |
+| `modules/agent-to-agent/agent-route.ts`, `create-agent.ts` | Assessed — both files' only change is `wakeContainer(fresh)` → `requestWake(fresh, '<reason>')` | Clean — confirmed by reading upstream's `src/request-wake.ts` directly: `requestWake` is `_reason`-parameter-ignoring pure delegation to `wakeContainer` ("byte-equivalent... MUST stay that way until the durable rows become authoritative: no logging, no signal writes, no behavior" — upstream's own doc comment), the same inert refactor already recorded for the `host-sweep.ts`/`reconcile.ts`/`request-wake.ts` row below | Done — no change needed for kernel-compatibility; **flagged for Workstream D** as a real but behavior-inert pure-TS refactor Isthmus hasn't adopted (adopting it is a rename, not a fix) |
+| `modules/kernel-supervisor/index.ts` | N/A — confirmed this file has no upstream equivalent at either v2.3.0 or v2.4.0 (`git show v2.4.0:src/modules/kernel-supervisor/index.ts` fails); it exists only because Isthmus's own Go kernel (EC-02) does. Checked for any version-sensitive logic (protocol version strings, wire-shape assumptions) — none found; it only supervises the `nanogo serve` process's lifecycle | N/A | Done — no change needed, confirmed Isthmus-only |
 | `host-sweep.ts`, `reconcile.ts`, `request-wake.ts` | Clean — durable-host coordination work, upstream-confirmed "shadow state... nothing reads the rows to make decisions" as of this range | Clean | Done — no change needed |
 
 **Deliverable for each remaining row**: does upstream's change require an
@@ -800,3 +800,35 @@ the final pin-move PR.
   kernel-supervisor modules) are the seam's non-urgent half — no protocol
   break behind them — continuing next per the standing "proceed
   autonomously" instruction.
+- 2026-09-25 — Workstream B's remaining rows assessed. Four resolved clean
+  with no change needed (`session-events.ts`'s `reconcileNetworkAccess`
+  deferred to Workstream C by design, not ported ahead of that ADR;
+  `agent-route.ts`/`create-agent.ts`'s `wakeContainer`→`requestWake` swap
+  confirmed inert by reading upstream's own `request-wake.ts` doc comment;
+  `cli/resources/groups.ts`'s kernel-seam slice (same wake-routing swap)
+  confirmed clean, its two unrelated feature additions (`--speed` tiers,
+  the `connect` gateway-account-connection operation) flagged for
+  Workstream D instead of assessed here, since neither touches the kernel
+  seam; `kernel-supervisor/index.ts` confirmed Isthmus-only, no upstream
+  equivalent, no version-sensitive logic). One row **escalated**:
+  `container-runner.ts`'s diff, read in full, turns out to bundle a third,
+  previously-uncharacterized concern beyond the two the data-shape pass
+  had already flagged — a "provider host contract" mount-composition
+  rewrite (`getProviderHostContract`/`realizeProviderSpawnSurfaces`) that
+  is orthogonal to gateway-trust and changes how *every* provider's
+  mounts get composed, not just a gateway's. `composeSessionSpec`'s own
+  small, gateway-specific diff (`networkAccess: gateway.networkAccess`,
+  `containers: [agent, ...(gateway.containers ?? [])]`) is exactly the
+  production call site the Workstream A/B kernel-side work exists to
+  receive, and confirms it stays unreachable until composition actually
+  builds a non-empty `gateway` object — consistent with everything else
+  found this session. Given the security-sensitive blast radius of a
+  mount-composition rewrite on a fork whose entire premise is a hardened
+  mount/trust boundary, and that this finding was not visible in the
+  original planning pass, this is being surfaced to the user rather than
+  ported autonomously — see the chat turn following this entry for the
+  full writeup and the two follow-on ADR decisions this implies
+  (gateway-session-lifecycle adoption, already anticipated by Workstream
+  C's Non-goals carve-out; and, newly, provider-host-contract adoption).
+  Workstream B is otherwise complete: every row assessed, the urgent
+  kernel-compatibility slice shipped and tested.
