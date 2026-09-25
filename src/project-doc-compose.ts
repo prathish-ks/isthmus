@@ -358,8 +358,16 @@ function fitToCap(sections: ProjectDocSection[], maxBytes: number, fileName: str
  * and the cleanup cannot throw, because a leftover temp file must never be
  * able to dark a group. Mirrors `migrate-claude-memory-settings.ts`, which
  * runs once at startup and so can use pid+time where this needs randomness.
+ *
+ * Exported for `provider-contracts/realize.ts` (Workstream C14): that
+ * module's every-group-init file writes land in the same agent-writable
+ * provider state-volume tree this function was written to protect, so it
+ * reuses this implementation rather than
+ * `migrate-claude-memory-settings.ts`'s weaker pid+time one (safe there only
+ * because that file runs once at startup, before any container exists to
+ * race against).
  */
-function writeAtomic(filePath: string, content: string): void {
+export function writeAtomic(filePath: string, content: string): void {
   const tmp = `${filePath}.tmp-${randomUUID()}`;
   try {
     fs.writeFileSync(tmp, content, { flag: 'wx' });
