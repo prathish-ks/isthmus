@@ -477,9 +477,7 @@ describe('provider instruction facts (Workstream C14)', () => {
     // canonical-path resolution (BASE_INSTRUCTIONS_PATH) and the legacy path
     // (explicit baseDocPath, same value) must read the identical file.
     expect(doc).toContain('# NanoClaw Runtime Contract');
-    expect(legacyDoc.includes('# NanoClaw Runtime Contract') && doc.includes('# NanoClaw Runtime Contract')).toBe(
-      true,
-    );
+    expect(legacyDoc.includes('# NanoClaw Runtime Contract') && doc.includes('# NanoClaw Runtime Contract')).toBe(true);
     expect(doc).toContain('# Native Runtime Skills');
     expect(doc).toContain('/home/node/.claude/skills');
     expect(legacyDoc).not.toContain('# Native Runtime Skills');
