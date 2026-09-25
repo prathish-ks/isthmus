@@ -310,37 +310,45 @@ routine version bump," above.
 | # | Task | Status |
 |---|---|---|
 | A1 | `internal/mount`: add `MountClass` value `gateway-trust`, `Policy.GatewayTrustRoot`, admission rule (ro-only, agent-role-allowed) mirroring `types.ts`'s new rule exactly | **Done** — `feat/mount-gateway-trust-class`, commit `5dd6ec64`. Ported class/policy field/admission rule/class-pinning in `ValidateSpec`, `ClassRequiredByPath`, `mountAllowed`, exact TS ordering (gateway-trust checked before identity-material). Also extended this package's own Go-only symlink-escape hardening to the new pinned root. Real bug found and fixed via LAW-06 (run existing suite before assuming correctness): `underRoot(path, "")` matches every absolute path, so unset `GatewayTrustRoot` silently misclassified every mount — fixed with an explicit empty-root fail-closed guard, verified via negative control (reverted the guard, confirmed 3 tests catch it, restored). Full `go-host` suite (`go build`, `go vet`, `gofmt`, `go test -race ./...`, all packages) green |
-| A2 | `internal/kernel`: extend the wire payload (`CapabilityRequestPayload`) to carry `networkAccess` and multi-container `SessionSpec.containers`. Produce the **mixed-version compatibility matrix** below as part of this task, not just a yes/no bump decision | Not started |
-| A3 | `internal/kernel` executor: implement per-session `docker network create --internal` + auxiliary container spawn, mirroring upstream's `docker-driver.ts` logic in Go (no upstream Go source exists to port from — this is original implementation work, not translation) | Not started |
+| A2 | `internal/kernel`: extend the wire payload (`CapabilityRequestPayload`) to carry `networkAccess` and multi-container `SessionSpec.containers`. Produce the **mixed-version compatibility matrix** below as part of this task, not just a yes/no bump decision | **Done** — `feat/mount-gateway-trust-class`, commit `41af3c5f`. Scope turned out narrower than estimated: `mount.Session.Containers` was already a slice (multi-container wire capacity predates this promotion), so the real gap was just `NetworkAccessIntent`/`NetworkAccessTarget` (new types in `internal/mount`) plus the `ProtocolVersion` bump. `internal/kernel/doc.go`'s own pre-existing versioning policy ("a version bump is required for any... shape change") already answered the bump question — not an open design call. Found and fixed a real regression: a pre-existing test hardcoded the literal `"v2"` as its "unsupported version" fixture (written when `ProtocolVersion` was `"v1"`); the bump silently made that fixture describe the current version. Fixed to derive from the live constant instead of a literal |
+| A3 | `internal/kernel` executor: implement per-session `docker network create --internal` + auxiliary container spawn, mirroring upstream's `docker-driver.ts` logic in Go (no upstream Go source exists to port from — this is original implementation work, not translation) | Not started — confirmed via reading `exec.go`: `findAgentContainer` explicitly refuses any non-agent-role container today (`"auxiliary containers are not supported by this kernel"`), mirroring old TS's pre-Iron-Proxy refusal exactly. This is the one line/behavior A3 replaces |
 | A4 | `internal/containerdefaults`: assess whether auxiliary/gateway-proxy containers need a different hardening posture than the agent container (they're not the agent, but they're not fully trusted either) | Not started |
 | A5 | Live-Docker tests proving a multi-container session actually gets a working, correctly-isolated private network — real container membership and isolation, not just that the generated argv looks right. **Must be PASSED + REQUIRED per "What 'the gate passed' means," above** — a report-only run does not satisfy this row. This is the `go-multi-container-live-docker` job named under Workstream G; not "Done" until `ci.yml`'s `needs:` actually names it (G1's Definition of done) | Not started — blocked on A3 (no multi-container executor to test against yet) |
 | A6 | Unit tests for the new mount class, table-driven, matching `internal/mount`'s existing style | **Done** — `feat/mount-gateway-trust-class`, commit `5dd6ec64`. Table-driven admission suite, a two-container test proving gateway-trust works on a non-agent (auxiliary proxy) role — the real Iron Proxy shape — the empty-root fail-closed regression test, and a `ResolveSymlinks` escape test |
 
-**A2's mixed-version compatibility matrix (fill in before deciding the
-`ProtocolVersion` question, not after)**:
+**A2's mixed-version compatibility matrix — resolved, commit `41af3c5f`.**
+`internal/kernel/server.go`'s dispatch already checks `env.Version` against
+the exact live `ProtocolVersion` string *before* decoding any payload at
+all — a pre-existing, deliberate property, not something this promotion
+needed to add:
 
-| TS host | Go kernel | Expected result |
+| TS host | Go kernel | Actual result (verified by test, `TestDispatch_OldV1HostAgainstNewKernel_RejectedNotMisparsed`) |
 |---|---|---|
-| old (pre-`networkAccess`) | old | Supported (today's baseline) |
-| new (sends `networkAccess`) | new | Supported (this promotion's target) |
-| old | new | Supported, or explicitly rejected — decide and state which |
-| new | old | Supported, or explicitly rejected — decide and state which |
+| old (`v1`, pre-`networkAccess`) | old (`v1`) | Supported (today's baseline, unaffected) |
+| new (`v2`, sends `networkAccess`) | new (`v2`) | Supported (this promotion's target) |
+| old (`v1`) | new (`v2`) | **Explicitly rejected** — `ErrUnsupportedVersion`, detail names both versions, checked before payload decode |
+| new (`v2`) | old (`v1`) | **Explicitly rejected**, same mechanism, symmetric |
 
-Also answer explicitly, recorded in the closing ADR (Workstream F, F1):
+Answers to the questions this row originally posed:
 
-- Can the TS host and Go kernel be rolled back independently, or must they
-  move together?
-- Does the kernel tolerate unknown/extra fields on the wire (forward
-  compatibility), or does an unrecognized field fail closed?
-- Is `networkAccess` optional during a rollout window, or does it need to
-  be mandatory from the first deployed version on both sides?
-- Does this specific change (a payload extension) actually require a
-  `ProtocolVersion` bump, or only a semantic change would — decide against
-  `version-compatibility.md` §2's existing rule, not by default in either
-  direction.
-- How does a mixed-version mismatch surface to an operator — a clear
-  error, or a confusing failure mode? If the latter, that's itself a
-  finding to fix before promoting, not to document and ship.
+- **Independent rollback**: no — an exact-string version gate means a
+  mismatched pair simply refuses to talk at all, in either direction.
+  This is the safe property, not a gap: neither side can silently
+  misinterpret the other's payload shape.
+- **Unknown-field tolerance**: not attempted and not needed — the version
+  string itself is the compatibility boundary, checked ahead of any
+  payload parsing.
+- **Was `networkAccess` optional during rollout**: no — moot given the
+  above; a v2 kernel only ever talks to a v2 host, which always sends it.
+- **Bump required?** Yes, unconditionally, per `internal/kernel/doc.go`'s
+  own pre-existing versioning policy — this was never actually an open
+  design question, just an unexecuted one.
+- **Operator-facing failure mode**: a clear, explicit error naming both
+  versions (`"kernel speaks v2, got v1"`) — not a confusing or silent
+  failure. No further fix needed here.
+
+Recorded here for now; folds into the closing ADR (F1) as that gets
+written.
 
 ### Workstream B — Seam audit (TypeScript call-sites into the kernel)
 
@@ -709,3 +717,23 @@ the final pin-move PR.
   (executor: network creation + multi-container spawn — no upstream Go
   source to port from), A4 (hardening posture), and A5 (live-Docker
   tests, blocked on A3) remain. Continuing sequentially.
+- 2026-09-25 — Workstream A2 done: `feat/mount-gateway-trust-class`,
+  commit `41af3c5f`. Added `NetworkAccessIntent`/`NetworkAccessTarget` to
+  `internal/mount`, bumped `ProtocolVersion` to `v2` per
+  `internal/kernel/doc.go`'s own pre-existing versioning policy (not a new
+  design decision, an unexecuted existing one), and resolved the
+  mixed-version compatibility matrix by reading `server.go`'s actual
+  dispatch logic rather than guessing: exact-string version check before
+  any payload decode means a mismatch is always a clean, explicit
+  rejection in both directions, never a silent misparse. Found and fixed
+  a real regression: a pre-existing test hardcoded `"v2"` as its
+  "unsupported version" fixture, which the bump silently made correct
+  instead of wrong — fixed to derive from the live constant. Confirmed
+  via reading `exec.go` that A3's actual job is replacing
+  `findAgentContainer`'s current explicit refusal of any non-agent-role
+  container (mirroring old pre-Iron-Proxy TS exactly) — the multi-
+  container wire *shape* already existed (`mount.Session.Containers` was
+  already a slice), narrowing A2's real scope versus the original
+  estimate. Full `go-host` suite green including `-race`. Continuing to
+  A3 next (the executor — the largest, most security-critical remaining
+  piece of Workstream A).
