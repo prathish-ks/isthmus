@@ -33,7 +33,25 @@
  * — stubs never ride env). Anything else refuses the spawn: nothing gets to
  * ride raw argv around the spec again. A typed SDK config surface is the
  * successor that deletes this parser.
+ *
+ * v2.4.0 promotion, Workstream C6 security review: parsing the argv shape
+ * alone was not enough — every `-v` mount lands as `class: 'allowlisted-
+ * extra'`, which both `mountAllowed` implementations admit unconditionally
+ * (no host-path check at all, by design, since operator-supplied mounts of
+ * this class already passed `validateAdditionalMounts`/`mount-allowlist.
+ * json` before reaching here — but provider-origin mounts are explicitly
+ * exempt from that check, so nothing downstream was validating *which* host
+ * path a `-v` could name). `isKnownOneCliHostPath` closes that: the SDK's
+ * own compiled source (`@onecli-sh/sdk`'s `lib/index.js`, read directly, not
+ * inferred) writes to exactly three fixed locations under `os.tmpdir()` —
+ * `onecli-proxy-ca.pem`, `onecli-combined-ca.pem`, and `onecli-stubs/
+ * onecli-stub-<basename>` — and a `-v` naming anything else, however
+ * grammatically well-formed, is refused before it ever reaches
+ * `composeSessionSpec`/`validateSpec`.
  */
+import * as os from 'node:os';
+import * as path from 'node:path';
+
 import { OneCLI, type ApprovalRequest } from '@onecli-sh/sdk';
 
 import { ONECLI_API_KEY, ONECLI_URL } from '../config.js';
@@ -60,6 +78,38 @@ function onecliNetworkAccess(): NetworkAccessIntent {
   return { endpoint: ONECLI_URL, target: { kind: 'host' } };
 }
 
+// The exact, fixed host paths @onecli-sh/sdk's lib/index.js writes to for a
+// -v mount's source — read directly from the compiled SDK source, not
+// inferred. `writeCaCertificate`/`buildCombinedCaBundle` write the two
+// single files below; `writeCredentialStub` always names a stub file
+// `onecli-stub-<basename>` under a fixed directory it creates with
+// `mkdirSync(..., { recursive: true })`.
+const ONECLI_PROXY_CA_PATH = path.join(os.tmpdir(), 'onecli-proxy-ca.pem');
+const ONECLI_COMBINED_CA_PATH = path.join(os.tmpdir(), 'onecli-combined-ca.pem');
+const ONECLI_STUB_DIR = path.join(os.tmpdir(), 'onecli-stubs');
+
+/**
+ * `allowlisted-extra` mounts are admitted with no host-path check at all
+ * (both `mountAllowed` implementations return true unconditionally for this
+ * class — it exists for a source the operator has already vetted). OneCLI's
+ * own argv grammar has no equivalent vetting step: `contributionFromArgs`
+ * only checked argv *shape* (`-v host:container[:ro]`), never *which* host
+ * path a `-v` could name. A compromised `@onecli-sh/sdk` package, or a
+ * compromised/buggy response from the hosted OneCLI service, could return a
+ * grammatically valid `-v` naming an arbitrary host path (e.g. a user's SSH
+ * key directory) and it would be admitted read-write into the agent
+ * container with nothing downstream to catch it. This is the one check
+ * standing between an untrusted argv value and that outcome — resolved
+ * (`path.resolve`) before comparison so `..`-relative tricks can't escape
+ * it.
+ */
+function isKnownOneCliHostPath(hostPath: string): boolean {
+  const resolved = path.resolve(hostPath);
+  if (resolved === ONECLI_PROXY_CA_PATH || resolved === ONECLI_COMBINED_CA_PATH) return true;
+  const stubDirWithSep = ONECLI_STUB_DIR + path.sep;
+  return resolved.startsWith(stubDirWithSep) && path.basename(resolved).startsWith('onecli-stub-');
+}
+
 /** Argv → typed contribution. Exported for its tests; the grammar is closed. */
 export function contributionFromArgs(args: readonly string[], groupScope: string): GatewayContribution {
   const env: Record<string, string> = {};
@@ -75,6 +125,11 @@ export function contributionFromArgs(args: readonly string[], groupScope: string
     if (flag === '-v' && value) {
       const parts = value.split(':');
       if (parts.length >= 2 && parts.length <= 3 && (parts[2] === undefined || parts[2] === 'ro')) {
+        if (!isKnownOneCliHostPath(parts[0])) {
+          throw new Error(
+            `OneCLI gateway emitted a -v mount whose host path is not one of this SDK's known outputs: '${parts[0]}'`,
+          );
+        }
         mounts.push({
           class: 'allowlisted-extra',
           hostPath: parts[0],
