@@ -1329,3 +1329,34 @@ the final pin-move PR.
   to follow C14's completion rather than run concurrently with it, since
   both touch provider-registration surfaces and conflating them in one
   sitting risks confusing which contract a given change belongs to.
+- 2026-09-26 — **C14 fully implemented (all 6 steps), a real regression
+  found and fixed in the same pass, and a sandbox-capability correction.**
+  Steps 4-6 (`buildMounts`/`resolveProviderContribution` rewrite, Claude's
+  real `ProviderHostContract`, `group-init.ts`/`command-gate.ts`
+  reconciliation) landed on top of the mechanism from Steps 1-3, in commits
+  `26b0ae30` and `a5bcbcff` — see C14's own row and progress notes above
+  for full detail on the `hasProviderMountSurface()` gate, the settings-
+  content and `writeAtomic` divergence decisions, and the 176-test
+  byte-identical-behavior verification. **Correction to this session's own
+  earlier assumption**: `container/agent-runner/` (the Bun-side tree) was
+  previously treated as untestable here because `bun-types` wasn't
+  installed — that's fixed by simply running `bun install` in that
+  directory (never attempted before), which restores both `bun run
+  typecheck` and `bun test` fully. This matters directly for C15 (the
+  container-side port, below) — it can be built with the same
+  test-and-verify discipline as everything else in this promotion, not
+  ported on faith. **Regression found this way, not assumed absent**:
+  Step 6's `command-gate.ts` change (literal `Set([...])` → contract-
+  derived) broke `container/agent-runner/src/formatter.commandLists.test.ts`,
+  a drift guard that parses `command-gate.ts`'s source text to keep the
+  container side's own hand-maintained command lists in sync (the two
+  runtimes share no modules). Fixed in commit `52cfcc31` by teaching the
+  guard to reconstruct the host side's expected sets from both
+  `command-gate.ts`'s remaining literal strings and each registered
+  provider contract's own `nativeAdmin`/`nativeFiltered` arrays, verified
+  via a mutation test (a deliberately-added bogus command makes exactly
+  the expected assertion fail) and the full container-side suite (343
+  pass, 1 skip, 0 fail, up from 339 pass/4 fail). This is exactly the kind
+  of dual-runtime drift this promotion's own "what 'green' means" section
+  warns about — closing it required actually running the Bun suite, not
+  trusting the Node-side green alone.
