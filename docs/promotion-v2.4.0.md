@@ -360,13 +360,13 @@ didn't cover (it only checked data shapes).
 | File | Data-shape impact (from prior pass) | Call-sequencing impact | Status |
 |---|---|---|---|
 | `container-runner.ts` | Major — gateway-session-lifecycle wrapping (load-bearing) + durable-host shadow-writes (upstream-confirmed inert) tangled in one ~900-line diff | Not yet assessed | Not started |
-| `drivers/docker-driver.ts` | Major — see Workstream A | N/A, IS the seam | In progress (A) — Go-side A3 (executor) not started; this TS file itself untouched so far |
-| `drivers/types.ts` | Major — see Workstream A | N/A | In progress (A) — Go-side mount-class port (A1) done in `internal/mount`; this TS file itself untouched so far (Isthmus's own `types.ts` doesn't yet declare `gateway-trust`/`networkAccess` — that's part of actually wiring A2/A3 through, not A1's scope) |
-| `drivers/index.ts` | Minor (wiring) | Not yet assessed | Not started |
+| `drivers/docker-driver.ts` | Major — see Workstream A | N/A, IS the seam | **Done** (commit `79465865`) — `capabilities().auxiliaryContainers` flipped to `true`; the `prepare()` refusal for non-agent roles removed (Go's `Wake`/A3 now realizes every container in the spec, so the TS-side refusal was a stale backstop); `assertMountSourcesExist` extended from `agent.mounts` to every container's mounts |
+| `drivers/types.ts` | Major — see Workstream A | N/A | **Done** (commit `79465865`) — `MountClass` gained `'gateway-trust'`; added `NetworkAccessTarget`/`NetworkAccessIntent`, mirroring the Go/wire types field-for-field; `SessionSpec.networkAccess` added as **optional** (deliberate divergence from Go's required field — this tree's composer doesn't yet build gateway-provider specs, documented inline); `MountPolicy.gatewayTrustRoot` added as required, with the same empty-root fail-closed guard A1 needed on the Go side ported into `classRequiredByPath`/`mountAllowed`; ro-only admission rule added to `validateSpec` |
+| `drivers/index.ts` | Minor (wiring) | Not yet assessed | **Done** (commit `79465865`) — `mountPolicy()` supplies a real `gatewayTrustRoot` default (`NANOCLAW_GATEWAY_TRUST_ROOT` env override, mirroring `materialsRoot`'s own pattern); `SETTINGS` allowlist updated |
 | `drivers/session-events.ts` | Minor | Not yet assessed | Not started |
-| `drivers/spec-fixture.ts` | Test fixture only | N/A | Not started |
-| `drivers/conformance.test.ts`, `docker-driver.test.ts`, `driver-selection.test.ts` | Test files — compare against Isthmus's own equivalents for coverage gaps | Not yet assessed | Not started |
-| `kernel/client.ts`, `kernel/protocol.ts` | Isthmus-only files (don't exist upstream) — confirm they still model the wire contract correctly once A2 lands | N/A | Blocked on A2 |
+| `drivers/spec-fixture.ts` | Test fixture only | N/A | **Done** (commit `79465865`) — `FIXTURE_POLICY` carries `gatewayTrustRoot` |
+| `drivers/conformance.test.ts`, `docker-driver.test.ts`, `driver-selection.test.ts` | Test files — compare against Isthmus's own equivalents for coverage gaps | Not yet assessed | `conformance.test.ts` **done** (commit `79465865`) — capability assertion flipped to `true`, stale "refuses whole" comments corrected; the file's own conditional multi-container contract test (`a driver that does not manage auxiliary containers refuses the spec whole`) already covered the realize-them path once the capability flipped, no test code change needed there. `docker-driver.test.ts`/`driver-selection.test.ts` checked — neither references the removed refusal path, no change needed |
+| `kernel/client.ts`, `kernel/protocol.ts` | Isthmus-only files (don't exist upstream) — confirm they still model the wire contract correctly once A2 lands | N/A | **Done** (commit `79465865`) — `protocol.ts`: `KERNEL_PROTOCOL_VERSION` bumped to `'v2'` alongside Go's own bump (A2, commit `41af3c5f`), `WireMountSpec.class` gained `'gateway-trust'`, added `WireNetworkAccessTarget`/`WireNetworkAccessIntent`, `WireSession.networkAccess?`. `client.ts`: added `toWireNetworkAccessIntent`, threaded `networkAccess` through `toWireSession` via the file's existing optional-field spread pattern. Full `pnpm exec tsc --noEmit` + `pnpm test` (3972 tests) green after these changes |
 | `cli/dispatch.ts`, `cli/guard.ts`, `cli/registry.ts` | Clean (zero commits in range) | Clean | Done — no change needed |
 | `cli/resources/groups.ts` | Not yet checked | Not yet assessed | Not started |
 | `self-mod/apply.ts` | Clean — shadow-write + wake-routing only, upstream's own commit message: "byte-equivalent by construction" | Clean | Done — no change needed |
@@ -780,3 +780,23 @@ the final pin-move PR.
   required CI, which the above closes. Workstream A is now
   code-complete; its only open item is real-CI verification of A5/E2.
   Moving to Workstream B (seam call-sequencing audit) next.
+- 2026-09-25 — Workstream B's urgent slice closed: the TS↔Go protocol-version
+  mismatch A2 introduced (Go bumped to `"v2"`; TS's `KERNEL_PROTOCOL_VERSION`
+  was still `'v1'`, which would have been a clean-but-total
+  `unsupported-version` break for every real wake/kill/build-image call) is
+  fixed, along with the rest of the gateway-trust/networkAccess TS-side port
+  (`feat/mount-gateway-trust-class`, commit `79465865`): `kernel/protocol.ts`,
+  `kernel/client.ts`, `drivers/types.ts`, `drivers/index.ts`,
+  `drivers/spec-fixture.ts`, `drivers/docker-driver.ts`,
+  `drivers/conformance.test.ts` — full row detail in the Workstream B table
+  above. `drivers/docker-driver.ts`'s `auxiliaryContainers` capability
+  flipped to `true`: Go's `Wake` (A3) already owns realizing every container
+  in a spec, so the TS-side refusal for non-agent roles was a stale
+  backstop once A3 landed, not a real constraint. `pnpm exec tsc --noEmit`
+  clean; full `pnpm test` green (3972 tests, 325 files); `eslint` on every
+  touched file shows only pre-existing `no-catch-all` warnings, zero errors,
+  nothing new. Remaining Workstream B rows (`session-events.ts`,
+  `container-runner.ts`, `cli/resources/groups.ts`, the agent-to-agent and
+  kernel-supervisor modules) are the seam's non-urgent half — no protocol
+  break behind them — continuing next per the standing "proceed
+  autonomously" instruction.
