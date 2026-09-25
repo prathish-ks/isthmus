@@ -48,8 +48,8 @@
  */
 import Database from 'better-sqlite3';
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
+import net from 'net';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -86,12 +86,10 @@ import {
   runMigrations,
 } from './db/index.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
-import { DockerSessionDriver } from './drivers/docker-driver.js';
 import { FakeCli } from './drivers/fake-cli.js';
-import { mountPolicy, resetSessionDriver, withSessionEvents } from './drivers/index.js';
-import { resetGatewayProvider, type GatewayProvider } from './gateway-providers/index.js';
+import { setUpSeamRealDriver, tearDownSeamRealDriver } from './drivers/seam-real-setup.js';
+import { RecordingKernel, eventually } from './kernel/fake-server.js';
 import { KERNEL_PROTOCOL_VERSION } from './kernel/protocol.js';
-import type { CapabilityRequestPayload, KernelEnvelope } from './kernel/protocol.js';
 import { inboundDbPath, outboundDbPath } from './mailbox/sqlite/paths.js';
 import { routeInbound } from './router.js';
 import { findSessionForAgent } from './db/sessions.js';
@@ -115,66 +113,6 @@ function now(): string {
 
 function socketPath(): string {
   return path.join(TEST_DIR, 'cli.sock');
-}
-
-/**
- * A one-connection-per-request NDJSON server on the kernel socket path,
- * mirroring `internal/kernel/server.go`'s contract (one JSON line in, one
- * out, then close) — the same fake `src/kernel/client.test.ts` uses, kept
- * local rather than exported from there because this one records every
- * envelope across the whole run instead of scripting one connection.
- */
-class RecordingKernel {
-  readonly received: Array<KernelEnvelope<CapabilityRequestPayload>> = [];
-  readonly #server: net.Server;
-
-  constructor(readonly socket: string) {
-    this.#server = net.createServer((conn) => {
-      let buffer = '';
-      conn.on('data', (chunk) => {
-        buffer += chunk.toString('utf8');
-        const idx = buffer.indexOf('\n');
-        if (idx < 0) return;
-        const envelope = JSON.parse(buffer.slice(0, idx)) as KernelEnvelope<CapabilityRequestPayload>;
-        this.received.push(envelope);
-        conn.write(
-          JSON.stringify({
-            version: KERNEL_PROTOCOL_VERSION,
-            requestId: envelope.requestId,
-            ok: true,
-            payload: {
-              allowed: true,
-              containerId: 'smoke-container-id',
-              containerName: KERNEL_DERIVED_NAME,
-            },
-          }) + '\n',
-        );
-        conn.end();
-      });
-    });
-  }
-
-  listen(): Promise<void> {
-    return new Promise((resolve) => this.#server.listen(this.socket, resolve));
-  }
-
-  close(): Promise<void> {
-    return new Promise((resolve) => this.#server.close(() => resolve()));
-  }
-
-  wakes(): Array<KernelEnvelope<CapabilityRequestPayload>> {
-    return this.received.filter((e) => e.payload.capability === 'container.wake');
-  }
-}
-
-/** Poll until `predicate` holds or the budget runs out, so no test sleeps blindly. */
-async function eventually(what: string, predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`timed out after ${timeoutMs}ms waiting for: ${what}`);
 }
 
 /** The host's own adapter wiring from `src/index.ts` step 3, verbatim in shape. */
@@ -248,31 +186,13 @@ beforeEach(async () => {
     created_at: now(),
   });
 
-  // No gateway on a CI runner, and the gateway's contribution is not what
-  // this seam is about. `resetGatewayProvider` is the module's own declared
-  // test seam, not a reach-in.
-  const noGateway: GatewayProvider = {
-    kind: 'none',
-    contribute: async () => ({ env: {}, mounts: [] }),
-  };
-  resetGatewayProvider(noGateway);
+  fakeCli = setUpSeamRealDriver();
 
-  // The REAL DockerSessionDriver — real validateSpec, real KernelClient
-  // against the mocked KERNEL_SOCKET_PATH — with only the docker binary
-  // faked. `resetSessionDriver` is the module's own declared test seam.
-  fakeCli = new FakeCli('docker');
-  // `prepare` runs an idempotency pre-check before the wake: it predicts the
-  // container name and asks docker whether something already wears it. A
-  // FakeCli with no scripted answer returns '' WITHOUT throwing, which
-  // `#existingSession` reads as "a container exists, with labels that are not
-  // this session's" — a name collision, refused before the kernel is ever
-  // dialled. Real docker exits non-zero for a name that does not exist, and
-  // that throw is exactly what the check catches as "no container". Scripting
-  // it is what makes the fake honest rather than convenient.
-  fakeCli.responses = [{ match: /^inspect /, throws: 'Error: No such object' }];
-  resetSessionDriver(withSessionEvents(new DockerSessionDriver({ ...mountPolicy(), cli: fakeCli })));
-
-  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'));
+  kernel = new RecordingKernel(path.join(TEST_DIR, 'nanogo-kernel.sock'), {
+    allowed: true,
+    containerId: 'smoke-container-id',
+    containerName: KERNEL_DERIVED_NAME,
+  });
   await kernel.listen();
 
   await initChannelAdapters(hostSetup);
@@ -281,8 +201,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await teardownChannelAdapters();
-  resetSessionDriver(null);
-  resetGatewayProvider(null);
+  tearDownSeamRealDriver();
   await kernel.close();
   await closeDb();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
@@ -298,7 +217,10 @@ describe('a line typed at the CLI socket reaches the kernel', () => {
       });
       client.write(JSON.stringify({ text: 'smoke: hello from the terminal' }) + '\n');
 
-      await eventually('the kernel to receive a container.wake', () => kernel.wakes().length === 1);
+      await eventually(
+        'the kernel to receive a container.wake',
+        () => kernel.requestsFor('container.wake').length === 1,
+      );
 
       // 1. The message became a real inbound row for a real session.
       const session = await findSessionForAgent(AGENT_GROUP_ID, MESSAGING_GROUP_ID, null);
@@ -311,7 +233,7 @@ describe('a line typed at the CLI socket reaches the kernel', () => {
 
       // 2. The envelope that actually crossed the wire is a well-formed
       //    container.wake for THAT session.
-      const envelope = kernel.wakes()[0];
+      const envelope = kernel.requestsFor('container.wake')[0];
       expect(envelope.version).toBe(KERNEL_PROTOCOL_VERSION);
       expect(envelope.op).toBe('capability.request');
       expect(envelope.payload.session?.key).toMatchObject({
@@ -355,7 +277,7 @@ describe('a line typed at the CLI socket reaches the kernel', () => {
       // field for the kernel to adopt, and the name the host then supervises
       // is the one that came back, not the one it sent. The last assertion is
       // the one with teeth: those two strings must differ.
-      const wire = kernel.wakes()[0].payload.session!;
+      const wire = kernel.requestsFor('container.wake')[0].payload.session!;
       const hostPredicted = wire.labels?.['nanoclaw-container-name'];
       expect(wire).not.toHaveProperty('name');
       expect(hostPredicted).toMatch(/^nanoclaw-v2-/);
@@ -387,7 +309,7 @@ describe('the reply leaves through the same CLI connection', () => {
       // Claim the chat slot: `deliver()` writes to the connected chat client,
       // and a client that has never sent a plain line is not one.
       client.write(JSON.stringify({ text: 'smoke: open the terminal' }) + '\n');
-      await eventually('the inbound line to be routed', () => kernel.wakes().length === 1);
+      await eventually('the inbound line to be routed', () => kernel.requestsFor('container.wake').length === 1);
 
       // Stand in for the agent-runner: one outbound row addressed back at the
       // CLI channel. Everything after this point is the real delivery path.

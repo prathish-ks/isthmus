@@ -5,12 +5,17 @@ on:
     branches: [main]
   # P9-05 (Phase 9/10 hardening): the upstream-watch job below needs its own
   # trigger, independent of this repo's own PR cadence — a new nanocoai/
-  # nanoclaw release can land on any day, PR or not. Weekly is deliberately
-  # loose (this is a "time for a human to look" signal, not a build gate;
-  # see docs/version-compatibility.md) with workflow_dispatch for an
-  # on-demand check (e.g. right after a Discord/release announcement).
+  # nanoclaw release can land on any day, PR or not. Originally weekly;
+  # moved to daily once sync-sibling-branches started sharing this same
+  # trigger, since that job actually pushes fast-forward updates to the
+  # channels/providers branches (not just a "time for a human to look"
+  # signal the way upstream-watch/egress-image-watch are) and a week-long
+  # gap between a channel/provider fix landing upstream and it reaching
+  # this project's mirror is a real cost, not just a stale docs pin. Still
+  # loose enough not to be a build gate; workflow_dispatch remains for an
+  # on-demand run (e.g. right after a Discord/release announcement).
   schedule:
-    - cron: "0 13 * * 1" # every Monday, 13:00 UTC
+    - cron: "0 13 * * *" # every day, 13:00 UTC
   workflow_dispatch: {}
 
 jobs:
@@ -22,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
@@ -200,7 +205,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -352,13 +357,17 @@ jobs:
           echo "Budgets are fixed ceilings tuned against real GitHub Actions runner measurements, not a %-vs-baseline comparison — see each test file's own comment for the baseline this was set against." >> "$GITHUB_STEP_SUMMARY"
 
   # Repository rules require exact `ci`; always run it so matrix, go-host,
-  # pnpm-audit, coverage-gate, and performance-gate failures all remain
-  # blocking. bun-audit is deliberately NOT in this list yet — see its own
-  # comment for why (continue-on-error until a real CI run proves it out,
-  # then promote here the same way pnpm-audit was).
+  # pnpm-audit, coverage-gate, performance-gate, and live-egress-lockdown
+  # failures all remain blocking. bun-audit is deliberately NOT in this list
+  # yet — see its own comment for why (continue-on-error until a real CI run
+  # proves it out, then promote here the same way pnpm-audit was).
+  # live-egress-lockdown IS in this list from its first commit, not promoted
+  # later — see that job's own comment for why this one doesn't follow the
+  # usual report-only-first sequencing.
   ci:
     if: always()
-    needs: [test, go-host, pnpm-audit, coverage-gate, performance-gate]
+    needs:
+      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -368,6 +377,9 @@ jobs:
           test "${{ needs.pnpm-audit.result }}" = success
           test "${{ needs.coverage-gate.result }}" = success
           test "${{ needs.performance-gate.result }}" = success
+          test "${{ needs.live-egress-lockdown.result }}" = success
+          test "${{ needs.wiring-registry-check.result }}" = success
+          test "${{ needs.sync-sibling-branch-script-test.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
@@ -548,7 +560,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -620,13 +632,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Coverage floor gate (vs .github/coverage-baseline.json)
         run: pnpm exec tsx scripts/check-coverage-baseline.ts
+
+  # wiring-registry-check (ADR-028, 2026-09-24): required from its first
+  # commit, not promoted later — same reasoning ADR-026 gave for
+  # live-egress-lockdown. This is the standing form of the 2026-09-24
+  # wiring/seam and boundary audits, which found the exact ADR-024 shape
+  # (a real, guard-gated function with no remaining caller) a second time
+  # the same day, plus a seam that had collapsed back into a mock. A check
+  # for this failure class that started report-only would reproduce the
+  # precise problem it exists to close: something that looks like coverage
+  # but isn't enforced.
+  wiring-registry-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: docs/wiring-registry.json entries still hold (real callers, seam not re-mocked, proof files exist)
+        run: pnpm exec tsx scripts/check-wiring-registry.ts
 
   # semgrep scope (2026-09-20): src/ promoted back into scope after a full
   # triage of the 149 findings a first pass surfaced here (2026-09-04 note
@@ -845,7 +879,7 @@ jobs:
   # substituted (a deterministic provider, for the same reason EC-06 used
   # one).
   #
-  # Runs on every PR, plus weekly and on demand. That was NOT the original
+  # Runs on every PR, plus daily and on demand. That was NOT the original
   # decision. This job was first written as schedule + workflow_dispatch
   # only, on the stated assumption that building the agent image (apt +
   # chromium + bun + pnpm globals) would cost minutes of runner time on
@@ -878,7 +912,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -913,6 +947,61 @@ jobs:
           echo "--- images ---"
           docker images || true
 
+  # live-egress-lockdown (EC-08): does NANOCLAW_EGRESS_LOCKDOWN=true actually
+  # isolate a real, kernel-spawned container's network — not "does a network
+  # with the right name exist somewhere," the specific silent regression
+  # ADR-024/ADR-025 (go-host/docs/) fixed. host-sweep.ts kept creating the
+  # isolated network on its own periodic cycle the whole time the bug was
+  # live, so a check that only asked "does the network exist" would have
+  # stayed green throughout. Runs scripts/ec08-egress-lockdown-live-smoke.sh;
+  # see that script and its .ts harness for exactly what's real (the host,
+  # kernel, Docker daemon, egress network, the network attachment this
+  # inspects) and what's substituted (the deterministic livesmoke provider,
+  # same reason EC-07 uses one; a minimal stand-in gateway container instead
+  # of a real OneCLI vault, which no CI runner has).
+  #
+  # Required, unlike live-host-docker above — deliberately not following
+  # this project's own usual "start report-only, promote once a real run
+  # proves it" sequencing (pnpm-audit, bun-audit, live-host-docker itself).
+  # This is the one CI job that would have caught the bug this PR fixes;
+  # shipping it report-only would repeat the exact "looks covered, isn't"
+  # shape ADR-024 exists to name. A shared runner's Docker environment is
+  # still more failure-prone than an in-process test, so a flake here is a
+  # real risk this project is accepting deliberately, not overlooking.
+  live-egress-lockdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go-host/go.mod
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the agent image
+        run: ./container/build.sh
+
+      - name: EC-08 egress-lockdown network isolation smoke
+        run: scripts/ec08-egress-lockdown-live-smoke.sh
+
+      # Same reasoning as live-host-docker's identical step: a failed run's
+      # diagnosis should start from ground truth, including which network
+      # the container that DID spawn actually landed on.
+      - name: What Docker still holds (diagnostic only)
+        if: always()
+        run: |
+          echo "--- containers ---"
+          docker ps -a || true
+          echo "--- networks ---"
+          docker network ls || true
+          echo "--- egress network detail ---"
+          docker network inspect "${NANOCLAW_EGRESS_NETWORK:-nanoclaw-egress}" || true
+
   # upstream-watch (P9-05, Phase 9/10 hardening): "CI obtains a pinned/
   # current NanoClaw upstream revision, runs baseline contracts and
   # compares Go behavior; alert on schema/contract drift" — the automated
@@ -922,7 +1011,7 @@ jobs:
   # Deliberately narrow scope: this job does NOT clone nanocoai/nanoclaw,
   # rebuild it, or run its test suite against this project's Go behavior —
   # that would need real upstream checkout/build infrastructure this
-  # project doesn't have yet, and would turn a lightweight weekly signal
+  # project doesn't have yet, and would turn a lightweight daily signal
   # into a heavy, flaky job (the exact "running a check and requiring a
   # check to pass are different things" distinction this file's own
   # go-lint/go-vulncheck/semgrep comment already draws). What it DOES do:
@@ -980,7 +1069,7 @@ jobs:
   # digest does NOT receive Alpine's routine security patches automatically
   # the way a floating tag would. This job is the automated "detect" half
   # of the policy that keeps that pin from silently going stale: same
-  # cadence and posture as upstream-watch above (weekly + on-demand,
+  # cadence and posture as upstream-watch above (daily + on-demand,
   # report-only, continue-on-error: true) — a mismatch here is not a
   # failure of this project, it's a prompt for a human to run
   # version-compatibility.md §5's review/decide/promote steps. Also meant
@@ -1014,3 +1103,111 @@ jobs:
           else
             echo "Up to date — the pinned digest still matches the live alpine:3.20 tag."
           fi
+
+  # sync-sibling-branch-script-test: a Copilot PR review caught a real bug
+  # in scripts/sync-sibling-branch.sh (count_errors piped `tsc --noEmit`
+  # straight into `wc -l` with no `|| true`, so `set -euo pipefail` turned
+  # tsc's ordinary non-zero exit -- which happens on every real run
+  # against these branches -- into a script-aborting failure; the
+  # warn-and-skip path the script exists to reach could never be
+  # exercised) that only a live run of sync-sibling-branches below, which
+  # only fires on schedule/workflow_dispatch, would ever have surfaced.
+  # This job runs scripts/sync-sibling-branch.test.sh -- a stub-`pnpm`
+  # regression test for exactly that failure mode -- on every PR instead,
+  # so a future edit to the sync script that reintroduces this class of
+  # bug is caught before merge, not on the next scheduled run. Needs
+  # neither Node nor pnpm: the test's stub `pnpm` on PATH fully replaces
+  # the real one, and the only other command the script under test uses is
+  # `git worktree add` against this checkout's own HEAD.
+  sync-sibling-branch-script-test:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/sync-sibling-branch.test.sh
+
+  # sync-sibling-branches-{check,push}: keeps this project's own `channels`
+  # and `providers` branches (see CLAUDE.md's "Channels and Providers"
+  # section) fast-forwarded to nanocoai/nanoclaw's same-named branches.
+  # These two branches carry no Isthmus-specific commits -- /add-<channel>
+  # and /add-opencode/add-codex skills only ever copy individual files out
+  # of them via `git show <branch>:path`, never merge them into main -- so
+  # this project's copy is a pure mirror and keeping it current is safe to
+  # fully automate, unlike upstream-watch/egress-image-watch above (which
+  # only ever report, never act) because a fast-forward can't discard
+  # anything: scripts/sync-sibling-branch.sh refuses to push anything that
+  # isn't a strict fast-forward, and additionally skips the push (leaving
+  # only a ::warning::) if adopting upstream's tip would raise the
+  # branch's own whole-tree typecheck error count beyond its existing
+  # baseline (see that script's own comment for why a nonzero baseline is
+  # normal there). Same cadence and posture otherwise: daily + on-demand,
+  # report-only, continue-on-error: true -- a skipped sync is a prompt for
+  # a human, not a failure of this project.
+  #
+  # Split into a read-only "check" job and a write-only "push" job -- not
+  # a stylistic choice, a security boundary a Copilot PR review correctly
+  # called a merge blocker on the original single-job design: that design
+  # ran `pnpm install`/`pnpm exec tsc` (to run the typecheck health check)
+  # against upstream's fetched tree in the SAME job that held a
+  # `contents: write` token for the eventual push. `pnpm install` can
+  # execute arbitrary lifecycle scripts from fetched package metadata,
+  # from either branch or any transitive dependency of theirs; a
+  # compromise there could have pushed unauthorized refs or exfiltrated
+  # the token, regardless of how much this project trusts nanocoai/
+  # nanoclaw's own maintainers specifically -- their dependency tree is a
+  # much larger, less-vetted trust boundary than the maintainers
+  # themselves. check runs under `permissions: contents: read` with
+  # checkout credentials not persisted at all (nothing worth stealing is
+  # available to whatever executes in the fetched worktrees) and never
+  # pushes; push runs under `contents: write` but never installs or
+  # executes anything it fetched -- only `git fetch`/`git push` against
+  # ref names and SHAs, and it independently re-verifies (fails closed,
+  # ::warning:: not error) that upstream's tip still matches exactly what
+  # check verified before pushing, rather than trusting a SHA carried
+  # across the job boundary. See scripts/sync-sibling-branch.sh's own
+  # header for the full check/push contract.
+  sync-sibling-branches-check:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      channels_should_push: ${{ steps.channels.outputs.should_push }}
+      channels_target_sha: ${{ steps.channels.outputs.target_sha }}
+      providers_should_push: ${{ steps.providers.outputs.should_push }}
+      providers_target_sha: ${{ steps.providers.outputs.target_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Check channels
+        id: channels
+        run: bash scripts/sync-sibling-branch.sh check channels
+      - name: Check providers
+        id: providers
+        run: bash scripts/sync-sibling-branch.sh check providers
+
+  sync-sibling-branches-push:
+    needs: sync-sibling-branches-check
+    if: needs.sync-sibling-branches-check.outputs.channels_should_push == 'true' || needs.sync-sibling-branches-check.outputs.providers_should_push == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push channels
+        if: needs.sync-sibling-branches-check.outputs.channels_should_push == 'true'
+        run: bash scripts/sync-sibling-branch.sh push channels "${{ needs.sync-sibling-branches-check.outputs.channels_target_sha }}"
+      - name: Push providers
+        if: needs.sync-sibling-branches-check.outputs.providers_should_push == 'true'
+        run: bash scripts/sync-sibling-branch.sh push providers "${{ needs.sync-sibling-branches-check.outputs.providers_target_sha }}"

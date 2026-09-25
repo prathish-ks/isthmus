@@ -216,6 +216,65 @@ func TestBuildServeKernel_AllowlistConfigured_NoAllowlistWarning(t *testing.T) {
 	}
 }
 
+// TestBuildServeKernel_EgressLockdownExpectedButNoNetwork_Errors is ADR-025's
+// own regression test: NANOCLAW_EGRESS_LOCKDOWN=true (mirrored here via
+// serveFlags.egressLockdownExpected, which runServeCmd sets from the real
+// env var) with no -docker-network must refuse to start, not run with
+// unenforceable lockdown. This is the check that makes the kernel itself —
+// not just kernel-supervisor/index.ts — refuse to silently reopen the bug
+// ADR-024 fixed, regardless of which process spawned `nanogo serve`.
+func TestBuildServeKernel_EgressLockdownExpectedButNoNetwork_Errors(t *testing.T) {
+	cfg := testConfig(t)
+	k, closeDB, err := buildServeKernel(cfg, serveFlags{egressLockdownExpected: true}, func(string) {})
+	if err == nil {
+		if closeDB != nil {
+			_ = closeDB()
+		}
+		t.Fatal("expected an error when egressLockdownExpected is true but dockerNetwork is empty, got nil")
+	}
+	if k != nil {
+		t.Fatal("expected a nil Kernel on this error path")
+	}
+	if !strings.Contains(err.Error(), "EGRESS_LOCKDOWN") {
+		t.Fatalf("error should name NANOCLAW_EGRESS_LOCKDOWN so an operator can act on it, got: %v", err)
+	}
+}
+
+// TestBuildServeKernel_EgressLockdownExpectedWithNetwork_Succeeds confirms
+// the check above is conditional on a missing network, not on lockdown
+// being expected at all — the normal case (kernel-supervisor correctly
+// computed both) must still start cleanly.
+func TestBuildServeKernel_EgressLockdownExpectedWithNetwork_Succeeds(t *testing.T) {
+	cfg := testConfig(t)
+	k, closeDB, err := buildServeKernel(cfg, serveFlags{
+		egressLockdownExpected: true,
+		dockerNetwork:          "nanoclaw-egress",
+	}, func(string) {})
+	if err != nil {
+		t.Fatalf("buildServeKernel: %v", err)
+	}
+	defer func() { _ = closeDB() }()
+	if k == nil {
+		t.Fatal("expected a non-nil Kernel")
+	}
+}
+
+// TestBuildServeKernel_EgressLockdownNotExpected_NoNetworkRequired confirms
+// this check is entirely inert for the common case (lockdown off) — an
+// install that never enabled NANOCLAW_EGRESS_LOCKDOWN needs no network flag
+// at all, exactly as before ADR-025.
+func TestBuildServeKernel_EgressLockdownNotExpected_NoNetworkRequired(t *testing.T) {
+	cfg := testConfig(t)
+	k, closeDB, err := buildServeKernel(cfg, serveFlags{}, func(string) {})
+	if err != nil {
+		t.Fatalf("buildServeKernel: %v", err)
+	}
+	defer func() { _ = closeDB() }()
+	if k == nil {
+		t.Fatal("expected a non-nil Kernel")
+	}
+}
+
 // TestBuildServeKernel_CloseDBIsNilSafe confirms the returned closer never
 // panics whether or not a DB was actually opened.
 func TestBuildServeKernel_CloseDBIsNilSafe(t *testing.T) {
