@@ -23,6 +23,22 @@ this document is this specific promotion's findings and tracking against
 it. `docs/design-laws.md`'s LAW-09 annotation records why the reusable
 process lives there rather than as a new numbered law.
 
+## Artifact index — where each kind of evidence actually lives
+
+One line per artifact type, so nobody has to guess which document to open
+or update:
+
+| Evidence type | Lives at |
+|---|---|
+| Full changed-file diff inventory | `docs/promotion-v2.4.0-file-inventory.csv` (Workstream D0; schema below) |
+| Security acceptance records (TS-only/bypass decisions) | `go-host/docs/compatibility-security-report.md` (Workstream C5) |
+| Architectural decisions (ADRs) | `go-host/docs/ADR-0XX-*.md`, new for this promotion (Workstream F1) — exact numbers assigned when written |
+| Consumed-contracts / compatibility ratings | `go-host/docs/version-compatibility.md` §1 and `go-host/docs/compatibility-matrix.md` (Workstream F2/F3) |
+| CI evidence (which jobs cover what) | Named directly in each workstream's task rows below (e.g. A5/G1's `go-multi-container-live-docker`); consolidated into the final PR's evidence index (see "PR boundaries") |
+| Migration rollback artifacts | `docs/promotion-v2.4.0-rollback-v2.3.0.md` / `-v2.4.0.md` (Workstream H2/H3) |
+| Final pin update | `docs/upstream-pin.json` + `docs/baseline.md`'s "Stable Baseline" section (Workstream G4, final PR only) |
+| This promotion's own status/tracking | This document — every workstream table, updated in place as work lands |
+
 ## Goal
 
 Move the pinned upstream baseline from `nanocoai/nanoclaw` **v2.3.0**
@@ -79,13 +95,18 @@ not just absorbing them passively — while:
 Implementation work under Workstreams A–H happens across however many PRs
 the work naturally needs. The **final pin-move PR is a separate, later PR**
 containing only: `docs/upstream-pin.json`, `docs/baseline.md`'s "Stable
-Baseline" section, the closing ADR(s), and links to the evidence
-(commits/PRs/CI runs) satisfying each promotion-gate line below. It does
-not carry implementation changes. This makes it possible to review "is the
-pin move itself correct and fully gated" as its own, small, auditable
-change — not buried inside a large mixed diff. Recommended grouping for the
-implementation PRs themselves, though not a hard requirement the way the
-final-PR isolation is:
+Baseline" section, the closing ADR(s), and a **one-page evidence index**
+(a short section or file in that same PR — reuse the "Promotion gate"
+checklist below verbatim, with each line's blank checkbox replaced by a
+direct link to the job run, ADR, or acceptance record that satisfies it;
+no separate artifact needed beyond that filled-in list). It does not carry
+implementation changes. This makes it possible to review "is the pin move
+itself correct and fully gated" as its own, small, auditable change — not
+buried inside a large mixed diff, and not requiring a reviewer to go
+hunting across a dozen prior PRs to confirm each gate actually has
+evidence behind it. Recommended grouping for the implementation PRs
+themselves, though not a hard requirement the way the final-PR isolation
+is:
 
 1. Kernel capability implementation (Workstream A)
 2. TypeScript seam reconciliation and bypass closure (Workstreams B, C)
@@ -563,7 +584,11 @@ satisfy H2/H3.
 
 Every box means PASSED + REQUIRED (or a named, dated, expiring exception
 recorded per Workstream C's acceptance-record format), per "What 'the gate
-passed' means" above — not merely attempted or run.
+passed' means" above — not merely attempted or run. **This section doubles
+as the final PR's evidence index** ("PR boundaries," above): at promotion
+time, each line below gets its blank checkbox replaced with a direct link
+to the evidence satisfying it, and that filled-in version ships as part of
+the final pin-move PR.
 
 - [ ] Workstream A complete and tested (E1, E2 PASSED + REQUIRED, A6)
 - [ ] Workstream B: every row resolved, no "not yet assessed" remaining
@@ -654,3 +679,20 @@ passed' means" above — not merely attempted or run.
   version, not just a "rollback behavior is documented" claim. All three
   carried into `go-host/docs/upstream-promotion-playbook.md`'s Steps 2, 6,
   and 7 so future promotions inherit them too.
+- 2026-09-25 — A further review round raised four points; two (the CSV
+  inventory schema, the migration rollback artifact requirement) were
+  already fully addressed in the immediately preceding commit
+  (`4f3f89b1`) — verified directly against the pushed file before
+  concluding that, rather than assumed — so this round's review appears
+  to have run against a version of the PR from before that push landed.
+  The two genuinely new points were incorporated: added an "Artifact
+  index" section near the top of this document (one line per evidence
+  type — diff inventory, security acceptance records, ADRs, CI evidence,
+  migration rollback artifacts, the final pin update — naming exactly
+  where each lives); and formalized the final pin-move PR's "links to the
+  evidence" requirement into a concrete one-page evidence index, defined
+  as the Promotion Gate checklist itself with each line's checkbox
+  replaced by a direct evidence link at promotion time (no new artifact
+  invented beyond reusing that existing section). Both carried into
+  `go-host/docs/upstream-promotion-playbook.md`'s Step 9 and the
+  per-promotion instance template.

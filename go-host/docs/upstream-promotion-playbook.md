@@ -330,12 +330,16 @@ existing discipline, unchanged by this playbook. Never let the pin move
 without a paired ADR.
 
 **This is a separate, final PR, not folded into the implementation work.**
-It contains only the pin/baseline files, the closing ADR(s), and links to
-the evidence satisfying every promotion-gate line — no application code.
-This keeps "is the pin move itself correct and fully gated" independently
-reviewable, rather than buried inside a large mixed diff. The
-implementation work across Steps 1–7 can span however many PRs it
-naturally needs; only this final step is constrained to its own PR.
+It contains only the pin/baseline files, the closing ADR(s), and a
+**one-page evidence index** — reuse the promotion instance document's own
+gate checklist verbatim, with each line's blank checkbox replaced by a
+direct link to the job run, ADR, or acceptance record satisfying it; no
+separate artifact needed beyond that filled-in list. This keeps "is the
+pin move itself correct and fully gated" independently reviewable, rather
+than buried inside a large mixed diff or requiring a reviewer to go
+hunting across many prior PRs. The implementation work across Steps 1–7
+can span however many PRs it naturally needs; only this final step is
+constrained to its own PR.
 
 ## Step 10 — Retrospective: does this change the constitution?
 
@@ -350,8 +354,12 @@ evidence bar the declined 2026-08-30 LAW-10 proposal was held to.
 
 ## Per-promotion instance template
 
-Each promotion gets its own `docs/promotion-vX.Y.Z.md`, structured as:
-goal/non-goals, a PR-boundaries note (Step 9), a "why this promotion is not
+Each promotion gets its own `docs/promotion-vX.Y.Z.md`, structured as: an
+**artifact index near the top** (one line per evidence type — diff
+inventory, security acceptance records, ADRs, CI evidence, migration
+rollback artifacts, the final pin update — naming exactly where each
+lives, so nobody has to guess which document to open or update), goal/
+non-goals, a PR-boundaries note (Step 9), a "why this promotion is not
 routine" findings section (Step 0's output plus Step 1/2's headline
 findings — clearly marked as a summary, with the actual gating evidence
 living in Step 2's file-inventory artifact, not duplicated as prose), the
@@ -359,7 +367,8 @@ living in Step 2's file-inventory artifact, not duplicated as prose), the
 playbook's copy of it), one status-tracked table per workstream mirroring
 Steps 1–7 above (including Step 3's acceptance-record fields and Step 4's
 compatibility matrix where relevant), a promotion gate checklist mirroring
-Steps 8–9 (including the tag-immutability re-check), and a changelog.
+Steps 8–9 (including the tag-immutability re-check) that doubles as the
+final PR's evidence index once filled in, and a changelog.
 `docs/promotion-v2.4.0.md` is the first such instance — read it as a
 worked example, not as this playbook's canonical content (the playbook
 stays version-agnostic; that document carries v2.4.0's actual findings and
