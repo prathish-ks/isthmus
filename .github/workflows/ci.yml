@@ -367,7 +367,7 @@ jobs:
   ci:
     if: always()
     needs:
-      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test]
+      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test, go-multi-container-live-docker]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -380,6 +380,7 @@ jobs:
           test "${{ needs.live-egress-lockdown.result }}" = success
           test "${{ needs.wiring-registry-check.result }}" = success
           test "${{ needs.sync-sibling-branch-script-test.result }}" = success
+          test "${{ needs.go-multi-container-live-docker.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
@@ -801,6 +802,44 @@ jobs:
         env:
           NANOCLAW_EC05_LIVE_DOCKER: "1"
         run: go test -mod=vendor ./internal/kernel/... -run TestLive -v
+
+  # go-multi-container-live-docker (v2.4.0 promotion, Workstream A5):
+  # go-host/internal/kernel/multi_container_network_live_docker_test.go's
+  # two tests, proving for real (a real --internal Docker network, real
+  # container membership, real DNS-resolution-based reachability/isolation
+  # checks, a real read-only-filesystem write attempt) the security
+  # properties Workstream A3's multi-container/network executor claims:
+  # the agent reaches its auxiliary container by the configured alias but
+  # cannot reach the outside internet, and the auxiliary's root filesystem
+  # is genuinely read-only.
+  #
+  # REQUIRED, unlike go-ec05-live-docker/go-egress-live-docker/
+  # live-host-docker above (all continue-on-error: true, outside the `ci`
+  # gate's needs:) -- a deliberate departure from this file's own general
+  # live-Docker posture, not an oversight. docs/promotion-v2.4.0.md's "What
+  # 'the gate passed' means" section states why: those existing jobs are
+  # long-standing regression/adversarial coverage where a shared-runner
+  # Docker flake shouldn't block an unrelated PR, but this job proves the
+  # one new privileged capability this promotion is adding to the trust
+  # kernel actually behaves as designed on a real daemon -- "the test ran"
+  # must not be mistaken for "the promotion is safe to rely on" for
+  # exactly this capability. A5/G1 in docs/promotion-v2.4.0.md are not
+  # "Done" on this job's mere existence; the promotion gate requires this
+  # job to be PASSED, not merely RUNNING.
+  go-multi-container-live-docker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go-host/go.mod
+      - name: Multi-container/network gateway live-Docker tests
+        env:
+          NANOCLAW_EC05_LIVE_DOCKER: "1"
+        run: go test -mod=vendor ./internal/kernel/... -run TestLive_Wake_MultiContainerSession -v
 
   # go-egress-live-docker (ADR-013 Decision 3): the live-Docker test from
   # go-host/internal/egress/live_docker_test.go — the one that actually
