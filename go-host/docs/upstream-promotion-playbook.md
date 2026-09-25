@@ -113,16 +113,25 @@ change that, just operationalizes it with the workstream structure below).
 ## Step 2 — Full-diff inventory and classification into three buckets
 
 **Produce a durable, machine-readable inventory before classifying** — not
-a prose diffstat claim ("200 files changed under `src/`"). One row per
-changed path (CSV, JSON, or a table in a dedicated
-`docs/promotion-vX.Y.Z-file-inventory.md`), covering at minimum: `path`,
-`status` (added/modified/deleted/renamed, with source/destination for
-renames), `bucket` (A/B/C, below), `consumed_contract_row` (if applicable,
-linking to Step 1's table), `security_review_status` (for Bucket B),
-`test_evidence`, `reconciliation_decision` (for Bucket C),
-`reviewer`/`ADR reference`. The promotion gate requires this inventory to
-exist with zero unclassified rows before the pin moves — a prose sweep is
-not sufficient evidence on its own that the sweep was actually complete.
+a prose diffstat claim ("200 files changed under `src/`"). **Fixed format,
+decided once here so every promotion writes to the same shape rather than
+each inventing its own** (a Copilot review of the first promotion flagged
+"CSV, JSON, or a table" as leaving room for drift): **CSV**, at
+`docs/promotion-vX.Y.Z-file-inventory.csv`, exact header:
+
+```
+path,status,source,destination,bucket,consumed_contract_row,security_review_status,test_evidence,reconciliation_decision,reviewer,adr_reference
+```
+
+`status` is one of `added`/`modified`/`deleted`/`renamed`; `source`/
+`destination` populated only for renames; `bucket` one of `A`/`B`/`C`;
+`security_review_status` populated for Bucket B rows (`closed`, or a link
+to the Step 3 acceptance record); `reconciliation_decision` populated for
+Bucket C rows (`port-verbatim`/`port-with-modification`/
+`declined:<reason>`). A row with a required field blank for its bucket
+counts as unclassified for the promotion gate's "zero unclassified rows"
+requirement — a prose sweep claim is not sufficient evidence on its own
+that the sweep was actually complete.
 
 Do not scope the sweep to `src/` alone. **Lesson from the v2.4.0
 promotion**: the credential-provider restructuring (OneCLI moving from a
@@ -266,6 +275,13 @@ modification / decline and why) in Step 2's inventory, not separately.
   an optional skill is a separate decision each promotion can make
   independently; closing the CI gap for whatever the pin itself adds to
   the trust boundary is not optional.
+- **Definition of done, not just a design decision**: a required-coverage
+  task is not complete until `.github/workflows/ci.yml` has actually been
+  edited — the job exists, its name is in the `ci` gate's `needs:` array,
+  and the `ci` job's own step asserts its result is `success`, matching
+  `wiring-registry-check`/`sync-sibling-branch-script-test`'s existing
+  pattern. Link the `ci.yml` diff itself as evidence, not a description of
+  intent to add one.
 
 ## Step 7 — Migration continuity
 
@@ -280,10 +296,20 @@ preserved; credentials never land in a location the kernel wouldn't admit
 as a valid mount; groups, sessions, mounts, and central DB state remain
 valid afterward; the resulting install runs the newly-pinned baseline; a
 deliberately-induced mid-migration failure leaves a recoverable (not
-corrupt) state; rollback behavior is documented; the whole procedure runs
-from a fresh checkout with no reliance on undocumented local state. Both
-source-version runs must land on the same resulting state — neither source
-version is allowed to produce a different outcome than the other.
+corrupt) state; the whole procedure runs from a fresh checkout with no
+reliance on undocumented local state. Both source-version runs must land
+on the same resulting state — neither source version is allowed to
+produce a different outcome than the other.
+
+**Rollback artifact, not just a rollback claim**: migration/rollback
+documentation is exactly where these processes tend to go ambiguous in
+practice, so "rollback behavior is documented" is not itself sufficient
+evidence. Each source-version run must produce a **recorded rollback
+artifact** — an executed command log (real commands, real output, not a
+hypothetical sequence) or a step-by-step operator checklist actually
+walked through during the test — checked into the promotion instance's own
+docs alongside its other evidence. A rollback claim with no artifact does
+not satisfy this step.
 
 ## Step 8 — Re-validate immediately before promoting
 
