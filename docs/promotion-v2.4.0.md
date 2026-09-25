@@ -40,8 +40,12 @@ not just absorbing them passively — while:
    features.
 5. Keeping user-facing migration (nanoclaw → Isthmus) working for someone
    arriving from either a v2.3.0 or a v2.4.0 nanoclaw install.
-6. Only then moving the pin — gated on tests, docs, and CI passing for real,
-   not on this plan looking complete on paper.
+6. Only then moving the pin — gated on tests, docs, and CI passing **for
+   real** (see "What 'green' means" and "What 'the gate passed' means"
+   below — a Copilot PR review on this plan's own first draft correctly
+   flagged that several gates were described in principle without being
+   precise enough to stop an incomplete promotion from being declared
+   complete; the sections below exist to close that).
 
 ## Non-goals
 
@@ -70,13 +74,36 @@ not just absorbing them passively — while:
   design achieving the same trust properties. That decision is Workstream
   C's output, recorded in an ADR — not assumed here.
 
+## PR boundaries
+
+Implementation work under Workstreams A–H happens across however many PRs
+the work naturally needs. The **final pin-move PR is a separate, later PR**
+containing only: `docs/upstream-pin.json`, `docs/baseline.md`'s "Stable
+Baseline" section, the closing ADR(s), and links to the evidence
+(commits/PRs/CI runs) satisfying each promotion-gate line below. It does
+not carry implementation changes. This makes it possible to review "is the
+pin move itself correct and fully gated" as its own, small, auditable
+change — not buried inside a large mixed diff. Recommended grouping for the
+implementation PRs themselves, though not a hard requirement the way the
+final-PR isolation is:
+
+1. Kernel capability implementation (Workstream A)
+2. TypeScript seam reconciliation and bypass closure (Workstreams B, C)
+3. Pure-TS reconciliation (Workstream D)
+4. Tests / CI / docs (Workstreams E, F, G)
+5. Migration continuity (Workstream H)
+6. Final pin-move PR (this section)
+
 ## Why this promotion is not a routine version bump
 
 The previous overlap review (ADR-017, 2026-09-03) found v2.3.0 still current
 with "no new admission-checked feature work cleared yet." That is no longer
 true. Concrete findings from this planning phase's own analysis, checked
 against `version-compatibility.md` §1's consumed-contracts table and a full
-`src/` diffstat (`54d9d9a5..v2.4.0`, 200 files changed, +17,801/-2,232):
+`src/` diffstat (`54d9d9a5..v2.4.0`, 200 files changed, +17,801/-2,232) —
+**this diffstat itself is a planning-phase estimate, not the reviewable
+inventory Workstream D now requires; see that workstream for the actual
+gating artifact**:
 
 - **`drivers/types.ts`** (mount/session admission shape — row 1 of the
   consumed-contracts table): new `MountClass` value `'gateway-trust'`, a new
@@ -112,7 +139,11 @@ against `version-compatibility.md` §1's consumed-contracts table and a full
   `.claude/skills/add-onecli/payload/src/gateway-providers/`, installed like
   a channel/provider skill. Isthmus's current `CLAUDE.md` documents OneCLI
   as trunk-baked. This is a real architectural fork point to decide, not
-  just port.
+  just port. **This specific file move is also the concrete reason
+  Workstream D now requires a machine-readable inventory rather than a
+  prose diffstat claim** — it was missed by an earlier scan scoped only to
+  `src/`, and a prose "the sweep was complete" statement would not have
+  caught that miss either.
 - Everything else in the consumed-contracts table (CLI-restart guard,
   self-mod guard decision logic, `pending_approvals`/`container_configs` row
   shapes, central DB format, mailbox identity shape) is clean — either
@@ -148,15 +179,66 @@ Workstream I's close): no new law number. Instead:
   annotated: a repeatable promotion procedure"), mirroring the existing
   LAW-07 annotation's structure and evidence bar.
 - `go-host/docs/upstream-promotion-playbook.md` is the actual reusable
-  procedure the annotation points to — a version-agnostic, ten-step process
-  extracted directly from this promotion's own findings, written so the
-  *next* nanocoai/nanoclaw release doesn't require re-deriving this
-  methodology from a long investigation the way this one did.
+  procedure the annotation points to — a version-agnostic, **eleven-step
+  process (Steps 0–10)** extracted directly from this promotion's own
+  findings, written so the *next* nanocoai/nanoclaw release doesn't
+  require re-deriving this methodology from a long investigation the way
+  this one did.
 
 This document remains this specific promotion's findings and tracking; the
 playbook is the durable artifact reused every future release. Workstream I
 below is now "confirm the playbook holds up once this promotion is actually
 executed," not "decide whether to write it."
+
+## What "green" means (baseline test policy)
+
+"Full suite green," used loosely elsewhere in this document, means
+specifically:
+
+- **Zero failures** in `pnpm exec vitest run`, `bun test`
+  (`container/agent-runner`), and `go test -mod=vendor ./...` (including
+  `-race`) — not "zero *new* failures relative to v2.3.0." If a
+  pre-existing failure is discovered during this promotion, fix it or
+  explicitly add it to a tracked baseline-exceptions list with an owner
+  and a reason, before counting the suite as green. Do not let it ride
+  silently under "that failure predates this PR."
+- The same standard applies to lint (`go-lint`) and vulnerability/audit
+  findings (`go-vulncheck`, `pnpm-audit`, `bun-audit`): zero net-new
+  findings attributable to this promotion's changes. A finding that
+  predates this promotion and is already tracked elsewhere does not block
+  this promotion; a new one does.
+- Any temporary exception must name an owner and an expiry/review date —
+  see "Acceptance-record requirements" under Workstream C for the same
+  discipline applied to accepted TS-only security decisions.
+
+## What "the gate passed" means (CI evidence policy)
+
+A CI job having **run** is not the same claim as a CI job having
+**passed**, and neither is the same claim as that job being **required**
+for merge. This plan uses these terms precisely from here on:
+
+- **RUNNING** — the job executed, produced output. On its own, insufficient
+  evidence for anything in this plan's promotion gate.
+- **PASSED** — the job executed and its own success condition was met.
+- **REQUIRED** — the job is in the `ci` gate's `needs:` list in
+  `.github/workflows/ci.yml`, so a failure blocks merge. As of this
+  writing, the existing live-Docker jobs (`go-ec05-live-docker`,
+  `go-egress-live-docker`, `live-host-docker`) are `continue-on-error:
+  true` and **not** in that `needs:` list — they report, they do not
+  block. That is a deliberate, already-documented posture for those
+  existing jobs (shared-runner Docker flakiness), and this plan does not
+  propose changing it for them.
+- **For this promotion's new behavior specifically** (multi-container
+  sessions, private network creation, `gateway-trust` mounts): the
+  live-Docker test proving this behavior (A5/E2) must be either REQUIRED,
+  or the promotion gate must carry an explicit, named, human-reviewed
+  exception recorded in this document — never silently satisfied by a
+  report-only run. "The live-Docker job ran" does not by itself mean "the
+  promotion was blocked if network isolation or multi-container behavior
+  failed," and this plan does not treat it as though it does.
+- Wherever this document says a test or CI job "passes" or is required, it
+  means PASSED + REQUIRED (or the explicit documented exception), not
+  RUNNING.
 
 ## Migration continuity — open question, needs discovery before design
 
@@ -192,9 +274,10 @@ Checked so far:
 it blocks writing a real continuity plan)**: find or confirm the actual
 current "come from nanoclaw, end up on Isthmus" flow. If none exists today
 as a dedicated skill, that is itself a finding worth recording, not an
-assumption to paper over.
+assumption to paper over. Workstream H below now defines concrete
+acceptance tests, not just discovery statements — see that section.
 
-## The four workstreams
+## The workstreams
 
 ### Workstream A — Kernel port (new capability, belongs in Go)
 
@@ -206,11 +289,37 @@ routine version bump," above.
 | # | Task | Status |
 |---|---|---|
 | A1 | `internal/mount`: add `MountClass` value `gateway-trust`, `Policy.GatewayTrustRoot`, admission rule (ro-only, agent-role-allowed) mirroring `types.ts`'s new rule exactly | Not started |
-| A2 | `internal/kernel`: extend the wire payload (`CapabilityRequestPayload`) to carry `networkAccess` and multi-container `SessionSpec.containers`; decide whether this requires a `ProtocolVersion` bump per `version-compatibility.md` §2's rule ("only needs to change when THIS project changes the TS↔Go contract") | Not started |
+| A2 | `internal/kernel`: extend the wire payload (`CapabilityRequestPayload`) to carry `networkAccess` and multi-container `SessionSpec.containers`. Produce the **mixed-version compatibility matrix** below as part of this task, not just a yes/no bump decision | Not started |
 | A3 | `internal/kernel` executor: implement per-session `docker network create --internal` + auxiliary container spawn, mirroring upstream's `docker-driver.ts` logic in Go (no upstream Go source exists to port from — this is original implementation work, not translation) | Not started |
 | A4 | `internal/containerdefaults`: assess whether auxiliary/gateway-proxy containers need a different hardening posture than the agent container (they're not the agent, but they're not fully trusted either) | Not started |
-| A5 | Live-Docker tests proving a multi-container session actually gets a working, correctly-isolated private network — not just that the generated argv looks right (matches this project's own repeated lesson about mocked vs. real coverage) | Not started |
+| A5 | Live-Docker tests proving a multi-container session actually gets a working, correctly-isolated private network — real container membership and isolation, not just that the generated argv looks right. **Must be PASSED + REQUIRED per "What 'the gate passed' means," above** — a report-only run does not satisfy this row | Not started |
 | A6 | Unit tests for the new mount class, table-driven, matching `internal/mount`'s existing style | Not started |
+
+**A2's mixed-version compatibility matrix (fill in before deciding the
+`ProtocolVersion` question, not after)**:
+
+| TS host | Go kernel | Expected result |
+|---|---|---|
+| old (pre-`networkAccess`) | old | Supported (today's baseline) |
+| new (sends `networkAccess`) | new | Supported (this promotion's target) |
+| old | new | Supported, or explicitly rejected — decide and state which |
+| new | old | Supported, or explicitly rejected — decide and state which |
+
+Also answer explicitly, recorded in the closing ADR (Workstream F, F1):
+
+- Can the TS host and Go kernel be rolled back independently, or must they
+  move together?
+- Does the kernel tolerate unknown/extra fields on the wire (forward
+  compatibility), or does an unrecognized field fail closed?
+- Is `networkAccess` optional during a rollout window, or does it need to
+  be mandatory from the first deployed version on both sides?
+- Does this specific change (a payload extension) actually require a
+  `ProtocolVersion` bump, or only a semantic change would — decide against
+  `version-compatibility.md` §2's existing rule, not by default in either
+  direction.
+- How does a mixed-version mismatch surface to an operator — a clear
+  error, or a confusing failure mode? If the latter, that's itself a
+  finding to fix before promoting, not to document and ship.
 
 ### Workstream B — Seam audit (TypeScript call-sites into the kernel)
 
@@ -254,42 +363,95 @@ outside `drivers/docker-driver.ts`.
 | C1 | Trace `ensureGatewaySession`/`stopGatewaySessionsForUnavailability` (`container-runner.ts`) end to end: can a session reach the gateway, or keep reaching it after the gateway becomes unavailable, through any path that skips this function? | Not started |
 | C2 | Trace `permitsConfiguredGatewayRead` (`gateway-read-policy.ts`): is the `NANOCLAW_GATEWAY_READ_ONLY_HOSTS` env-var allowlist the *only* gate on read-only gateway destinations, and is it consulted on every code path that makes an outbound gateway request? | Not started |
 | C3 | Confirm the OneCLI-as-skill restructuring doesn't change *how* credentials reach a container — still exclusively via a kernel-admitted `gateway-trust`/`identity-material` mount, never a new env-var or volume path the kernel doesn't validate | Not started |
-| C4 | Full re-sweep of the 21 gateway files plus a fresh repo-wide grep (not scoped to `src/` this time — check `container/agent-runner/src/` and `setup/` too) for new `docker`/`exec`/credential-handling code introduced anywhere in the v2.4.0 diff that this plan hasn't already accounted for | Not started |
-| C5 | For each finding: either close it (route through the kernel, or an existing guard) or explicitly accept and document the risk in `go-host/docs/compatibility-security-report.md`, the same way `admissionEnforced: false` is already an accepted, named gap today — never a silent gap | Not started |
+| C4 | Full re-sweep of the 21 gateway files plus a fresh repo-wide grep (not scoped to `src/` this time — check `container/agent-runner/src/` and `setup/` too) for new `docker`/`exec`/credential-handling code introduced anywhere in the v2.4.0 diff that this plan hasn't already accounted for. Cross-reference against the Workstream D file inventory once it exists, rather than re-deriving file lists independently | Not started |
+| C5 | For each finding: either close it (route through the kernel, or an existing guard) or produce a full **acceptance record** (see below) — never a bare "accepted and documented" note | Not started |
 | C6 | Security-focused review pass using the `code-review` skill, scoped specifically to trust-boundary findings on this diff (not general bug-hunting) | Not started |
 
-### Workstream D — Pure-TypeScript reconciliation
+**Acceptance-record requirements (C5)** — every accepted bypass or TS-only
+security decision must record all of the following, in
+`go-host/docs/compatibility-security-report.md` (or a linked doc), before
+it counts as closed rather than open:
 
-Scope: the remaining ~161 changed files under `src/` (200 total minus
-Workstream B's 18 minus Workstream C's 21, with some overlap to resolve)
-plus whatever the full-repo diff (`container/agent-runner/`, `setup/`,
-`.claude/skills/`) adds once actually enumerated.
+- The exact privileged operation the decision covers.
+- Every reachable call path to that operation (not just the one this
+  review happened to trace first).
+- Why Go-kernel enforcement is not currently feasible for this specific
+  case (a real constraint, not "ran out of time").
+- The threat model and a concrete abuse case — what a malicious or
+  compromised actor could actually do through this gap.
+- Any compensating control already in place.
+- A severity rating and residual risk statement.
+- A **named approver** — a person, not "the team."
+- A **date of approval**.
+- An **expiry/review date** — an acceptance record with no expiry is a
+  permanent exception by default, which this plan does not allow. Every
+  record gets re-reviewed at or before its expiry.
+- Whether this decision blocks `compatibility-matrix.md`'s "Stable" rating
+  for the affected row (it should, unless explicitly justified otherwise).
+- A regression test proving the accepted boundary stays exactly where it
+  was accepted — i.e., a test that fails if the gap silently widens.
+
+Isthmus's existing `admissionEnforced: false` note in `docker-driver.ts`'s
+`capabilities()` predates this requirement and should be brought up to this
+same bar as part of Workstream C, not grandfathered in.
+
+### Workstream D — Full-diff inventory and pure-TypeScript reconciliation
+
+**D0 — the inventory artifact (new; gates everything else in this
+workstream).** Before classifying anything, produce a durable,
+machine-readable inventory of every changed path in the pin→v2.4.0 diff —
+not the prose "200 files changed under `src/`" estimate in "Why this
+promotion is not a routine version bump," which is exactly the kind of
+claim that let the OneCLI move go unnoticed once already. One row per
+changed path (CSV, JSON, or a table in a dedicated
+`docs/promotion-v2.4.0-file-inventory.md`), covering:
+
+- `path`
+- `status` — added / modified / deleted / renamed
+- `source`/`destination` for renames (the OneCLI move is exactly this case)
+- `bucket` — A (seam) / B (bypass-risk) / C (pure-TS)
+- `consumed_contract_row` — if this path corresponds to a
+  `version-compatibility.md` §1 row
+- `security_review_status` — for Bucket B rows, links to the Workstream C
+  finding or acceptance record
+- `test_evidence` — link to the test(s) covering this change
+- `reconciliation_decision` — port verbatim / port with modification /
+  decline and why (Bucket C rows)
+- `reviewer` / `ADR reference`
+
+The full-repo sweep this inventory is built from must cover `src/`,
+`container/agent-runner/src/`, `setup/`, and `.claude/skills/` — not `src/`
+alone, per the same lesson.
 
 | # | Task | Status |
 |---|---|---|
-| D1 | Full file-level classification into B/C/D, corrected for the double-counting in this plan's first-pass numbers (some files may legitimately belong to more than one bucket) | Not started |
+| D0 | Produce the file-inventory artifact described above, covering the full repo diff | Not started |
+| D1 | Classify every row into Bucket A/B/C using the inventory — supersedes the earlier prose-based first pass | Not started |
 | D2 | Read `migrate-nanoclaw`'s and `update-nanoclaw`'s SKILL.md in full; decide whether either is usable as-is, adaptable, or whether Isthmus's depth of fork needs a bespoke process for this reconciliation specifically | Not started |
-| D3 | For each D-bucket file: is it a genuinely independent upstream change (safe to port as-is), or does it touch a file Isthmus has already meaningfully modified (needs manual reconciliation, feature-by-feature, preserving both sides) | Not started |
-| D4 | Track every reconciliation decision (port verbatim / port with modification / decline and record why) somewhere durable — this table, or a linked sub-document if the volume warrants it | Not started |
+| D3 | For each Bucket C row: is it a genuinely independent upstream change (safe to port as-is), or does it touch a file Isthmus has already meaningfully modified (needs manual reconciliation, feature-by-feature, preserving both sides)? Record the decision in the inventory's `reconciliation_decision` column | Not started |
+| D4 | Confirm zero rows remain unclassified and zero Bucket B rows lack a security-review status before this workstream counts as done — this is also a promotion-gate line, not just an internal target | Not started |
 
 ### Workstream E — Testing
+
+See "What 'green' means" and "What 'the gate passed' means," above, for
+what "passes"/"green" mean in every row below.
 
 | # | Task | Status |
 |---|---|---|
 | E1 | Go: unit tests for every new/changed `internal/mount` rule (Workstream A) | Not started |
-| E2 | Go: live-Docker tests for multi-container sessions and network isolation (Workstream A) | Not started |
+| E2 | Go: live-Docker tests for multi-container sessions and network isolation (Workstream A). **PASSED + REQUIRED, not report-only** — see A5 | Not started |
 | E3 | TS: update/extend the seam tests this project already built (the 6 seam-real tests from the wiring-boundary-coverage effort, merged 2026-09-24) to cover any new wake/kill/build-image call shape from Workstream B | Not started |
-| E4 | TS: parity/security-regression coverage for the gateway trust-boundary findings from Workstream C (matching LAW-06/LAW-08's "contracts before rewrites" / "no weaker security than upstream" bar) | Not started |
-| E5 | Full suite green: `pnpm exec vitest run`, `bun test` (container/agent-runner), `go test -mod=vendor ./...` including `-race`, plus the live-Docker jobs (`go-ec05-live-docker`, `go-egress-live-docker`) actually run and passing on real CI, not just locally | Not started |
+| E4 | TS: parity/security-regression coverage for the gateway trust-boundary findings from Workstream C (matching LAW-06/LAW-08's "contracts before rewrites" / "no weaker security than upstream" bar), including the regression test each Workstream C acceptance record requires | Not started |
+| E5 | Full suite green (per "What 'green' means," above): `pnpm exec vitest run`, `bun test` (container/agent-runner), `go test -mod=vendor ./...` including `-race`. Pre-existing live-Docker jobs (`go-ec05-live-docker`, `go-egress-live-docker`) run and pass; the *new* multi-container/network test (E2) is additionally required per "What 'the gate passed' means" | Not started |
 | E6 | `wiring-registry-check` passes against any new privileged function this promotion introduces (Workstream A/C may add real callers/seam tests that need registering) | Not started |
 
 ### Workstream F — Documentation
 
 | # | Task | Status |
 |---|---|---|
-| F1 | New ADR(s) recording the architectural decisions: (a) mount/network model in the Go kernel, (b) gateway-provider trust-boundary scope (what's kernel-enforced vs. accepted TS-side), (c) OneCLI trunk-vs-skill placement decision. One ADR or several, whichever keeps each decision reviewable independently — decide when the decisions are actually made, not now. | Not started |
+| F1 | New ADR(s) recording the architectural decisions: (a) mount/network model in the Go kernel, including A2's mixed-version compatibility matrix and rollout answers; (b) gateway-provider trust-boundary scope (what's kernel-enforced vs. accepted TS-side, referencing every Workstream C acceptance record); (c) OneCLI trunk-vs-skill placement decision. One ADR or several, whichever keeps each decision reviewable independently — decide when the decisions are actually made, not now | Not started |
 | F2 | `go-host/docs/version-compatibility.md` §1's consumed-contracts table updated to reflect the new v2.4.0-based contracts | Not started |
-| F3 | `go-host/docs/compatibility-matrix.md` Stable/Preview/Unsupported ratings re-issued against the new baseline | Not started |
+| F3 | `go-host/docs/compatibility-matrix.md` Stable/Preview/Unsupported ratings re-issued against the new baseline — any row covered by an open (non-expired) Workstream C acceptance record stays below Stable unless that record explicitly says otherwise | Not started |
 | F4 | `docs/traceability.md` updated with this promotion's ADR(s) and any new/changed law-breach entries | Not started |
 | F5 | `CLAUDE.md`'s "Secrets / Credentials / OneCLI" section updated if Workstream C/D's OneCLI decision changes how it's documented | Not started |
 | F6 | This document's own findings folded into `go-host/docs/ADR-017`-style closure, or superseded by a new numbered ADR referencing it | Not started |
@@ -304,23 +466,29 @@ gate the last time a comparably-sized surface (the wiring/recurrence-
 prevention registry) was added. This explicitly excludes adopting the
 `add-iron-proxy` *skill* or its own `iron-front` CI job (see Non-goals) —
 this workstream is about covering what the *core pin itself* adds, not
-about a downstream optional feature.
+about a downstream optional feature. Every "required" below means PASSED +
+REQUIRED per "What 'the gate passed' means."
 
 | # | Task | Status |
 |---|---|---|
-| G1 | For each new Go kernel surface from Workstream A (multi-container sessions, `gateway-trust` mount class, network-creation executor logic): identify what a required CI job needs to verify, and add it — mirroring `wiring-registry-check`'s precedent, not just noting the gap | Not started |
-| G2 | For each Workstream C finding that gets closed via a new guard/check rather than accepted-and-documented: confirm that guard/check has its own CI coverage (unit test at minimum; a dedicated required job if the finding's severity warrants it, matching G1's bar) | Not started |
+| G1 | For each new Go kernel surface from Workstream A (multi-container sessions, `gateway-trust` mount class, network-creation executor logic): identify what a required CI job needs to verify, and add it as a **required** gate — mirroring `wiring-registry-check`'s precedent, not just noting the gap | Not started |
+| G2 | For each Workstream C finding that gets closed via a new guard/check rather than an accepted-and-recorded exception: confirm that guard/check has its own CI coverage (unit test at minimum; a dedicated required job if the finding's severity warrants it, matching G1's bar) | Not started |
 | G3 | For any new script/automation this promotion introduces (e.g. a migration-continuity check, Workstream H): add `sync-sibling-branch-script-test`-style regression coverage, run on every PR — required, not report-only, unless there's a specific reason it can't be (state the reason if so) | Not started |
-| G4 | Update `docs/upstream-pin.json`'s `$comment`/fields and `docs/baseline.md`'s "Stable Baseline" section together, in the same commit as the closing ADR (per LAW-09's own discipline, already established) | Not started (final step) |
+| G4 | Update `docs/upstream-pin.json`'s `$comment`/fields and `docs/baseline.md`'s "Stable Baseline" section together, in the same commit as the closing ADR (per LAW-09's own discipline, already established) — this is the final-pin-PR step, see "PR boundaries" above | Not started (final step) |
 
 ### Workstream H — Migration continuity (nanoclaw → Isthmus)
+
+H1 (find/confirm the actual onboarding path) is discovery, as before. H2
+and H3 are no longer open-ended "verify that path handles X" statements —
+each is a concrete, executable acceptance test with explicit pass/fail
+criteria, run once per source version:
 
 | # | Task | Status |
 |---|---|---|
 | H1 | Resolve the open question above: identify or confirm the actual current onboarding path from a plain nanocoai/nanoclaw install to Isthmus | Not started |
-| H2 | Verify that path handles a source install on nanoclaw v2.3.0 | Not started |
-| H3 | Verify that path handles a source install on nanoclaw v2.4.0 (new — didn't exist as a migration source before this promotion) | Not started |
-| H4 | Confirm it's acceptable and correctly handled for that path to carry a v2.3.0-sourced user forward to Isthmus's new v2.4.0-pinned baseline as part of migrating in (per this plan's stated goal) | Not started |
+| H2 | **Acceptance test, source = nanoclaw v2.3.0**: starting from a clean plain nanoclaw v2.3.0 install, run the identified path end to end and verify all of: existing user data and configuration preserved; credentials are not copied into any location the kernel wouldn't admit as a valid mount; groups, sessions, mounts, and central DB state remain valid after migration; the resulting installation is running Isthmus pinned to the new v2.4.0 baseline; a deliberately-induced failure partway through leaves a recoverable state (not partial/corrupt); rollback behavior is documented; the whole procedure runs from a fresh checkout with no reliance on undocumented local state | Not started |
+| H3 | **Acceptance test, source = nanoclaw v2.4.0**: the same full checklist as H2, against a clean plain nanoclaw v2.4.0 install instead | Not started |
+| H4 | Confirm both H2 and H3 land the user on the identical resulting state (same pinned baseline, same expected behavior) — a v2.3.0-sourced and a v2.4.0-sourced migration are not allowed to diverge in outcome | Not started |
 
 ### Workstream I — Design Law closure (resolved: LAW-09 annotation + playbook, not a new law)
 
@@ -332,16 +500,20 @@ about a downstream optional feature.
 
 ## Promotion gate — do not move the pin until every box below is checked
 
-- [ ] Workstream A complete and tested (E1, E2, A6)
+Every box means PASSED + REQUIRED (or a named, dated, expiring exception
+recorded per Workstream C's acceptance-record format), per "What 'the gate
+passed' means" above — not merely attempted or run.
+
+- [ ] Workstream A complete and tested (E1, E2 PASSED + REQUIRED, A6)
 - [ ] Workstream B: every row resolved, no "not yet assessed" remaining
-- [ ] Workstream C: every finding closed or explicitly accepted and documented (C5)
-- [ ] Workstream D: every file classified and reconciled
-- [ ] Workstream E: full suite green on real CI, not local-only
+- [ ] Workstream C: every finding closed, or covered by a complete acceptance record (C5) — zero bare "accepted" notes
+- [ ] Workstream D: the file-inventory artifact (D0) exists, has zero unclassified rows and zero Bucket B rows without a security-review status (D4)
+- [ ] Workstream E: full suite green per "What 'green' means" on real CI, not local-only
 - [ ] Workstream F: ADR(s) merged, compatibility docs current
-- [ ] Workstream G: CI coverage added for every new privileged surface this promotion introduces (required, not merely considered)
-- [ ] Workstream H: migration continuity verified for both source versions
-- [ ] Final re-validation: re-run this plan's Workstream B/C classification against the actual v2.4.0 tag one more time immediately before promoting, to catch anything that changed between planning and execution
-- [ ] `docs/upstream-pin.json` + `docs/baseline.md` updated together with the closing ADR (G3)
+- [ ] Workstream G: CI coverage added and REQUIRED for every new privileged surface this promotion introduces (G1–G3), no report-only substitutions
+- [ ] Workstream H: H2 and H3 acceptance tests both pass, H4 confirms matching outcomes
+- [ ] **Tag/commit immutability re-check**: re-run Workstream B/C/D's classification against the *live* v2.4.0 tag one more time immediately before promoting (catches drift since Step 0); confirm the tag still resolves to the same commit (`143db6c9`) captured at the start of this plan and has not moved; record the final verified commit SHA in this document's changelog at promotion time
+- [ ] `docs/upstream-pin.json` + `docs/baseline.md` updated together with the closing ADR (G4) — in the final pin-move PR only, per "PR boundaries" above
 
 ## Open questions / risks (living list)
 
@@ -353,8 +525,8 @@ about a downstream optional feature.
   modifications against this file needs to track which lines belong to
   which stream, not treat it as one block.
 - Whether `internal/kernel`'s wire protocol needs a version bump (A2) is
-  undetermined — affects rollout/compatibility sequencing if the answer is
-  yes.
+  undetermined — now gated on producing the mixed-version compatibility
+  matrix, not a standalone yes/no call.
 - The `channels`/`providers` sibling-branch auto-sync (merged 2026-09-25)
   is explicitly out of scope here, but note for later: once this pin moves,
   those branches' own upstream base line moves too, since they track
@@ -385,3 +557,25 @@ about a downstream optional feature.
   G1–G4), updated the promotion-gate checklist line to match, and carried
   the same correction into the reusable playbook's Step 6 so it holds for
   every future promotion, not just this one.
+- 2026-09-25 — Addressed a Copilot PR review on this plan's own first
+  draft (all points assessed as sound and incorporated, none disputed):
+  fixed the "ten-step" claim (playbook is eleven steps, 0–10); fixed a
+  stale `(G3)` reference in the promotion gate to `(G4)` after the earlier
+  renumbering; added Workstream D0, a required machine-readable file
+  inventory artifact, replacing the earlier prose diffstat as the gating
+  evidence; added full acceptance-record requirements to Workstream C's
+  C5 (named approver, expiry, threat model, regression test, etc.,
+  replacing bare "accepted and documented"); added "What 'the gate passed'
+  means" distinguishing RUNNING/PASSED/REQUIRED, and applied it to A5/E2/
+  G1 so the new live-Docker coverage can't be satisfied by a report-only
+  run; added A2's mixed-version TS-host/Go-kernel compatibility matrix and
+  rollout questions; converted Workstream H's H2/H3 into concrete,
+  itemized acceptance tests instead of open-ended "verify it handles X"
+  statements; added "What 'green' means" (baseline test policy: zero
+  failures, not zero-new-failures, with a named/expiring exception process
+  matching Workstream C's); added tag/commit immutability re-verification
+  to the promotion gate's final line; added the "PR boundaries" section
+  separating implementation PRs from the final pin-only PR. Corresponding
+  durable corrections (step count, CI-required language, acceptance-record
+  requirements) also applied to `go-host/docs/upstream-promotion-playbook.md`
+  so future promotions inherit them.

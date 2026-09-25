@@ -48,7 +48,7 @@ re-deriving it from scratch at the next release, is what this annotation
 is for — the same move this document already made for LAW-07.
 
 **The procedure**: `go-host/docs/upstream-promotion-playbook.md`, a
-version-agnostic, ten-step process — scope the release with real data before
+version-agnostic, eleven-step process (Steps 0–10) — scope the release with real data before
 reading a diff; check `version-compatibility.md`'s consumed-contracts table
 row by row; classify the *full* repo diff (not just the obvious directories)
 into seam call-sites, bypass-risk surfaces, and pure-TypeScript; trace every
