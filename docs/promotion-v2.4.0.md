@@ -99,10 +99,17 @@ not just absorbing them passively — while:
   `container-runner.ts` finding") vs.
   `container/agent-runner/src/provider-contracts/*` (container, execution
   policy/inference/memory/command-formatting — a ~2,579-line, 100%
-  unported, genuinely separate effort). Only the host-side contract is
-  reopened by this decision; whether the container-side one is also in
-  scope is an open question for the founder, recorded in C14 rather than
-  assumed either way.
+  unported, genuinely separate effort). Only the host-side contract was
+  reopened by the original decision above; whether the container-side one
+  is also in scope was left as an open question for the founder.
+- **Resolved 2026-09-26, by direct founder decision — the container-side
+  provider-contracts port IS also in scope.** Reason given: the
+  container-side provider files (`container/agent-runner/src/providers/
+  claude.ts`, `provider-registry.ts`, `types.ts`, `factory.ts`, `mock.ts`)
+  are confirmed **byte-identical to the pinned v2.3.0 baseline** — `git
+  diff v2.3.0 -- <file>` is empty for every one of them — so unlike the
+  host-side settings-content situation, there is no Isthmus-specific
+  behavior a port would silently overwrite. Tracked as **C15**.
 - This is not a general "catch up with upstream forever" project. LAW-09
   stays in force: one pinned baseline at a time, promoted deliberately.
 - **Revised 2026-09-25 (ADR-030) — installing `add-iron-proxy` IS in
@@ -449,6 +456,7 @@ outside `drivers/docker-driver.ts`.
 **Progress, 2026-09-26: Steps 1-3 of 6 done and committed, all mechanism work** (`feat/gateway-provider-seam`). **Step 3** (commit `defa4d29`): added `ProviderInstructionFacts`, `BASE_INSTRUCTIONS_PATH`, `MEMORY_NOTE_PLACEHOLDER`, `renderBaseInstructions()`, `renderNativeSkillsSection()` to `project-doc-compose.ts` — purely additive, `ProjectDocSpec.baseDocPath` becomes optional (legacy shape) rather than required; `DEFAULT_PROJECT_DOC` deliberately keeps setting it, so every existing spec's behavior is byte-for-byte unchanged (confirmed: all 28 pre-existing tests pass unmodified). Done first, out of the plan's original order, because `registry.ts` (step 1) imports `ProviderInstructionFacts` from it. **Steps 1-2** (commit `03e884a9`): widened `provider-contracts/registry.ts` from C8's narrow slice to the full contract (`projectDocument`, `stateVolumes`, `skillBackings`, `skillViews`, `files`, `legacyHostAdapter`, `commands`), and added `file-transformers.ts` (self-contained, ported verbatim). **A real, deliberate divergence from upstream, not an oversight**: upstream requires `projectDocument` on every registered contract; here every mount/file field stays optional, because Isthmus's shipped `claude.ts` (C8) registers a model-domain-only contract with no mount surface at all and must keep compiling and behaving identically while this rewrite lands in stages — `assertProviderHostContractShape` now encodes the actual invariant instead: a contract declares **no** mount/file surface at all (buildMounts keeps composing that provider's mounts the legacy way, wholly unaffected by this commit) or a **complete** one, `projectDocument` included, with upstream's full validation applying from that point (path canonicalization, mountClass allowlist, id uniqueness, cross-reference checks, container-destination collisions). New `registry.test.ts` (33 cases, the first real coverage this file has had) weights toward the new divergent invariant (6 cases) and the shape-validation failure modes upstream's own 501-line suite exists to catch. **Step 2's `realize.ts`** (commit `56e60edc`): the group-init/spawn-time realization step `buildMounts` will call — state-volume directory creation, prepared-file initialization/reconciliation, skill-backing/view path resolution, shared-skill symlink sync, project-document composition. **A second deliberate divergence, also security-relevant**: upstream imports `writeAtomic` from `migrate-claude-memory-settings.ts`, safe there only because that file runs once at startup before any container exists to race against; this module's file writes land in the same agent-writable, group-shared, read-write-mounted state-volume tree `project-doc-compose.ts`'s own `writeAtomic` (LOAD-BEARING header, the symlink-race fix from earlier this promotion) exists to protect, so `realize.ts` reuses that implementation instead (exported it, zero behavior change to `project-doc-compose.ts` itself). New `realize.test.ts` (19 cases); the two path-escape-rejection tests (the file's most security-critical assertion) verified via a targeted mutation check rather than a stash-based negative control, since this is wholly new code with no pre-existing behavior to diff against — neutering the escape guard makes exactly those two tests fail, restoring it makes all 19 pass. Every step across all three commits verified via `pnpm exec tsc --noEmit` clean and zero regression in every real consumer (`gateway-approval-coordinator.ts`, `provider-surfaces.test.ts`, the C8/C10/C11 test suites, 88+19 tests total in the touched area). Claude's existing C8 registration is untouched throughout — this is why Steps 1-3 could land safely without yet touching the one provider Isthmus runs in production.
 
 **Remaining, in dependency order, none started**: Step 4, `container-runner.ts`'s `buildMounts`/`resolveProviderContribution` rewrite — the single highest-blast-radius file in this entire promotion, since it composes the mount set for the only provider (Claude) this fork actually runs in production, and a mistake here doesn't fail loud, it fails as a broken or insecurely-mounted container at spawn time; Step 5, Isthmus's own Claude `ProviderHostContract` (the settings-content divergence decision above already made — preserve Isthmus's `PreCompact`/env-var behavior, don't adopt upstream's `CLAUDE_DEFAULT_SETTINGS` verbatim) plus the live-mount-output-preserving regression test the deep-scope report recommended (§4: prove a contract-composed `MountSpec[]` for Claude is byte-identical to today's legacy output for an existing group, before this ships); Step 6, `group-init.ts`/`command-gate.ts` reconciliation. Deliberately stopped here rather than continuing into Step 4/5 in the same sitting: Steps 1-3 are mechanism-only and testable in total isolation from Claude's real mounts (confirmed — Claude's registration never changed, `buildMounts` itself is still the pre-existing legacy-only code, nothing about any running container changed), where Step 4 onward is exactly the point this stops being reversible-if-wrong without a live container spawn to check against, and deserves its own unhurried session with the same rigor as Steps 1-3 rather than being rushed at the tail of a long one. This is the recommended next resumption point for this promotion. |
+| C15 | **New (2026-09-26, direct founder decision), the container-side sibling of C14.** Port `container/agent-runner/src/provider-contracts/*` (the Bun-side execution-policy/inference/memory/command-formatting contract — a genuinely separate abstraction from C14's host-side mount/file contract, see the Non-goals section) and reconcile `container/agent-runner/src/providers/{claude,provider-registry,types,factory}.ts` against it | **Not started. Scoping done, in this doc's own record of the conversation that authorized it**, not yet in a dedicated report. Confirmed directly (not assumed) against the real `v2.3.0` tag: every current Isthmus file under `container/agent-runner/src/providers/` (`claude.ts`, `provider-registry.ts`, `types.ts`, `factory.ts`, `mock.ts`) is **byte-identical** to the v2.3.0 baseline — `git diff v2.3.0 -- <file>` is empty for all five. This is the opposite situation from C14's host side (where real Isthmus-specific behavior, the `PreCompact` hook, had to be preserved against a blind overwrite): here there is nothing Isthmus-specific to reconcile, only upstream's own diff to apply. That lowers *reconciliation* risk but not *execution* risk — `claude.ts` is the file that runs every live Claude agent session inside the container, not inert scaffolding. Real diff sizes measured directly (Isthmus's current files vs. the v2.4.0 reference pulled to scratchpad during C14's scoping pass): `providers/claude.ts` **−281 net lines** (94 added, 375 removed — logic extracted into the new contract layer); `providers/provider-registry.ts` +89 net; `providers/types.ts` ~63 lines churned; `providers/factory.ts` +29 net; `providers/claude-history.ts` and `providers/claude-config.ts` are **new files**, not present in Isthmus at all; `container/agent-runner/src/provider-contracts/` (7 files: `registry`, `realize`, `claude`, `mock`, `names`, `verifier`, `index`) is an **entirely new directory**. Planned approach, matching C14's own discipline: characterize `claude.ts`'s current externally-observable behavior with tests first (LAW-06 — this is live execution-path code, not additive mount composition), then apply upstream's diff, then verify byte-for-byte behavioral parity on everything the characterization test locked in before calling this done. Not yet scheduled against C14 Steps 4-6 — both are large, both touch provider-registration surfaces, doing them back-to-back risks conflating two different kinds of contract in one sitting; recommend finishing C14 first since it's already half-landed, then C15 as its own clean pass. |
 
 **Acceptance-record requirements (C5)** — every accepted bypass or TS-only
 security decision must record all of the following, in
@@ -1281,3 +1289,35 @@ the final pin-move PR.
   provider-host-contract mount-composition rewrite (`container-runner.ts`
   `buildMounts`, `src/provider-contracts/*`) — its report is recorded in
   the next entry.
+- 2026-09-26 — **C14 Steps 1-3 of 6 implemented and committed** (registry.ts
+  widening, file-transformers.ts, realize.ts, project-doc-compose.ts's
+  instruction-facts layer — see C14's own row for full detail, commits
+  `defa4d29`/`03e884a9`/`56e60edc`). Two deliberate, documented divergences
+  from upstream found and applied along the way, both correctness/security
+  decisions rather than straight ports: the mount-surface-invariant
+  relaxation in `registry.ts` (every mount/file field optional, so Claude's
+  existing C8 registration keeps working unchanged while this lands in
+  stages), and `realize.ts` reusing `project-doc-compose.ts`'s hardened
+  `writeAtomic` instead of upstream's weaker startup-only one, since
+  `realize.ts`'s file writes land in the same agent-writable, group-shared
+  state-volume tree the original symlink-race fix protects. Step 4 (the
+  `buildMounts` rewrite itself — the highest-blast-radius file in this
+  promotion) deliberately deferred to its own session rather than rushed.
+- 2026-09-26 — **C15 opened: the container-side provider-contracts port
+  is also in scope, by direct founder decision.** The founder asked why
+  the container-side abstraction couldn't just be imported, since Isthmus
+  had "never touched" it — checked directly against the `v2.3.0` tag and
+  confirmed correct: every current file under `container/agent-runner/src/
+  providers/` is byte-identical to the v2.3.0 baseline. This is a genuine
+  correction to this document's own C14 row, which had stated (without
+  this direct verification) that the container-side files "diverge from
+  v2.3.0's baseline" — they don't; that claim is removed from the record
+  here and replaced with the verified fact. Real diff sizes measured
+  directly against the v2.4.0 reference already pulled during C14's
+  scoping: `providers/claude.ts` shrinks by 281 net lines as its logic
+  moves into a new declarative contract layer; `claude-history.ts` and
+  `claude-config.ts` are new files; the whole `provider-contracts/`
+  directory (7 files) is new. Tracked as C15, not started — recommended
+  to follow C14's completion rather than run concurrently with it, since
+  both touch provider-registration surfaces and conflating them in one
+  sitting risks confusing which contract a given change belongs to.
