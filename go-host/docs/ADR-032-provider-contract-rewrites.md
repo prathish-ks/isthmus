@@ -4,7 +4,9 @@ Status: host-side (C14) decided and implemented 2026-09-26, by the
 `docs/promotion-v2.4.0.md` scope-policy decision ("the scope bar is
 'genuinely part of v2.4.0,' not 'small enough to be convenient'").
 Container-side (C15) decided 2026-09-26, by direct founder direction;
-scoped, not yet implemented. Adds Workstream C tasks C14/C15.
+mechanism implemented and committed 2026-09-26 (`7af29867`), deliberately
+narrower than upstream's full diff — see the C15 decision below. Adds
+Workstream C tasks C14/C15.
 
 ## Background
 
@@ -141,31 +143,81 @@ doing the actual work — not a separate parity harness), and committed in
 `feat/gateway-provider-seam` (commits `defa4d29`, `03e884a9`, `56e60edc`,
 `26b0ae30`, `a5bcbcff`).
 
-**C15 (scoped, not implemented) — Container-side provider-runtime-contract
-port.** Port `container/agent-runner/src/provider-contracts/*` (a new
-directory: `registry.ts`, `realize.ts`, `claude.ts`, `mock.ts`, `names.ts`,
-`verifier.ts`, `index.ts`) and reconcile
+**C15 (mechanism implemented, `poll-loop.ts` deliberately excluded) —
+Container-side provider-runtime-contract port.** Ported
+`container/agent-runner/src/provider-contracts/*` (new directory:
+`registry.ts`, `realize.ts`, `claude.ts`, `mock.ts`, `names.ts`,
+`verifier.ts`, `index.ts`) and reconciled
 `container/agent-runner/src/providers/{claude,provider-registry,types,
-factory}.ts` against it, plus two new files (`claude-history.ts`,
-`claude-config.ts`) and, found during scoping — not part of the original
-estimate — `poll-loop.ts` and `index.ts`, which read the
-`AgentProvider.supportsNativeSlashCommands`/`.emitsMidTurnText` instance
-booleans this rewrite replaces with contract fields
-(`commands.formatting`/`textDelivery`). Sequenced to follow C14 rather
-than run concurrently, since both touch provider-registration surfaces.
-Plan: characterize `claude.ts`'s (currently 691 lines) externally-
-observable behavior with tests first (LAW-06 — this is the file that runs
-every live Claude conversation turn), confirmed testable in this sandbox
-(`bun install && bun run typecheck && bun test` all work), then apply
-upstream's diff, correcting the `/remote-control` categorization along the
-way, then verify byte-for-byte behavioral parity before calling it done.
+factory,mock}.ts` against it, plus two new files (`claude-history.ts`,
+`claude-config.ts`) extracted from the old monolithic `claude.ts`.
+Committed `feat/gateway-provider-seam` @ `7af29867` (23 files,
++1505/−403). Full container-side suite: 343 pass, 1 skip, 0 fail; clean
+`bun run typecheck`; clean `eslint`.
+
+Scoping found the honest blast radius included `poll-loop.ts` (the actual
+message-processing core loop reads
+`AgentProvider.supportsNativeSlashCommands`/`.emitsMidTurnText` in 10+
+call sites) and `index.ts`. `index.ts` was reconciled (barrel import,
+`requireProviderName`, `registerProviderMemorySessionHook`).
+**`poll-loop.ts` was deliberately excluded from this pass**: its real
+v2.3.0→v2.4.0 diff (327 changed lines, confirmed via `git diff v2.3.0..v2.4.0`
+against the actual tags, not assumed) bundles the
+`supportsNativeSlashCommands`/`emitsMidTurnText`→contract migration
+together with an unrelated, substantial multi-turn reply-routing rewrite
+(new `queuedTurns`/`adoptTurn`/`pushRetry` mechanism, `setCurrentInReplyTo`
+→`setCurrentReplyRoute` rename, `AbortSignal` cancellation,
+`db/session-routing.ts` +44 lines, `db/session-state.ts` +71 lines) — the
+same bundled-concerns pattern Workstream B already found in
+`container-runner.ts` (gateway-session-lifecycle + durable-host-shadow-
+writes + provider-host-contract mixed in one diff). Separating a genuine
+feature rewrite from a mechanical contract-adoption diff under time
+pressure risks either a rushed, under-tested surgical split or silently
+absorbing unrelated scope creep; neither serves LAW-06. **Resolution**:
+`AgentProvider.supportsNativeSlashCommands`/`.emitsMidTurnText` stay
+instance fields on `providers/types.ts`, diverging from upstream's
+migration. `poll-loop.ts` needs zero changes as a result. The contract
+still declares `commands.formatting`/`textDelivery` (verifier-checked for
+correct shape) but nothing consumes them yet — the same "declared but
+unconsumed" staging this promotion already used for host-side `inference`
+ahead of C14 Step 5. The reply-routing rewrite itself is **not** adopted
+and **not** dropped — tracked as its own separate, not-yet-scoped
+follow-on item in `docs/promotion-v2.4.0.md`.
+
+Also confirmed and applied during the port, both verified against the
+real tags directly (LAW-01/LAW-06, not assumed): `providers/claude-config.ts`
+keeps `'TaskOutput'` in `TOOL_ALLOWLIST` (upstream's v2.4.0 drops it with
+zero occurrences anywhere in the v2.4.0 container tree and no evidence of
+a deliberate removal, while it's been present since this fork's first
+commit); `provider-contracts/claude.ts` corrects `/remote-control` to
+`nativeFiltered`, matching Isthmus's own already-tested categorization
+instead of upstream's `nativeAdmin` (the recommendation from this ADR's
+original scoping pass, now applied). Both fields are currently inert on
+the container side (nothing consumes `contract.commands` for real
+behavior yet), so this is a correctness-of-declared-value fix, not a
+behavior change today.
+
+One further deliberate deferral, not part of the mechanism port itself:
+upstream's v2.4.0 also fixes a real bug in `claude.ts`'s `systemPrompt`
+construction (`snapshot: false` on the preset option — without it, a
+resumed session keeps a stale system-prompt append, old agent name and
+destinations, until compaction). Applying it requires bumping
+`@anthropic-ai/claude-agent-sdk` from Isthmus's current `^0.3.238`
+(matching the v2.3.0-era pin) to upstream's `^0.3.280` — a supply-chain
+decision CLAUDE.md's "Container Runtime (Bun)" section reserves for its
+own deliberate pass (check the npm release date, pin deliberately, never
+`bun update` blindly), not folded into this rewrite. The bug remains
+present; the fix is deferred, not declined, and tracked as its own
+follow-on item.
 
 ## Consequences
 
 - `docs/promotion-v2.4.0.md` Workstream C: C14's row marked done with full
-  step-by-step evidence; C15's row carries the deep-scope findings above
-  and is the current recommended next resumption point for this
-  promotion's remaining implementation work.
+  step-by-step evidence; C15's row marked done for the mechanism port
+  (commit `7af29867`), with the `poll-loop.ts` reply-routing rewrite and
+  the SDK version bump both carried forward as their own explicit,
+  not-yet-scoped follow-on items rather than being silently absorbed or
+  dropped.
 - Workstream B's own `container-runner.ts` row (which originally flagged
   this exact rewrite as needing its own architectural decision) is
   resolved by C14; its other named concern, gateway-session-lifecycle
