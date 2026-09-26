@@ -200,6 +200,31 @@ func TestDockerExecutor_Wake_AuxiliaryWithoutMatchingNetworkAccessTarget_Rejecte
 	}
 }
 
+// validateNetworkAccessTarget's OTHER rule: a session-container target must
+// actually name one of the session's own auxiliary containers, not an
+// arbitrary role string. Distinct code path from the rejection test above
+// (that one fires when Target.Kind isn't "session-container" at all; this
+// one fires when it IS "session-container" but Role doesn't match anything
+// in spec.Containers).
+func TestDockerExecutor_Wake_SessionContainerTargetNamesNonexistentRole_Rejected(t *testing.T) {
+	d, _ := newFakeDockerExecutor(t, "")
+	spec := testWakeSpec()
+	spec.Containers = append(spec.Containers, mount.Container{Role: "proxy"})
+	spec.NetworkAccess = mount.NetworkAccessIntent{
+		Endpoint: "gateway.internal:443",
+		// "session-container" kind, but no container in spec.Containers
+		// has role "wrong-role" — must be rejected, not silently treated
+		// as targeting "proxy" or falling through to the agent's own
+		// network args.
+		Target: mount.NetworkAccessTarget{Kind: mount.NetworkTargetSessionContainer, Role: "wrong-role"},
+	}
+	if _, _, _, _, err := d.Wake(context.Background(), spec, containerdefaults.RunAs{}, containerdefaults.Resources{}); err == nil {
+		t.Fatal("expected denial: a session-container networkAccess target naming a role with no matching auxiliary container")
+	} else if !strings.Contains(err.Error(), "session-container network target must name an auxiliary container") {
+		t.Fatalf("expected validateNetworkAccessTarget's specific reason, got: %v", err)
+	}
+}
+
 // The positive case: a correctly-specified auxiliary container (a
 // session-container networkAccess target naming it) is genuinely realized
 // — network created, both containers created and started, aliased

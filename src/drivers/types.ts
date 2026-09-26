@@ -636,13 +636,20 @@ export function looksLikeCredential(value: string): boolean {
  * be claimed by a path that has not earned it".
  */
 export function classRequiredByPath(hostPath: string, policy: MountPolicy): MountClass | null {
-  if (underRoot(hostPath, policy.materialsRoot)) return 'identity-material';
+  // Gateway-trust checked before materials: matches `mount.ClassRequiredByPath`
+  // (Go)'s order exactly, which itself matches upstream's own v2.4.0 ordering
+  // (commit 249bbe93) — kept identical on both sides so a hostPath under both
+  // roots (a misconfiguration nothing else prevents) classifies the same way
+  // regardless of which side evaluates it, rather than depending on the two
+  // roots staying disjoint by convention alone.
+  //
   // Guard against an empty gatewayTrustRoot: `underRoot(path, '')` matches
   // every canonical absolute path (empty root + '/' prefix), so an
   // unconfigured root would silently misclassify every mount as
   // gateway-trust instead of failing closed. Mirrors the same guard on
   // `mount.ClassRequiredByPath` (Go) — see that function's own comment.
   if (policy.gatewayTrustRoot !== '' && underRoot(hostPath, policy.gatewayTrustRoot)) return 'gateway-trust';
+  if (underRoot(hostPath, policy.materialsRoot)) return 'identity-material';
   if (policy.surfaceRoots.some((root) => underRoot(hostPath, root))) return 'install-surface';
   return null;
 }

@@ -527,6 +527,24 @@ func TestGatewayTrust_UnconfiguredRootFailsClosed(t *testing.T) {
 	})
 }
 
+// ClassRequiredByPath checks GatewayTrustRoot before MaterialsRoot — pins
+// that order so a hostPath under both roots (a misconfiguration nothing else
+// prevents) classifies as gateway-trust here, matching the identical
+// precedence this package's TS mirror (classRequiredByPath, drivers/types.ts)
+// now also uses. Before this test and the matching TS one existed, nothing
+// on either side would have caught the two mirrors disagreeing on which
+// class wins the overlap.
+func TestClassRequiredByPath_GatewayTrustPrecedesMaterials(t *testing.T) {
+	policy := basePolicy()
+	policy.MaterialsRoot = "/data/shared-root"
+	policy.GatewayTrustRoot = "/data/shared-root/gateway-trust"
+
+	got := ClassRequiredByPath("/data/shared-root/gateway-trust/ca.pem", policy)
+	if got != ClassGatewayTrust {
+		t.Fatalf("expected ClassGatewayTrust for a path under both roots, got %q", got)
+	}
+}
+
 // ResolveSymlinks hardening (this package's own Go-only addition, item 1 in
 // the package doc comment) must cover gateway-trust the same way it already
 // covers identity-material/install-surface — a symlink planted inside an
