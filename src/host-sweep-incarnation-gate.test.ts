@@ -20,7 +20,22 @@
  */
 import fs from 'fs';
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// `sweep()`'s own reason-sweep hook dynamically imports `modules/approvals/
+// index.js`, which pulls in the gateway-provider registry (gateway-approval-
+// coordinator.js -> gateway-providers/index.js -> installed.js) and, since
+// the v2.4.0 promotion's Workstream C8, a real gateway provider that loads
+// `@grpc/grpc-js`/`@grpc/proto-loader` — Node native-binding libraries with a
+// real, one-time module-load cost. Paid here, before any test's own
+// `vi.waitFor` window starts, instead of inside the first test's — otherwise
+// the first sweep() call absorbs that cost, its own reschedule lands late
+// (after that test's waitFor already gave up), and the delayed callback
+// shows up as a spurious extra `sweepCallbacks` push in whichever test runs
+// next. Not a mock: the real module tree, loaded for real, exactly once.
+beforeAll(async () => {
+  await import('./modules/approvals/index.js');
+});
 
 vi.mock('./config.js', async () => {
   const actual = await vi.importActual('./config.js');

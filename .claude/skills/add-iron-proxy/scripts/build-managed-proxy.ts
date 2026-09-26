@@ -8,10 +8,18 @@ import { installCommand, InstallCommandFailure } from './install-command.js';
 const skill = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pins = JSON.parse(fs.readFileSync(path.join(skill, 'versions.json'), 'utf8'));
 const compatibility = path.resolve(skill, '../../../gateway-compat/onecli-summary');
-const summaryPin = JSON.parse(fs.readFileSync(path.join(compatibility, 'upstream.json'), 'utf8'));
-const onecliPin = JSON.parse(fs.readFileSync(path.join(skill, '../add-onecli/versions.json'), 'utf8'));
-if (summaryPin.version !== onecliPin['onecli-gateway'])
-  throw new Error('Approval compatibility must match the pinned OneCLI gateway');
+// Upstream also cross-checks gateway-compat/onecli-summary/upstream.json's
+// pinned OneCLI gateway version against `.claude/skills/add-onecli/versions
+// .json`'s own `onecli-gateway` pin — a same-repo drift guard between two
+// files upstream's own build maintains together, since upstream provisions
+// OneCLI itself as a skill-installed, self-built gateway with its own
+// pinned server image (matching how this same skill provisions Iron
+// Control). Isthmus has no equivalent: OneCLI here is a bring-your-own
+// external gateway service the operator runs and versions independently
+// (`CLAUDE.md`'s "Secrets / Credentials / OneCLI" section) — there is no
+// second, Isthmus-maintained pin file for this compatibility helper's own
+// upstream.json to drift from. Nothing to check; the pin above still
+// governs which OneCLI summary-format source this helper is built against.
 const compatibilityInputs = ['Cargo.toml', 'Cargo.lock', 'src/main.rs', 'prepare.py', 'upstream.json'];
 export const frontProxyHash = createHash('sha256')
   .update(
