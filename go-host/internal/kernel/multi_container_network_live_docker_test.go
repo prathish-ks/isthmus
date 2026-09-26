@@ -242,11 +242,30 @@ func TestLive_Wake_MultiContainerSession_PrivateNetworkIsolatesAgentAndReachesPr
 	// successful resolution here is real, daemon-mediated confirmation of
 	// network membership and the alias, not an inference from argv.
 	//
-	// Polled rather than a single attempt: see dockerExecOKEventually's own
-	// comment for why, and for why this has already been widened once and
-	// still failed on CI for the full window — diagnostics are logged on
-	// failure specifically because a second blind guess isn't warranted.
-	if ok, out := dockerExecOKEventually(t, payload.ContainerName, 20*time.Second, "nslookup", "gateway-proxy"); !ok {
+	// "gateway-proxy." with the trailing dot — not "gateway-proxy" — is
+	// the actual fix, found from real diagnostics on the second CI
+	// failure rather than a third guess: the CI runner (Azure-hosted)
+	// injects a real DNS search domain into the container's resolv.conf
+	// (something like "<id>.<region>.internal.cloudapp.net" — this
+	// sandbox's own Docker Desktop VM doesn't set one, which is exactly
+	// why this never reproduced locally). A bare, few-dots name triggers
+	// the resolver's normal search-domain suffixing *before* trying the
+	// name as-is, so busybox nslookup queried
+	// "gateway-proxy.<search-domain>" first — 127.0.0.11 correctly
+	// doesn't know that name and returns SERVFAIL, and the resolver
+	// treats that as terminal rather than falling through to the bare
+	// name. A trailing dot marks the name as already fully-qualified in
+	// standard DNS syntax, which suppresses search-domain suffixing
+	// entirely — confirmed locally against a container given an explicit
+	// --dns-search override (this sandbox's own environment doesn't
+	// otherwise have one to test against): a bare lookup gets the
+	// search-suffixed query, a trailing-dot lookup does not.
+	//
+	// Retained the poll (dockerExecOKEventually) and diagnostics
+	// regardless of finding the real cause — a fast, correct check
+	// costs nothing extra, and the diagnostics remain valuable if
+	// anything about this ever regresses again.
+	if ok, out := dockerExecOKEventually(t, payload.ContainerName, 20*time.Second, "nslookup", "gateway-proxy."); !ok {
 		t.Logf("last nslookup attempt output:\n%s", out)
 		logNetworkDiagnostics(t, wantNetwork, payload.ContainerName, wantAuxiliaryName)
 		t.Fatal("expected the agent to resolve its auxiliary container's alias (gateway-proxy) on the shared private network")
