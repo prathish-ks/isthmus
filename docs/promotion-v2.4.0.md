@@ -701,16 +701,31 @@ time, each line below gets its blank checkbox replaced with a direct link
 to the evidence satisfying it, and that filled-in version ships as part of
 the final pin-move PR.
 
-- [ ] Workstream A complete and tested (E1, E2 PASSED + REQUIRED, A6)
-- [ ] Workstream B: every row resolved, no "not yet assessed" remaining
-- [ ] Workstream C: every finding closed, or covered by a complete acceptance record (C5) — zero bare "accepted" notes
-- [ ] Workstream D: the file-inventory artifact (D0) exists, has zero unclassified rows and zero Bucket B rows without a security-review status (D4)
-- [ ] Workstream E: full suite green per "What 'green' means" on real CI, not local-only
-- [ ] Workstream F: ADR(s) merged, compatibility docs current
-- [ ] Workstream G: CI coverage added and REQUIRED for every new privileged surface this promotion introduces (G1–G3), no report-only substitutions
-- [ ] Workstream H: H2 and H3 acceptance tests both pass, each with its recorded rollback artifact, H4 confirms matching outcomes
-- [ ] **Tag/commit immutability re-check**: re-run Workstream B/C/D's classification against the *live* v2.4.0 tag one more time immediately before promoting (catches drift since Step 0); confirm the tag still resolves to the same commit (`143db6c9`) captured at the start of this plan and has not moved; record the final verified commit SHA in this document's changelog at promotion time
-- [ ] `docs/upstream-pin.json` + `docs/baseline.md` updated together with the closing ADR (G4) — in the final pin-move PR only, per "PR boundaries" above
+**Status as of 2026-09-26** (interim snapshot for external review on this
+plan's own PR, [#50](https://github.com/prathish-ks/isthmus/pull/50) —
+not yet the final filled-in version this section describes above, which
+still ships only with the pin-move PR itself once every line below is
+truly checked): implementation for every workstream is complete and
+locally verified across two branches (`feat/mount-gateway-trust-class`,
+`feat/gateway-provider-seam`) plus this planning branch's own docs. The
+one thing genuinely outstanding across the board is **real GitHub
+Actions CI evidence** — neither implementation branch has a PR open yet
+(see "PR boundaries," above, and the reply on this thread), so every
+green result below is `pnpm`/`go test`/`bun test` run locally in a
+worktree, not yet the formal required-gate run itself. That's exactly
+what opening PR #1 (kernel capability) and PR #2 (gateway bypass
+closure) resolves — flagged per-line below rather than glossed over.
+
+- [x] Workstream A complete and tested (E1, E2 PASSED + REQUIRED, A6) — A1–A6 all closed, `feat/mount-gateway-trust-class`. E2/A5's live-Docker evidence is real (a real daemon, `-race`, both new tests executed with `CONFIRMED LIVE` log lines — see A5's row) but run locally; the formal GitHub Actions run of `go-multi-container-live-docker` is pending PR #1
+- [x] Workstream B: every row resolved, no "not yet assessed" remaining — closed across `feat/mount-gateway-trust-class` (commit `79465865`) and `feat/gateway-provider-seam` (C14)
+- [x] Workstream C: every finding closed, or covered by a complete acceptance record (C5) — zero bare "accepted" notes — C0–C15 closed, `feat/gateway-provider-seam`; C5's own accounting is zero acceptance records (every finding closed outright, see E4)
+- [x] Workstream D: the file-inventory artifact (D0) exists, has zero unclassified rows and zero Bucket B rows without a security-review status (D4) — `docs/promotion-v2.4.0-file-inventory.csv`, 526 rows, this branch. This one doesn't depend on CI — it's a real, already-merged-to-this-branch file, reviewable now
+- [ ] Workstream E: full suite green per "What 'green' means" on real CI, not local-only — **the one row this snapshot cannot check.** Locally: `pnpm exec vitest run` 4098 pass / 77 pre-existing-and-recorded-exception fail (E5), `bun test` 343 pass/1 skip/0 fail, `go test -mod=vendor ./... -race` all packages ok. E5's own row already says it plainly: "the formal required-CI-gate run... is still outstanding." Resolves the moment PR #1/#2 are opened and `ci.yml` runs green on GitHub
+- [x] Workstream F: ADR(s) merged, compatibility docs current — ADR-028 (F1(a)), ADR-029–034 (F4), all on this branch; F6 deliberately not written yet (correctly blocked on G4 — see F6's own row)
+- [x] Workstream G: CI coverage added and REQUIRED for every new privileged surface this promotion introduces (G1–G3), no report-only substitutions — G1 (`go-multi-container-live-docker`, commit `1c9b6903`), G2 (verified against the real `ci.yml`, no new job needed), G3 (confirmed N/A — see G3's row for the full re-verification). All three are about whether `ci.yml`'s *configuration* names the right required jobs, which is true today regardless of whether a GitHub-hosted run has executed it yet — that's what E's outstanding box tracks
+- [x] Workstream H: H2 and H3 acceptance tests both pass, each with its recorded rollback artifact, H4 confirms matching outcomes — [`docs/promotion-v2.4.0-rollback-v2.3.0.md`](promotion-v2.4.0-rollback-v2.3.0.md), [`docs/promotion-v2.4.0-rollback-v2.4.0.md`](promotion-v2.4.0-rollback-v2.4.0.md), H4 comparison table in the latter. This workstream's evidence is command-log transcripts, not CI — already real and reviewable now
+- [ ] **Tag/commit immutability re-check**: re-run Workstream B/C/D's classification against the *live* v2.4.0 tag one more time immediately before promoting (catches drift since Step 0); confirm the tag still resolves to the same commit (`143db6c9`) captured at the start of this plan and has not moved; record the final verified commit SHA in this document's changelog at promotion time — by design, not done until immediately before promoting (G4)
+- [ ] `docs/upstream-pin.json` + `docs/baseline.md` updated together with the closing ADR (G4) — in the final pin-move PR only, per "PR boundaries" above — by design, this is G4 itself, the last step
 
 ## Open questions / risks (living list)
 
@@ -1579,3 +1594,61 @@ the final pin-move PR.
   and resolved with the user's help (two large downloaded VM images
   moved out, Trash emptied by the user — an action outside what this
   assistant will do itself) before the retry succeeded cleanly.
+- 2026-09-26 — **H2 closed: a real end-to-end migration acceptance
+  test, not a design-only claim.** Non-interactively drove the actual
+  `isthmus.sh` migration against a real nanoclaw v2.3.0 install on a
+  disposable scratch worktree, to a local-only merge of this
+  promotion's own branches standing in for the pinned v2.4.0 baseline
+  (never pushed — those branches aren't merged to `main` yet).
+  `data/v2.db` byte-identical across migrate and rollback; `nanogo
+  doctor` clean post-migration; a mid-flight `pkill` during the
+  container step left a momentarily-orphaned process and a transient
+  lock file, both self-resolved with no data corruption. Along the
+  way, found and worked around a real, separate UX gap in the setup
+  wizard itself (its stall-detector prompt hangs forever on non-TTY
+  stdin after 60s of silence from a slow build step) by pre-building
+  the container image out-of-band first. Full transcript:
+  `docs/promotion-v2.4.0-rollback-v2.3.0.md`. Explicitly does not
+  re-prove real-credential handling or live-container adoption — both
+  still rest on H1's 2026-09-06 dry run, stated plainly in the artifact.
+- 2026-09-26 — **H3 and H4 closed.** Same test, sourced from the real
+  v2.4.0 tag instead of v2.3.0. Same clean result (byte-identical
+  `data/v2.db`, clean `nanogo doctor`), plus three things a v2.3.0
+  source didn't surface: the setup wizard's skip-step name changed
+  from `onecli` to `gateway` as a direct effect of this same
+  promotion's gateway-provider generalization; running that
+  un-skipped step for real hit 2 test failures traced to this
+  machine's own ambient `ANTHROPIC_BASE_URL` env var beating a test
+  fixture (confirmed sandbox artifact, not a defect); and a failed
+  attempt's partial file writes left uncommitted debris blocking the
+  next `git checkout`, cleanly recovered — a second, differently-shaped
+  demonstration of the "partial failure leaves recoverable state"
+  property H2 tested via a process kill. H4: H2 and H3 land on
+  identical resulting state on every axis compared. Full transcript:
+  `docs/promotion-v2.4.0-rollback-v2.4.0.md`.
+- 2026-09-26 — **G3 closed: re-verified, not left on its earlier
+  "blocked on H2/H3" assumption.** With H2/H3 actually landed, checked
+  all three places a new standalone script could have appeared:
+  Workstream A added none; Workstream C's new files (Iron Proxy skill
+  scripts, portal/slack-worker, two git-command-builder utilities) are
+  ordinary feature code already covered by the required `test` job —
+  confirmed `vitest.config.ci.ts` merges on top of `vitest.config.ts`
+  rather than replacing its `include` list, so C8's skill-payload
+  tests genuinely run in CI; Workstream H, the one place this row
+  originally expected a new script, in fact introduced zero — `git
+  diff --diff-filter=A` against the H2/H3 commits confirms it.
+  Resolves to N/A.
+- 2026-09-26 — **Promotion-gate checklist filled in with an interim
+  status snapshot**, ahead of the final pin-move PR that formally owns
+  it, so [PR #50](https://github.com/prathish-ks/isthmus/pull/50) has
+  something concrete for external review before PR #1 (kernel
+  capability) opens. Every workstream's implementation is complete and
+  locally verified; the one gap flagged honestly rather than glossed
+  over is that no GitHub Actions run has executed either implementation
+  branch yet (no PR open for `feat/mount-gateway-trust-class` or
+  `feat/gateway-provider-seam`) — E5's own row already said this
+  plainly ("the formal required-CI-gate run... is still outstanding"),
+  so the checklist's Workstream E line stays unchecked until PR #1/#2
+  open and `ci.yml` runs green for real. Tag-immutability re-check and
+  `docs/upstream-pin.json`/`docs/baseline.md` (G4) remain unchecked by
+  design — both belong only to the final pin-move PR.
