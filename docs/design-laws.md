@@ -36,6 +36,54 @@ LAW-07 reads, on its face, as a division of labor: Go enforces, TypeScript decid
 
 **Explicit risk cross-references**: this reading is what keeps the project out of Risk R-06's trap ("kernel accumulates product/integration logic" — avoided by moving only the narrow gating logic, not the whole catalog). It also keeps the project out of Risk R-10's trap ("Go rewrite narrative: project solves engineering interest, not user problem... only measurable benefit is runtime/language change" — avoided because the benefit being pursued is a physically enforced boundary, not a language swap of the same advisory check).
 
+## LAW-09, annotated: a repeatable promotion procedure
+
+LAW-09 states the policy — pin deliberately, watch separately, a routine
+release shouldn't force Go changes — but not the procedure for actually
+carrying it out. The 2026-09 promotion from `nanocoai/nanoclaw` v2.3.0 to
+v2.4.0 is where that procedure got worked out for real, against an upstream
+release that (unlike the one ADR-017 reviewed a month earlier) genuinely did
+change consumed contracts. Recording the procedure here, rather than
+re-deriving it from scratch at the next release, is what this annotation
+is for — the same move this document already made for LAW-07.
+
+**The procedure**: `go-host/docs/upstream-promotion-playbook.md`, a
+version-agnostic, eleven-step process (Steps 0–10) — scope the release with real data before
+reading a diff; check `version-compatibility.md`'s consumed-contracts table
+row by row; classify the *full* repo diff (not just the obvious directories)
+into seam call-sites, bypass-risk surfaces, and pure-TypeScript; trace every
+bypass-risk finding to a real, named answer rather than a diff scan; port
+what genuinely belongs in the kernel, with real tests, not argv-shape
+assertions; reconcile pure-TypeScript changes; uplift tests/docs/CI; verify
+migration continuity for both the outgoing and incoming pinned version;
+re-validate against the live tag immediately before promoting; only then
+move the pin, paired with an ADR as this document already requires. Each
+promotion gets its own dated instance document (`docs/promotion-vX.Y.Z.md`)
+applying that playbook; the playbook itself stays version-agnostic across
+promotions.
+
+**Why an annotation and not a new law**: checked directly against this
+document's own bar — "must not be restating something LAW-01 through LAW-09
+already cover." LAW-09 already says a routine release shouldn't force Go
+changes and that upstream should be pinned deliberately; the playbook is the
+concrete *how*, not a new principle. This is the same reasoning "Why there
+is no tenth law" (below) already applied once; nothing about the v2.4.0
+promotion surfaced a principle distinct from what LAW-09 already states, so
+the same conclusion applies again. A future promotion is free to revisit
+this if it genuinely finds something new — the bar stays the same each time,
+not just this once.
+
+**What the v2.4.0 promotion found, as a concrete illustration of why this
+procedure matters**: skimming commit messages alone missed a coordinated
+four-PR architectural change (opened together, held open ~8 days, merged
+together in a 45-minute window hours before the release tag) — only visible
+by checking PR timestamps via the GitHub API, not commit dates. Scoping the
+diff sweep to the directories that seemed obviously relevant missed a
+credential-provider restructuring (a file moving from a trunk path to a
+skill-payload path) entirely, because it fell outside that scope. Both are
+now Step 0 and Step 2 items in the playbook specifically because they were
+missed once already.
+
 ## Why there is no tenth law
 
 A second-opinion review of the project (2026-08-30) proposed adding a new "LAW-10 — security authority must be exclusive." The explicit decision, made and recorded at the time, was not to add it: the substance is already fully covered by LAW-07 and OBJ-04, sharpened above with the concrete evidence Phase 1 produced. Adding a numbered law for the same idea would duplicate the constitution rather than clarify it. A later, unverified "upstream monitoring" update referenced "LAW-10" as though it had been adopted — it had not, and this document is the durable record that it was considered and declined in favor of annotating the existing laws.
