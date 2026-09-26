@@ -605,11 +605,11 @@ what "passes"/"green" mean in every row below.
 | # | Task | Status |
 |---|---|---|
 | F1 | New ADR(s) recording the architectural decisions: (a) mount/network model in the Go kernel, including A2's mixed-version compatibility matrix and rollout answers; (b) gateway-provider trust-boundary scope (what's kernel-enforced vs. accepted TS-side, referencing every Workstream C acceptance record); (c) OneCLI trunk-vs-skill placement decision. One ADR or several, whichever keeps each decision reviewable independently — decide when the decisions are actually made, not now | **(b) and (c) done — see [ADR-030](../go-host/docs/ADR-030-gateway-adoption-and-multi-host-coordination.md).** **New, added 2026-09-26**: [ADR-032](../go-host/docs/ADR-032-provider-contract-rewrites.md) records C14 (host-side provider-host-contract mount-composition rewrite, done) and C15 (container-side provider-runtime-contract port, mechanism implemented and committed) — a decision this list didn't originally name, surfaced by Workstream B's deep-scope pass after F1 was first written. (a) mount/network model in the Go kernel — still not written; Workstream A's own ADRs (referenced from its own rows) may already cover this, not independently confirmed here |
-| F2 | `go-host/docs/version-compatibility.md` §1's consumed-contracts table updated to reflect the new v2.4.0-based contracts | Not started |
-| F3 | `go-host/docs/compatibility-matrix.md` Stable/Preview/Unsupported ratings re-issued against the new baseline — any row covered by an open (non-expired) Workstream C acceptance record stays below Stable unless that record explicitly says otherwise | Not started |
-| F4 | `docs/traceability.md` updated with this promotion's ADR(s) and any new/changed law-breach entries | Not started |
-| F5 | `CLAUDE.md`'s "Secrets / Credentials / OneCLI" section updated if Workstream C/D's OneCLI decision changes how it's documented | Not started |
-| F6 | This document's own findings folded into `go-host/docs/ADR-017`-style closure, or superseded by a new numbered ADR referencing it | Not started |
+| F2 | `go-host/docs/version-compatibility.md` §1's consumed-contracts table updated to reflect the new v2.4.0-based contracts | **Done (2026-09-26)**, `feat/gateway-provider-seam` @ `710603e6`. Updated the mount/session-admission-shape row (gateway-trust `MountClass`, `Policy.GatewayTrustRoot`, `SessionSpec.networkAccess`) and the Docker-chokepoint row (`Executor.Wake`/`Kill`'s multi-container/network-isolation extension, plus its one named scope gap — auxiliary health-checking in `status()`, not ported). Added a staging note distinguishing "this table describes the code on this branch" from "the pin has moved to v2.4.0" (that's §3's "Promote" step / Workstream G4, a separate, later action) so the table isn't misread as claiming the pin already moved |
+| F3 | `go-host/docs/compatibility-matrix.md` Stable/Preview/Unsupported ratings re-issued against the new baseline — any row covered by an open (non-expired) Workstream C acceptance record stays below Stable unless that record explicitly says otherwise | **Done (2026-09-26)**, `feat/gateway-provider-seam` @ `710603e6`. Added two new Stable rows (gateway-trust mount admission — A1/A6's table-driven suite; multi-container wake/kill with real network isolation — A3/A5's live-Docker evidence, not just a fake-CLI unit suite) and one Unsupported row (the auxiliary health-check gap). No row held below its earned rating by an acceptance record — Workstream C5 produced zero open ones, so every rating reflects actual verification status |
+| F4 | `docs/traceability.md` updated with this promotion's ADR(s) and any new/changed law-breach entries | **Done (2026-09-26)**, `docs/v2.4.0-promotion-plan` @ `705d054d`. Added ADR-029 through ADR-032 to the ADR index (029 superseded same-day by 030; 030/032 as compliant LAW-07/08/LAW-06 citations; 031 as N/A, a feature-adoption decision). Added ADR-030 to LAW-07/LAW-08's Known-exceptions columns (the same trust-boundary-scoping role ADR-016 already plays for LAW-07). Added three new Boundary-verification rows for C6's three real findings, matching the existing live/negative-control-verified format exactly. Updated the "Channel → kernel wake" seam row for E3's new assertion. Added a Known-gaps bullet naming the two deliberately-deferred items (gateway-session-lifecycle wrapping, poll-loop.ts's reply-routing rewrite) so they're visible outside this document too |
+| F5 | `CLAUDE.md`'s "Secrets / Credentials / OneCLI" section updated if Workstream C/D's OneCLI decision changes how it's documented | **Done (2026-09-26)**, `feat/gateway-provider-seam` @ `710603e6`. It did change: C7 generalized `src/modules/approvals/onecli-approvals.ts` (which CLAUDE.md still named, and which no longer exists) into the provider-generic `src/gateway-approval-coordinator.ts`, with `gateway-providers/onecli.ts`'s `approvals.subscribe` now the thin protocol-specific adapter into it. Updated both the prose (which file owns approver resolution/delivery/expiry/sweep now, and why — so a future provider like Iron Proxy doesn't reimplement it) and the Key Files table entry. OneCLI's own approval UX is unchanged (C7 extracted behavior-for-behavior) |
+| F6 | This document's own findings folded into `go-host/docs/ADR-017`-style closure, or superseded by a new numbered ADR referencing it | **Correctly blocked, not silently unstarted (2026-09-26).** `ADR-017` was the closing review for the *v2.3.0* pin promotion — this row's job is the v2.4.0 equivalent, a single dated review ADR that supersedes/extends it once the pin actually moves. Writing that now would be premature and likely wrong: the pin has not moved (Workstream G4, gated on G3, gated on Workstream H's migration-continuity work, none of which is done), and an "ADR-017-style closure" written before the thing it closes is finished would either have to be revised again at G4 or would misrepresent the promotion as complete. The individual decision ADRs this promotion already produced (ADR-029 through ADR-032) are NOT a substitute for this row — they're per-decision records, the same granularity as ADR-004/006/013 always were; F6 is specifically the ADR-017-shaped *dated review* one level up. Sequenced immediately after G4 lands, not before |
 
 ### Workstream G — CI / PR-check uplift (required, not optional)
 
@@ -1449,3 +1449,27 @@ the final pin-move PR.
   still passing. No new test-writing needed for E4 — closed by
   verification, not implementation. Workstream E (Testing) is now
   entirely done.
+- 2026-09-26 — **Workstream F (Documentation) closed: F2-F5 done, F6
+  correctly blocked, not a gap.** F2/F3: `version-compatibility.md`/
+  `compatibility-matrix.md` updated with Workstream A's gateway-trust
+  mount class, `networkAccess`, and multi-container Wake/Kill (new Stable
+  rows backed by A5's real live-Docker evidence, not just unit tests; one
+  new Unsupported row for the one named scope gap — auxiliary health-
+  checking). Both docs get a staging note: they now describe code ahead
+  of the pin, which is a deliberate, separate, later action (Workstream
+  G4), not something these architecture docs should wait on or that
+  should be misread as the pin having already moved. F4:
+  `traceability.md` gets ADR-029 through -032 indexed, three new
+  Boundary-verification rows for C6's real trust-boundary findings, and a
+  Known-gaps bullet keeping the two deliberately-deferred items
+  (gateway-session-lifecycle wrapping, `poll-loop.ts`'s reply-routing
+  rewrite) visible outside this one document. F5: found and fixed a real
+  staleness bug while checking — CLAUDE.md still named
+  `src/modules/approvals/onecli-approvals.ts`, a file C7 deleted when it
+  generalized that flow into `src/gateway-approval-coordinator.ts`;
+  updated both the prose and the Key Files table. F6 (the ADR-017-style
+  *closing* review for this whole promotion) stays explicitly blocked on
+  the pin actually moving (Workstream G4, gated on G3, gated on H) —
+  writing that closure now would either misrepresent the promotion as
+  finished or need rewriting at G4; the per-decision ADRs (029-032)
+  already exist and are not a substitute for it.
