@@ -17,7 +17,7 @@ import { log } from '../log.js';
 import {
   getGatewayProviderFactory,
   listGatewayProviderKinds,
-  type GatewayProvider,
+  type GatewayProviderDefinition,
   type GatewayProviderKind,
 } from './gateway-provider-registry.js';
 // Side-effect import: the barrel overlays append their registration to.
@@ -33,9 +33,9 @@ export function configuredGatewayProviderKind(env: NodeJS.ProcessEnv = process.e
   return configured.toLowerCase() || DEFAULT_GATEWAY_PROVIDER_KIND;
 }
 
-let installed: GatewayProvider | null = null;
+let installed: GatewayProviderDefinition | null = null;
 
-export function getGatewayProvider(): GatewayProvider {
+export function getGatewayProvider(): GatewayProviderDefinition {
   if (!installed) {
     const kind = configuredGatewayProviderKind();
     const factory = getGatewayProviderFactory(kind);
@@ -53,7 +53,7 @@ export function getGatewayProvider(): GatewayProvider {
 }
 
 /** Test seam: drop the memoized provider so a suite can inject another one. */
-export function resetGatewayProvider(next: GatewayProvider | null = null): void {
+export function resetGatewayProvider(next: GatewayProviderDefinition | null = null): void {
   installed = next;
 }
 

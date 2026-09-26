@@ -47,7 +47,23 @@ beforeEach(() => {
     EGRESS_NETWORK: 'unused-in-this-test',
     ensureEgressNetwork: vi.fn().mockReturnValue(false),
   }));
+  // kernel-supervisor/index.ts now imports getGatewayProvider (ADR-033) to
+  // resolve defaultDockerNetworkDeps().resolveEgressGatewayAccess. Mocked
+  // here, not left to resolve the real barrel, for the same reason
+  // config.js/egress-lockdown.js are: the real gateway-providers/index.js ->
+  // installed.js -> onecli.ts chain constructs a real OneCLI SDK client at
+  // module scope from ONECLI_URL/ONECLI_API_KEY, neither of which this
+  // file's own config.js mock provides (this file is about kernel-process
+  // lifecycle, not gateway wiring) — importing it for real here throws.
+  vi.doMock('../../gateway-providers/index.js', () => ({
+    getGatewayProvider: () => ({ kind: 'test-gateway', egressGateway: () => MOCK_EGRESS_GATEWAY_ACCESS }),
+  }));
 });
+
+const MOCK_EGRESS_GATEWAY_ACCESS = {
+  endpoint: 'host.docker.internal',
+  target: { kind: 'runtime' as const, identity: 'mock-default-gateway' },
+};
 
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -301,12 +317,23 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
     delete process.env.NANOCLAW_KERNEL_DOCKER_NETWORK;
   });
 
+  // A stand-in NetworkAccessIntent — the shape GatewayProviderDefinition
+  // .egressGateway() returns (ADR-033), not tied to any real gateway.
+  const TEST_ACCESS = { endpoint: 'host.docker.internal', target: { kind: 'runtime' as const, identity: 'test-gw' } };
+  const resolveEgressGatewayAccess = () => TEST_ACCESS;
+
   it('passes -docker-network for the egress network when lockdown is on, and establishes it', async () => {
     const ensureEgressNetwork = vi.fn().mockReturnValue(true);
     const mod = await import('./index.js');
-    const args = mod.dockerNetworkArgs({ egressLockdown: true, egressNetwork: 'nanoclaw-egress', ensureEgressNetwork });
+    const args = mod.dockerNetworkArgs({
+      egressLockdown: true,
+      egressNetwork: 'nanoclaw-egress',
+      resolveEgressGatewayAccess,
+      ensureEgressNetwork,
+    });
     expect(args).toEqual(['-docker-network', 'nanoclaw-egress']);
     expect(ensureEgressNetwork).toHaveBeenCalledTimes(1);
+    expect(ensureEgressNetwork).toHaveBeenCalledWith(TEST_ACCESS);
   });
 
   it('propagates EgressLockdownError (or any establish failure) rather than starting the kernel on open egress', async () => {
@@ -316,8 +343,28 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
     });
     const mod = await import('./index.js');
     expect(() =>
-      mod.dockerNetworkArgs({ egressLockdown: true, egressNetwork: 'nanoclaw-egress', ensureEgressNetwork }),
+      mod.dockerNetworkArgs({
+        egressLockdown: true,
+        egressNetwork: 'nanoclaw-egress',
+        resolveEgressGatewayAccess,
+        ensureEgressNetwork,
+      }),
     ).toThrow('gateway container is not running');
+  });
+
+  it('refuses to start when lockdown is on but the configured gateway declares no egress attachment', async () => {
+    const mod = await import('./index.js');
+    const ensureEgressNetwork = vi.fn();
+    expect(() =>
+      mod.dockerNetworkArgs({
+        egressLockdown: true,
+        egressNetwork: 'nanoclaw-egress',
+        resolveEgressGatewayAccess: () => undefined,
+        ensureEgressNetwork,
+      }),
+    ).toThrow(/declares no egress-lockdown attachment/);
+    // Fail-fast: never even asks ensureEgressNetwork to attempt anything.
+    expect(ensureEgressNetwork).not.toHaveBeenCalled();
   });
 
   it('spawnKernel reports failure (not a crash) when buildServeArgs throws', async () => {
@@ -326,6 +373,7 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
     const deps = {
       egressLockdown: true,
       egressNetwork: 'nanoclaw-egress',
+      resolveEgressGatewayAccess,
       ensureEgressNetwork: vi.fn().mockImplementation(() => {
         throw new Error('gateway unreachable');
       }),
@@ -355,6 +403,7 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
     const deps = {
       egressLockdown: true,
       egressNetwork: 'nanoclaw-egress',
+      resolveEgressGatewayAccess,
       ensureEgressNetwork: vi.fn().mockImplementation(() => {
         throw new Error('gateway not up yet');
       }),
@@ -375,6 +424,7 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
       mod.dockerNetworkArgs({
         egressLockdown: true,
         egressNetwork: 'nanoclaw-egress',
+        resolveEgressGatewayAccess,
         ensureEgressNetwork: vi.fn().mockReturnValue(true),
       }),
     ).toThrow(/conflicting network/);
@@ -387,6 +437,7 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
     const args = mod.dockerNetworkArgs({
       egressLockdown: false,
       egressNetwork: 'nanoclaw-egress',
+      resolveEgressGatewayAccess,
       ensureEgressNetwork,
     });
     expect(args).toEqual(['-docker-network', 'custom-net']);
@@ -398,6 +449,7 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
     const args = mod.dockerNetworkArgs({
       egressLockdown: false,
       egressNetwork: 'nanoclaw-egress',
+      resolveEgressGatewayAccess,
       ensureEgressNetwork: vi.fn(),
     });
     expect(args).toEqual([]);
@@ -408,6 +460,7 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
     const args = mod.buildServeArgs({
       egressLockdown: true,
       egressNetwork: 'nanoclaw-egress',
+      resolveEgressGatewayAccess,
       ensureEgressNetwork: vi.fn().mockReturnValue(true),
     });
     expect(args).toEqual(expect.arrayContaining(['-docker-network', 'nanoclaw-egress']));
@@ -431,5 +484,10 @@ describe('kernel-supervisor: egress-lockdown network wiring', () => {
     expect(deps.egressLockdown).toBe(false); // the shared beforeEach's own default
     expect(deps.egressNetwork).toBe('unused-in-this-test');
     expect(deps.ensureEgressNetwork).toBe(egressLockdown.ensureEgressNetwork);
+    // resolveEgressGatewayAccess is a new closure, not a re-export, so this
+    // checks it behaves like the real wiring (asks getGatewayProvider()) by
+    // reading back the shared gateway-providers/index.js mock's own value,
+    // rather than asserting reference identity.
+    expect(deps.resolveEgressGatewayAccess()).toEqual(MOCK_EGRESS_GATEWAY_ACCESS);
   });
 });

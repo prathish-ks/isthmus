@@ -1,34 +1,42 @@
 /**
- * OneCLI manual-approval handler — coverage of the full request lifecycle.
+ * Gateway approval coordinator — coverage of the full request lifecycle,
+ * driven through the installed OneCLI provider (the only one registered in
+ * this tree today).
+ *
+ * v2.4.0 promotion, Workstream C7: ported from
+ * `modules/approvals/onecli-approvals.coverage.test.ts` behavior-for-
+ * behavior — same scenarios, same timing, same fail-closed assertions.
+ * Renamed to match the generic surface: `ga-` short ids (was `oa-`),
+ * `GATEWAY_APPROVAL_ACTION` (was `ONECLI_ACTION`), generic log-message text.
  *
  * The @onecli-sh/sdk client is replaced with a stub that captures the
- * `configureManualApproval` callback so tests can drive it exactly the way the
- * gateway would: fire a request, watch the card go out, then resolve it by an
- * admin click or let the expiry timer fire. Real central DB, fake delivery
- * adapter (records deliveries and edits).
+ * `configureManualApproval` callback so tests can drive it exactly the way
+ * the gateway would: fire a request, watch the card go out, then resolve it
+ * by an admin click or let the expiry timer fire. Real central DB, fake
+ * delivery adapter (records deliveries and edits).
  */
 import * as fs from 'fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ApprovalRequest } from '@onecli-sh/sdk';
 
-import { getDb } from '../../db/connection.js';
-import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
-import { createAgentGroup } from '../../db/agent-groups.js';
-import { createMessagingGroup } from '../../db/messaging-groups.js';
+import { getDb } from './db/connection.js';
+import { initTestDb, closeDb, runMigrations } from './db/index.js';
+import { createAgentGroup } from './db/agent-groups.js';
+import { createMessagingGroup } from './db/messaging-groups.js';
 import {
   createPendingApproval,
   deletePendingApproval,
   getPendingApproval,
   getPendingApprovalsByAction,
   transitionPendingApprovalStatus,
-} from '../../db/sessions.js';
-import type { ChannelDeliveryAdapter } from '../../delivery.js';
-import { log } from '../../log.js';
-import type { PendingApproval } from '../../types.js';
-import { upsertUser } from '../permissions/db/users.js';
-import { upsertUserDm } from '../permissions/db/user-dms.js';
-import { grantRole } from '../permissions/db/user-roles.js';
+} from './db/sessions.js';
+import type { ChannelDeliveryAdapter } from './delivery.js';
+import { log } from './log.js';
+import type { PendingApproval } from './types.js';
+import { upsertUser } from './modules/permissions/db/users.js';
+import { upsertUserDm } from './modules/permissions/db/user-dms.js';
+import { grantRole } from './modules/permissions/db/user-roles.js';
 
 const sdk = vi.hoisted(() => ({
   configure: vi.fn(),
@@ -46,15 +54,20 @@ vi.mock('@onecli-sh/sdk', () => ({
   },
 }));
 
-vi.mock('../../config.js', async () => {
-  const actual = await vi.importActual('../../config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-onecli-approvals-cov' };
+vi.mock('./config.js', async () => {
+  const actual = await vi.importActual('./config.js');
+  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-gateway-approvals-cov' };
 });
 
-const { ONECLI_ACTION, editCardExpired, resolveOneCLIApproval, startOneCLIApprovalHandler, stopOneCLIApprovalHandler } =
-  await import('./onecli-approvals.js');
+const {
+  GATEWAY_APPROVAL_ACTION,
+  editCardExpired,
+  resolveGatewayApproval,
+  startGatewayApprovalCoordinator,
+  stopGatewayApprovalCoordinator,
+} = await import('./gateway-approval-coordinator.js');
 
-const TEST_DIR = '/tmp/nanoclaw-test-onecli-approvals-cov';
+const TEST_DIR = '/tmp/nanoclaw-test-gateway-approvals-cov';
 const DM_CHANNEL = 'slack';
 const DM_PLATFORM = 'D-admin-1';
 const DM_INSTANCE = 'slack-b';
@@ -136,7 +149,7 @@ function fire(request: ApprovalRequest): Promise<'approve' | 'deny'> {
 async function awaitCard(): Promise<PendingApproval> {
   let row: PendingApproval | undefined;
   await vi.waitFor(async () => {
-    const rows = await getPendingApprovalsByAction(ONECLI_ACTION);
+    const rows = await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION);
     expect(rows).toHaveLength(1);
     row = rows[0];
   });
@@ -150,7 +163,7 @@ async function awaitCard(): Promise<PendingApproval> {
 async function awaitCardFake(): Promise<PendingApproval> {
   for (let i = 0; i < 50; i++) {
     await vi.advanceTimersByTimeAsync(0);
-    const rows = await getPendingApprovalsByAction(ONECLI_ACTION);
+    const rows = await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION);
     if (rows.length === 1) return rows[0];
   }
   throw new Error('card row never appeared');
@@ -175,7 +188,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  stopOneCLIApprovalHandler();
+  stopGatewayApprovalCoordinator();
   vi.useRealTimers();
   await closeDb();
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true, force: true });
@@ -183,29 +196,29 @@ afterEach(async () => {
 
 describe('start / stop lifecycle', () => {
   it('configures the SDK once and ignores a second start while running', () => {
-    startOneCLIApprovalHandler(fakeAdapter);
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     expect(sdk.configure).toHaveBeenCalledTimes(1);
   });
 
   it('stop releases the SDK handle so a later start configures again', () => {
-    startOneCLIApprovalHandler(fakeAdapter);
-    stopOneCLIApprovalHandler();
+    startGatewayApprovalCoordinator(fakeAdapter);
+    stopGatewayApprovalCoordinator();
     expect(sdk.stop).toHaveBeenCalledTimes(1);
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     expect(sdk.configure).toHaveBeenCalledTimes(2);
   });
 
   it('stop without a running handler is a no-op', () => {
-    expect(() => stopOneCLIApprovalHandler()).not.toThrow();
+    expect(() => stopGatewayApprovalCoordinator()).not.toThrow();
     expect(sdk.stop).not.toHaveBeenCalled();
   });
 
   it('sweeps rows left over from a previous process: card edited as host-restarted, row dropped', async () => {
     await createPendingApproval({
-      approval_id: 'oa-stale001',
+      approval_id: 'ga-stale001',
       request_id: 'req-old',
-      action: ONECLI_ACTION,
+      action: GATEWAY_APPROVAL_ACTION,
       payload: '{}',
       created_at: now(),
       channel_type: DM_CHANNEL,
@@ -217,10 +230,10 @@ describe('start / stop lifecycle', () => {
       options_json: '[]',
     });
 
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
 
     await vi.waitFor(async () => {
-      expect(await getPendingApproval('oa-stale001')).toBeUndefined();
+      expect(await getPendingApproval('ga-stale001')).toBeUndefined();
     });
     expect(delivered).toHaveLength(1);
     expect(delivered[0].content.operation).toBe('edit');
@@ -233,9 +246,9 @@ describe('start / stop lifecycle', () => {
   it('logs when the startup sweep itself fails instead of throwing', async () => {
     const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
     await closeDb(); // getDb() now throws inside the sweep
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     await vi.waitFor(() => {
-      expect(errorSpy).toHaveBeenCalledWith('OneCLI approval sweep failed', expect.anything());
+      expect(errorSpy).toHaveBeenCalledWith('Gateway approval sweep failed', expect.anything());
     });
     errorSpy.mockRestore();
   });
@@ -243,12 +256,12 @@ describe('start / stop lifecycle', () => {
   // Regression test for a fixed bug: stopping the handler while a request is
   // still in flight (awaiting an admin click or its expiry timer) used to
   // clear the timer and the pending map without ever resolving the promise
-  // handleRequest returned to the gateway callback — leaving that callback
-  // (and the gateway's HTTP connection behind it) hanging forever instead of
-  // just until the request's own timeout.
+  // decide() returned to the provider callback — leaving that callback (and
+  // the gateway's connection behind it) hanging forever instead of just
+  // until the request's own timeout.
   it('stop resolves any in-flight request promise instead of leaving it hanging forever', async () => {
     await seedApprover();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const decision = fire(makeRequest());
     await awaitCard();
 
@@ -258,7 +271,7 @@ describe('start / stop lifecycle', () => {
     });
     expect(settled).toBe(false);
 
-    stopOneCLIApprovalHandler();
+    stopGatewayApprovalCoordinator();
 
     await expect(decision).resolves.toBe('deny');
     expect(settled).toBe(true);
@@ -267,18 +280,18 @@ describe('start / stop lifecycle', () => {
 
 describe('gateway callback → approval card', () => {
   it('denies when the handler has been stopped (no adapter bound)', async () => {
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const cb = sdk.callback!;
-    stopOneCLIApprovalHandler();
+    stopGatewayApprovalCoordinator();
     expect(await cb(makeRequest())).toBe('deny');
     expect(delivered).toHaveLength(0);
   });
 
   it('denies when nobody is eligible to approve', async () => {
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     expect(await fire(makeRequest())).toBe('deny');
     expect(delivered).toHaveLength(0);
-    expect(await getPendingApprovalsByAction(ONECLI_ACTION)).toHaveLength(0);
+    expect(await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).toHaveLength(0);
   });
 
   it('denies when no approver has a reachable DM', async () => {
@@ -291,7 +304,7 @@ describe('gateway callback → approval card', () => {
       granted_by: null,
       granted_at: now(),
     });
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     expect(await fire(makeRequest())).toBe('deny');
     expect(delivered).toHaveLength(0);
   });
@@ -301,24 +314,22 @@ describe('gateway callback → approval card', () => {
     deliverImpl = async () => {
       throw new Error('platform down');
     };
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     expect(await fire(makeRequest())).toBe('deny');
     expect(delivered).toHaveLength(1);
-    expect(await getPendingApprovalsByAction(ONECLI_ACTION)).toHaveLength(0);
+    expect(await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).toHaveLength(0);
   });
 
   // Regression test for a fixed bug: the card used to be delivered BEFORE
   // createPendingApproval wrote its row, so a DB failure there left a live
   // card with Approve/Reject buttons that couldn't resolve anything. The row
   // is now written first — a DB failure specifically at that insert must mean
-  // no card ever goes out. Only the pending_approvals table is dropped so
-  // pickApprover/pickApprovalDelivery (which query other tables) still
-  // succeed and reach createPendingApproval, isolating the failure to it.
+  // no card ever goes out.
   it('never delivers the card when persisting the pending-approval row fails', async () => {
     await seedApprover();
     const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
     await getDb().run('DROP TABLE pending_approvals');
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     expect(await fire(makeRequest())).toBe('deny');
     expect(delivered).toHaveLength(0);
     errorSpy.mockRestore();
@@ -326,7 +337,7 @@ describe('gateway callback → approval card', () => {
 
   it('denies (fail closed) when the handler throws on a malformed request', async () => {
     await seedApprover();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const broken = makeRequest({ agent: undefined as unknown as ApprovalRequest['agent'] });
     expect(await fire(broken)).toBe('deny');
     expect(delivered).toHaveLength(0);
@@ -334,7 +345,7 @@ describe('gateway callback → approval card', () => {
 
   it('delivers the card to the approver DM on its owning instance and persists the row', async () => {
     await seedApprover();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const decision = fire(makeRequest({ bodyPreview: null }));
     const row = await awaitCard();
 
@@ -346,7 +357,7 @@ describe('gateway callback → approval card', () => {
     expect(card.kind).toBe('chat-sdk');
     expect(card.content.type).toBe('ask_question');
     expect(card.content.questionId).toBe(row.approval_id);
-    expect(row.approval_id).toMatch(/^oa-[a-z0-9]{1,8}$/);
+    expect(row.approval_id).toMatch(/^ga-[a-z0-9]{1,8}$/);
     expect(card.content.title).toBe('Credentials Request');
     expect(card.content.question).toBe('*Agent:* Group One\n_POST api.example.com/v1/send_');
 
@@ -356,31 +367,32 @@ describe('gateway callback → approval card', () => {
     expect(row.platform_message_id).toBe('pm-1');
     expect(row.status).toBe('pending');
     expect(JSON.parse(row.payload)).toMatchObject({
-      oneCliRequestId: 'req-uuid-1',
+      gatewayKind: 'onecli',
+      nativeRequestId: 'req-uuid-1',
       method: 'POST',
       host: 'api.example.com',
       path: '/v1/send',
       approver: 'slack:admin-1',
     });
 
-    expect(await resolveOneCLIApproval(row.approval_id, 'approve')).toBe(true);
+    expect(await resolveGatewayApproval(row.approval_id, 'approve')).toBe(true);
     expect(await decision).toBe('approve');
     expect(await getPendingApproval(row.approval_id)).toBeUndefined();
   });
 
   it('a Reject click resolves the gateway callback with deny', async () => {
     await seedApprover();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const decision = fire(makeRequest());
     const row = await awaitCard();
-    expect(await resolveOneCLIApproval(row.approval_id, 'reject')).toBe(true);
+    expect(await resolveGatewayApproval(row.approval_id, 'reject')).toBe(true);
     expect(await decision).toBe('deny');
     expect(await getPendingApproval(row.approval_id)).toBeUndefined();
   });
 
   it('falls back to the SDK agent name and a null group when the request carries no external id', async () => {
     await seedApprover();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     void fire(makeRequest({ agent: { id: 'x', name: 'SDK Agent Name', externalId: null } }));
     const row = await awaitCard();
     expect(row.agent_group_id).toBeNull();
@@ -390,22 +402,22 @@ describe('gateway callback → approval card', () => {
   it('a null platform message id is persisted as NULL', async () => {
     await seedApprover();
     deliverImpl = async () => undefined;
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     void fire(makeRequest());
     const row = await awaitCard();
     expect(row.platform_message_id).toBeNull();
   });
 });
 
-describe('resolveOneCLIApproval', () => {
+describe('resolveGatewayApproval', () => {
   it('returns false for an id with no in-flight promise', async () => {
-    startOneCLIApprovalHandler(fakeAdapter);
-    expect(await resolveOneCLIApproval('oa-nope', 'approve')).toBe(false);
+    startGatewayApprovalCoordinator(fakeAdapter);
+    expect(await resolveGatewayApproval('ga-nope', 'approve')).toBe(false);
   });
 
   it('returns false when the row is no longer pending, leaving the promise in flight', async () => {
     await seedApprover();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     let settled = false;
     const decision = fire(makeRequest());
     void decision.then(() => {
@@ -414,7 +426,7 @@ describe('resolveOneCLIApproval', () => {
     const row = await awaitCard();
     expect(await transitionPendingApprovalStatus(row.approval_id, 'pending', 'expired')).toBe(true);
 
-    expect(await resolveOneCLIApproval(row.approval_id, 'approve')).toBe(false);
+    expect(await resolveGatewayApproval(row.approval_id, 'approve')).toBe(false);
     await new Promise((r) => setTimeout(r, 5));
     expect(settled).toBe(false);
     expect((await getPendingApproval(row.approval_id))?.status).toBe('expired');
@@ -425,7 +437,7 @@ describe('expiry timer', () => {
   it('fires just before the gateway TTL: card edited as timed out, row dropped, callback denied', async () => {
     await seedApprover();
     vi.useFakeTimers();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const decision = fire(makeRequest({ expiresAt: new Date(Date.now() + 3_000).toISOString() }));
     await vi.advanceTimersByTimeAsync(0);
     const row = await awaitCardFake();
@@ -456,7 +468,7 @@ describe('expiry timer', () => {
   it('clamps an already-elapsed TTL to a 1s timer', async () => {
     await seedApprover();
     vi.useFakeTimers();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     let settled = false;
     const decision = fire(makeRequest({ expiresAt: new Date(Date.now() - 60_000).toISOString() }));
     void decision.then(() => {
@@ -474,7 +486,7 @@ describe('expiry timer', () => {
   it('skips the card edit when the row vanished before the timer fired', async () => {
     await seedApprover();
     vi.useFakeTimers();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const decision = fire(makeRequest({ expiresAt: new Date(Date.now() + 3_000).toISOString() }));
     await vi.advanceTimersByTimeAsync(0);
     const row = await awaitCardFake();
@@ -489,7 +501,7 @@ describe('expiry timer', () => {
   it('skips the card edit when the row was already claimed by another transition', async () => {
     await seedApprover();
     vi.useFakeTimers();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const decision = fire(makeRequest({ expiresAt: new Date(Date.now() + 3_000).toISOString() }));
     await vi.advanceTimersByTimeAsync(0);
     const row = await awaitCardFake();
@@ -506,7 +518,7 @@ describe('expiry timer', () => {
     await seedApprover();
     const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const decision = fire(makeRequest({ expiresAt: new Date(Date.now() + 3_000).toISOString() }));
     await vi.advanceTimersByTimeAsync(0);
     const row = await awaitCardFake();
@@ -520,7 +532,7 @@ describe('expiry timer', () => {
       expect(await getPendingApproval(row.approval_id)).toBeUndefined();
     });
     expect(errorSpy).toHaveBeenCalledWith(
-      'Failed to edit expired OneCLI approval card',
+      'Failed to edit expired gateway approval card',
       expect.objectContaining({ approvalId: row.approval_id }),
     );
     errorSpy.mockRestore();
@@ -530,7 +542,7 @@ describe('expiry timer', () => {
     await seedApprover();
     const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     const decision = fire(makeRequest({ expiresAt: new Date(Date.now() + 3_000).toISOString() }));
     await vi.advanceTimersByTimeAsync(0);
     const row = await awaitCardFake();
@@ -540,7 +552,7 @@ describe('expiry timer', () => {
     expect(await decision).toBe('deny');
     await vi.advanceTimersByTimeAsync(10);
     expect(errorSpy).toHaveBeenCalledWith(
-      'Failed to mark OneCLI approval expired',
+      'Failed to mark gateway approval expired',
       expect.objectContaining({ approvalId: row.approval_id }),
     );
     expect(delivered).toHaveLength(1);
@@ -550,11 +562,11 @@ describe('expiry timer', () => {
   it('stop clears in-flight timers so no expiry edit is ever sent', async () => {
     await seedApprover();
     vi.useFakeTimers();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     void fire(makeRequest({ expiresAt: new Date(Date.now() + 3_000).toISOString() }));
     await vi.advanceTimersByTimeAsync(0);
     await awaitCardFake();
-    stopOneCLIApprovalHandler();
+    stopGatewayApprovalCoordinator();
     await vi.advanceTimersByTimeAsync(5_000);
     expect(delivered).toHaveLength(1);
   });
@@ -563,10 +575,10 @@ describe('expiry timer', () => {
 describe('editCardExpired', () => {
   function row(overrides: Partial<PendingApproval> = {}): PendingApproval {
     return {
-      approval_id: 'oa-edit0001',
+      approval_id: 'ga-edit0001',
       session_id: null,
       request_id: 'req-1',
-      action: ONECLI_ACTION,
+      action: GATEWAY_APPROVAL_ACTION,
       payload: '{}',
       created_at: now(),
       agent_group_id: null,
@@ -590,7 +602,7 @@ describe('editCardExpired', () => {
   });
 
   it('does nothing when the row has no platform message id or address', async () => {
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     await editCardExpired(row({ platform_message_id: null }), 'no response');
     await editCardExpired(row({ channel_type: null }), 'no response');
     await editCardExpired(row({ platform_id: null }), 'no response');
@@ -598,7 +610,7 @@ describe('editCardExpired', () => {
   });
 
   it('joins title, question and resolution into the plain-text fallback, skipping empty parts', async () => {
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     await editCardExpired(row({ question: '' }), 'host restarted');
     expect(delivered).toHaveLength(1);
     expect(delivered[0].content.text).toBe('Credentials Request\n\n⏱️ Timed out — host restarted before resolution');
@@ -609,7 +621,7 @@ describe('editCardExpired', () => {
 describe('card question rendering', () => {
   async function questionFor(request: ApprovalRequest): Promise<string> {
     await seedApprover();
-    startOneCLIApprovalHandler(fakeAdapter);
+    startGatewayApprovalCoordinator(fakeAdapter);
     void fire(request);
     await awaitCard();
     return String(delivered[0].content.question);

@@ -24,9 +24,11 @@
  *
  * What is real here: the CLI adapter on its real Unix socket, the router,
  * session resolution, the real `inbound.db`/`outbound.db` files, the real
- * `wakeContainer`/`spawnContainer` composition path, the real
- * `DockerSessionDriver` including `validateSpec`, the real `KernelClient`,
- * and a real Unix-socket NDJSON round trip.
+ * `wakeContainer`/`spawnContainer` composition path (including the
+ * `networkAccess` field Workstream B's v2.4.0 promotion added to
+ * `SessionSpec`/`WireSession`), the real `DockerSessionDriver` including
+ * `validateSpec`, the real `KernelClient`, and a real Unix-socket NDJSON
+ * round trip.
  *
  * What is deliberately NOT real, and why:
  *   - the kernel itself is a fake NDJSON server (the same shape
@@ -249,6 +251,19 @@ describe('a line typed at the CLI socket reaches the kernel', () => {
       expect(containers[0].role).toBe('agent');
       expect(containers[0].image).toBeTruthy();
       expect(envelope.payload.runAs?.uid).not.toBe(0);
+
+      // 4. Workstream B's new SessionSpec.networkAccess field (the wire
+      //    surface gateway-trust/multi-container sessions ride on) makes it
+      //    across the real composeSessionSpec -> toWireSession -> real
+      //    socket path unmangled. seam-real-setup's no-op gateway always
+      //    contributes a `{endpoint:'', target:{kind:'host'}}` intent, so
+      //    this asserts the exact shape crossing the wire today for the
+      //    ordinary, no-gateway case — the one this whole seam already
+      //    exercises on every PR. A5/the live-Docker leg is what proves a
+      //    real `kind: 'runtime'`/`'session-container'` intent is honoured
+      //    by the kernel; this is the narrower, always-on claim that the
+      //    field itself is not silently dropped or reshaped en route.
+      expect(envelope.payload.session?.networkAccess).toEqual({ endpoint: '', target: { kind: 'host' } });
     } finally {
       client.destroy();
     }

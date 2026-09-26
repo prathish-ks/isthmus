@@ -1,9 +1,9 @@
 /**
  * Approval response handler — the branches the authz regression suite leaves
- * open: OneCLI rows (resolved / stale), rows with no session, handler-less and
+ * open: gateway credential rows (resolved / stale), rows with no session, handler-less and
  * throwing approvals, already-claimed rows, scoped-admin authorization.
  *
- * Real central DB. onecli-approvals is stubbed so the OneCLI branch can be
+ * Real central DB. gateway-approval-coordinator is stubbed so the gateway-credential branch can be
  * steered without the SDK; writeSessionMessage is mocked to read back the
  * agent-facing note.
  */
@@ -19,7 +19,7 @@ import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
 import { upsertUser } from '../permissions/db/users.js';
 import { grantRole } from '../permissions/db/user-roles.js';
-import { resolveOneCLIApproval } from './onecli-approvals.js';
+import { resolveGatewayApproval } from '../../gateway-approval-coordinator.js';
 import { registerApprovalHandler } from './primitive.js';
 import { handleApprovalsResponse } from './response-handler.js';
 
@@ -37,9 +37,9 @@ vi.mock('../../session-manager.js', async () => {
   return { ...actual, writeSessionMessage: vi.fn() };
 });
 
-vi.mock('./onecli-approvals.js', () => ({
-  ONECLI_ACTION: 'onecli_credential',
-  resolveOneCLIApproval: vi.fn(),
+vi.mock('../../gateway-approval-coordinator.js', () => ({
+  GATEWAY_APPROVAL_ACTION: 'gateway_credential',
+  resolveGatewayApproval: vi.fn(),
 }));
 
 const TEST_DIR = '/tmp/nanoclaw-test-approval-response-cov';
@@ -140,19 +140,19 @@ describe('handleApprovalsResponse — claim rules', () => {
   });
 });
 
-describe('handleApprovalsResponse — OneCLI credential rows', () => {
+describe('handleApprovalsResponse — gateway credential rows', () => {
   it('hands the click to the in-memory resolver when it is still waiting', async () => {
-    vi.mocked(resolveOneCLIApproval).mockResolvedValueOnce(true);
-    await seedApproval({ approval_id: 'oa-1', action: 'onecli_credential', session_id: null });
+    vi.mocked(resolveGatewayApproval).mockResolvedValueOnce(true);
+    await seedApproval({ approval_id: 'oa-1', action: 'gateway_credential', session_id: null });
     expect(await click('oa-1', 'approve')).toBe(true);
-    expect(resolveOneCLIApproval).toHaveBeenCalledWith('oa-1', 'approve');
+    expect(resolveGatewayApproval).toHaveBeenCalledWith('oa-1', 'approve');
     // The resolver owns the row in this branch — the handler must not touch it.
     expect(await getPendingApproval('oa-1')).toBeDefined();
   });
 
   it('drops the row when the resolver is gone (timer fired / process state lost)', async () => {
-    vi.mocked(resolveOneCLIApproval).mockResolvedValueOnce(false);
-    await seedApproval({ approval_id: 'oa-2', action: 'onecli_credential', session_id: null });
+    vi.mocked(resolveGatewayApproval).mockResolvedValueOnce(false);
+    await seedApproval({ approval_id: 'oa-2', action: 'gateway_credential', session_id: null });
     expect(await click('oa-2', 'reject')).toBe(true);
     expect(await getPendingApproval('oa-2')).toBeUndefined();
   });

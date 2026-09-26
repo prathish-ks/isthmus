@@ -41,23 +41,36 @@ func ContainerName(key mount.SessionKey) string {
 	return fmt.Sprintf("ncl-%s-%s", raw[:39], hash)
 }
 
-// LabelsForKey is the Go port of labelsForKey (docker-driver.ts:360-369):
-// the four canonical adoption labels, plus any extra (group-folder, and a
-// container's own realization-only Labels) layered on top. extra is applied
-// after the canonical four, matching the TS spread order — a caller cannot
-// use extra to overwrite an adoption-contract label with a different value
-// for the SAME key, since Go's map literal construction below always writes
-// the canonical four last... actually to mirror `{...canonical, ...extra}`
-// exactly (extra wins on collision), extra is applied last.
+// LabelsForKey: the four canonical adoption labels, plus any extra
+// (group-folder, and — since the v2.4.0 gateway-provider seam — a
+// gateway-composed auxiliary container's own realization-only Labels)
+// layered on top. The canonical four are applied LAST, deliberately
+// overwriting anything `extra` supplies for the same key: `extra` is
+// untrusted-provider-supplied content (a gateway's `ContainerSpec.labels`,
+// per `gateway-provider-registry.ts`'s `GatewayContribution.containers`)
+// reaching this function with no upstream admission check at all —
+// `mount.ValidateSpec`'s own comment states plainly that Labels is one of
+// the realization-only fields it never reads. Adoption
+// (`listSessions`/`watchSessions`/the wake-time collision check in
+// `docker-driver.ts`) trusts these four keys as ground truth for which live
+// container belongs to which session, across every install sharing a
+// daemon; a caller-supplied `extra` value winning on collision would let a
+// gateway-composed auxiliary container impersonate another session, group,
+// or install's agent. An earlier version of this function let `extra` win
+// on collision (matching a stale TS `{...canonical, ...extra}` spread this
+// doc comment used to cite from a pre-ADR-016 TS-side implementation that
+// no longer exists — Go has owned container realization exclusively since
+// ADR-016); found and closed as a latent gap before any registered gateway
+// provider populated `.containers[].labels` (see
+// TestLabelsForKey_CanonicalWinsOverColludingExtra's negative control).
 func LabelsForKey(key mount.SessionKey, role string, extra map[string]string) map[string]string {
-	labels := map[string]string{
-		labelInstall: key.InstallSlug,
-		labelGroup:   key.AgentGroupID,
-		labelSession: key.SessionID,
-		labelRole:    role,
-	}
+	labels := make(map[string]string, len(extra)+4)
 	for k, v := range extra {
 		labels[k] = v
 	}
+	labels[labelInstall] = key.InstallSlug
+	labels[labelGroup] = key.AgentGroupID
+	labels[labelSession] = key.SessionID
+	labels[labelRole] = role
 	return labels
 }

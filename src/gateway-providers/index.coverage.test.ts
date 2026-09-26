@@ -17,8 +17,19 @@ import {
   listGatewayProviderKinds,
   registerGatewayProvider,
   resetGatewayProvider,
-  type GatewayProvider,
+  type GatewayProviderDefinition,
 } from './index.js';
+
+function stubProvider(kind: string): GatewayProviderDefinition {
+  return {
+    kind,
+    agentSkills: [],
+    sessions: {
+      ensure: async () => ({ contribution: { networkAccess: { endpoint: '', target: { kind: 'host' } } } }),
+    },
+    approvals: { subscribe: async () => {} },
+  };
+}
 
 const ENV_KEY = 'NANOCLAW_GATEWAY_PROVIDER';
 const savedEnv = process.env[ENV_KEY];
@@ -85,7 +96,7 @@ describe('getGatewayProvider', () => {
   });
 
   it('selects an overlay-registered kind when configured', () => {
-    const overlay: GatewayProvider = { kind: 'idx-overlay', contribute: async () => ({}) };
+    const overlay = stubProvider('idx-overlay');
     registerGatewayProvider('idx-overlay', () => overlay);
     process.env[ENV_KEY] = 'IDX-OVERLAY';
     expect(getGatewayProvider()).toBe(overlay);
@@ -93,7 +104,7 @@ describe('getGatewayProvider', () => {
   });
 
   it('resetGatewayProvider injects a provider directly (test seam)', () => {
-    const fake: GatewayProvider = { kind: 'fake', contribute: async () => ({ env: { A: '1' } }) };
+    const fake = stubProvider('fake');
     resetGatewayProvider(fake);
     expect(getGatewayProvider()).toBe(fake);
     // No selection happened, so no selection log line.

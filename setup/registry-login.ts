@@ -150,8 +150,14 @@ interface EnrollResult {
   emailUpdates: boolean | null;
 }
 
-/** Sign-in failure with a sentence for the user and, where possible, a way out. */
-class LoginError extends Error {
+/**
+ * Sign-in failure with a sentence for the user and, where possible, a way
+ * out. Exported (v2.4.0 promotion, Workstream C10): `setup/portal.ts`'s
+ * sign-in path (`signInThroughPortal`) checks `error instanceof LoginError`
+ * to distinguish a declined/expired/failed sign-in (skip the perk stage,
+ * continue setup) from a real bug (rethrow).
+ */
+export class LoginError extends Error {
   constructor(
     message: string,
     readonly hint?: string,
@@ -608,7 +614,8 @@ function enrollFailure(api: string, method: 'code' | 'idp', res: HttpResult): Lo
 // ---------------------------------------------------------------------------
 // Device flow
 
-interface IdpConfig {
+/** Exported (Workstream C10): part of `DeviceFlow`'s shape, below. */
+export interface IdpConfig {
   clientId: string;
   deviceEndpoint: string;
   tokenEndpoint: string;
@@ -676,6 +683,18 @@ async function probeBroker(api: string): Promise<BrokerProbe> {
       tokenEndpoint: str(declared.token_endpoint) ?? DEFAULT_TOKEN_ENDPOINT,
     },
   };
+}
+
+/**
+ * Extracted (Workstream C10) from `run()`'s own inline throw, unchanged in
+ * wording — `startDeviceFlow` below needs the identical message, and a
+ * second hand-copied throw is how these drift apart over time.
+ */
+function notABroker(api: string, detail: string): LoginError {
+  return new LoginError(
+    `No NanoClaw registry at ${api} (${detail}).`,
+    `Nothing at that address answers as a NanoClaw registry. If ${ENV.api} is set, check it points at one — unset, this reaches the hosted service. Either way \`./container/build.sh\` builds the image locally and needs no account.`,
+  );
 }
 
 function misconfiguredClient(): LoginError {
@@ -848,6 +867,61 @@ async function pollForIdpToken(cfg: IdpConfig, device: DeviceAuthorization): Pro
       }
     }
   }
+}
+
+/**
+ * Workstream C10 (v2.4.0 promotion). `deviceLogin` below is this driver's own
+ * standalone flow: request, print/open the code, poll, enroll — one call,
+ * blocking, meant to run under an inherited TTY. `setup/portal.ts` needs the
+ * same primitives split in two, because it presents the code its own way (a
+ * browser page, not a printed card) and must return control to its caller
+ * between "the code exists" and "the sign-in finished."
+ */
+export interface DeviceFlow {
+  api: string;
+  idp: IdpConfig;
+  device: DeviceAuthorization;
+}
+
+/**
+ * The device flow's first step for a caller presenting the code its own way.
+ * Probes the broker and requests a device authorization. Prints and opens
+ * nothing — that is `deviceLogin`'s job for the standalone driver, and
+ * `portal.ts`'s own job for its browser handoff. Every refusal is a
+ * `LoginError` worded exactly as the standalone run would word it, via the
+ * same `notABroker` helper `run()` uses.
+ */
+export async function startDeviceFlow(apiOverride?: string): Promise<DeviceFlow> {
+  const api = resolveApiBase(apiOverride);
+  const probe = await probeBroker(api);
+  if (probe.kind === 'not-a-broker') throw notABroker(api, probe.detail);
+  if (probe.kind === 'no-idp') {
+    throw new LoginError(
+      'Browser authentication is not configured for this registry.',
+      'Run setup/registry-login.sh to sign in with an enrollment code instead.',
+    );
+  }
+  return { api, idp: probe.config, device: await requestDeviceAuthorization(probe.config) };
+}
+
+/**
+ * The rest of that flow: poll the token endpoint until the sign-in is
+ * approved (RFC 8628 §3.5 back-off, via the same `pollForIdpToken` the
+ * standalone driver uses), enroll at the broker, and persist the credential
+ * exactly as a standalone sign-in does (`account.json`, `registry-auth.json`,
+ * the docker credential helper) — `portal.ts` itself never touches
+ * `account.json`.
+ */
+export async function finishDeviceFlow({ api, idp, device }: DeviceFlow): Promise<AccountCredential> {
+  const idpToken = await pollForIdpToken(idp, device);
+  const { credential } = await enroll(api, {
+    method: 'idp',
+    provider: 'workos',
+    access_token: idpToken,
+    client: clientRecord(),
+  });
+  persistCredential(credential);
+  return credential;
 }
 
 async function deviceLogin(api: string, cfg: IdpConfig): Promise<EnrollResult> {
@@ -1148,10 +1222,7 @@ export async function run(argv: string[]): Promise<void> {
 
   const probe = await probeBroker(api);
   if (probe.kind === 'not-a-broker') {
-    throw new LoginError(
-      `No NanoClaw registry at ${api} (${probe.detail}).`,
-      `Nothing at that address answers as a NanoClaw registry. If ${ENV.api} is set, check it points at one — unset, this reaches the hosted service. Either way \`./container/build.sh\` builds the image locally and needs no account.`,
-    );
+    throw notABroker(api, probe.detail);
   }
   const idp = probe.kind === 'idp' ? probe.config : undefined;
   if (!idp) {

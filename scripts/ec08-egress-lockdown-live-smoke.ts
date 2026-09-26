@@ -299,7 +299,13 @@ async function main(): Promise<void> {
   // provider doesn't change what network the container lands on.
   registerGatewayProvider('none', () => ({
     kind: 'none',
-    contribute: async () => ({ env: {}, mounts: [] }),
+    agentSkills: [],
+    sessions: {
+      ensure: async () => ({
+        contribution: { env: {}, mounts: [], networkAccess: { endpoint: '', target: { kind: 'host' } } },
+      }),
+    },
+    approvals: { subscribe: async () => {} },
   }));
   process.env.NANOCLAW_GATEWAY_PROVIDER = process.env.NANOCLAW_GATEWAY_PROVIDER || 'none';
 

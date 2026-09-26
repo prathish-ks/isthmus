@@ -24,8 +24,8 @@ vi.mock('../../config.js', async () => {
   return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-expired-card-instance' };
 });
 
-// The module builds a OneCLI client at import time; the sweep/expiry path
-// under test never touches it.
+// onecli.ts (the only registered gateway provider) builds a OneCLI client at
+// import time; the sweep/expiry path under test never touches it.
 vi.mock('@onecli-sh/sdk', () => ({
   OneCLI: class {
     configureManualApproval() {
@@ -34,8 +34,8 @@ vi.mock('@onecli-sh/sdk', () => ({
   },
 }));
 
-const { editCardExpired, startOneCLIApprovalHandler, stopOneCLIApprovalHandler, ONECLI_ACTION } =
-  await import('./onecli-approvals.js');
+const { editCardExpired, startGatewayApprovalCoordinator, stopGatewayApprovalCoordinator, GATEWAY_APPROVAL_ACTION } =
+  await import('../../gateway-approval-coordinator.js');
 
 const TEST_DIR = '/tmp/nanoclaw-test-expired-card-instance';
 
@@ -60,10 +60,10 @@ const captureAdapter: ChannelDeliveryAdapter = {
 
 async function seedPending(overrides: Partial<PendingApproval> = {}): Promise<PendingApproval> {
   const row: PendingApproval = {
-    approval_id: 'oa-test0001',
+    approval_id: 'ga-test0001',
     session_id: null,
     request_id: 'req-1',
-    action: ONECLI_ACTION,
+    action: GATEWAY_APPROVAL_ACTION,
     payload: JSON.stringify({ approver: 'slack:admin-1' }),
     created_at: now(),
     agent_group_id: 'ag-b',
@@ -93,16 +93,16 @@ beforeEach(async () => {
 
   await createAgentGroup({ id: 'ag-b', name: 'Agent B', folder: 'agent-b', agent_provider: null, created_at: now() });
 
-  startOneCLIApprovalHandler(captureAdapter);
+  startGatewayApprovalCoordinator(captureAdapter);
 });
 
 afterEach(async () => {
-  stopOneCLIApprovalHandler();
+  stopGatewayApprovalCoordinator();
   await closeDb();
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-describe('expired OneCLI card edits carry the posting instance', () => {
+describe('expired gateway approval card edits carry the posting instance', () => {
   it('addresses the named instance the card went out as', async () => {
     const row = await seedPending();
 
@@ -117,7 +117,7 @@ describe('expired OneCLI card edits carry the posting instance', () => {
     await seedPending({ instance: 'slack-secondary' });
 
     // What sweepStaleApprovals does: re-read the persisted row, then edit.
-    const persisted = await getPendingApproval('oa-test0001');
+    const persisted = await getPendingApproval('ga-test0001');
     expect(persisted?.instance).toBe('slack-secondary');
     await editCardExpired(persisted!, 'host restarted');
 

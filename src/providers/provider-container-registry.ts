@@ -52,6 +52,15 @@ export interface ProviderContainerContext {
   selectedSkills: string[];
   /** `process.env` at spawn time — pull passthrough values from here. */
   hostEnv: NodeJS.ProcessEnv;
+  /**
+   * True only when this fn is being called as a legacy overlay beneath an
+   * active provider host contract (Workstream C14) — core now owns
+   * composing the project doc, skill links, and state-volume mounts, so a
+   * legacy fn checking this should skip doing that work itself and
+   * contribute only what the contract can't express (e.g. env passthrough).
+   * Absent for a plain legacy-only registration (no contract).
+   */
+  coreOwnsProviderSurfaces?: true;
 }
 
 export interface ProviderContainerContribution {

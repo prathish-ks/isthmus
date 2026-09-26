@@ -122,9 +122,14 @@ describe('initGroupFilesystem agent surfaces', () => {
     await initGroupFilesystem(ag);
 
     expect(fs.readFileSync(settingsFile, 'utf-8')).toBe(content);
+    // Workstream C14 step 5: this reconciliation now runs through the
+    // generic provider-file-transformer mechanism (provider-contracts/
+    // claude.ts's 'claude-settings' transformer), whose diagnostics use the
+    // interface's own `filePath` field name rather than group-init.ts's old
+    // direct-call `settingsFile` — the warning text itself is unchanged.
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringContaining('Claude settings'),
-      expect.objectContaining({ settingsFile }),
+      expect.objectContaining({ filePath: settingsFile }),
     );
   });
 

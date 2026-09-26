@@ -179,3 +179,183 @@ describe('a stored credential issued by a different service', () => {
     expect(storedToken(home)).toBe('nct_stale');
   });
 });
+
+// Characterization test, added ahead of the v2.4.0-promotion Workstream C10
+// refactor that extracts this exact error into a shared `notABroker()`
+// helper (reused by the new `startDeviceFlow` export). Interactive mode
+// reaches `probeBroker` before any prompt, so this needs no stdin/readline
+// stubbing — the throw happens first, only a forced TTY to get past
+// parseArgs's `Boolean(process.stdin.isTTY)` default. Written and run
+// against the pre-refactor code to prove the wording this test pins is what's
+// actually there today, not a guess.
+describe('probing a URL that answers but is not a NanoClaw registry (interactive)', () => {
+  let originalIsTTY: boolean | undefined;
+
+  beforeEach(() => {
+    originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+  });
+
+  it('throws a LoginError naming the API and the reason, before any prompt', async () => {
+    homeWith(undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, text: async () => '<html>Not Found</html>' })));
+
+    await expect(runLogin(['--api', TARGET])).rejects.toMatchObject({
+      name: 'LoginError',
+      message: `No NanoClaw registry at ${TARGET} (HTTP 404 with no NanoClaw registry response).`,
+    });
+  });
+});
+
+// New exports (v2.4.0 promotion, Workstream C10): `setup/portal.ts`'s own
+// sign-in path needs the device flow split into two steps instead of
+// `deviceLogin`'s one blocking call. Tested directly, not through `run()` —
+// these are their own public contract now, the same reasoning
+// `onecli.test.ts` uses for `contributionFromArgs`.
+describe('startDeviceFlow / finishDeviceFlow', () => {
+  const DEVICE_ENDPOINT = 'https://idp.example.invalid/device';
+  const TOKEN_ENDPOINT = 'https://idp.example.invalid/token';
+
+  beforeEach(() => {
+    // The env-based clientId path in probeBroker — bypasses needing to also
+    // mock the /v1/auth-config broker-probe response for these tests, which
+    // are about the device-flow steps themselves, not broker discovery
+    // (already covered by the "not a NanoClaw registry" suite above and by
+    // startDeviceFlow's own not-a-broker/no-idp cases below).
+    vi.stubEnv('NANOCLAW_WORKOS_CLIENT_ID', 'client_test');
+    vi.stubEnv('NANOCLAW_WORKOS_DEVICE_ENDPOINT', DEVICE_ENDPOINT);
+    vi.stubEnv('NANOCLAW_WORKOS_TOKEN_ENDPOINT', TOKEN_ENDPOINT);
+  });
+
+  it('startDeviceFlow returns the device authorization without printing or opening anything', async () => {
+    homeWith(undefined);
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe(DEVICE_ENDPOINT);
+      return {
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            device_code: 'devcode-1',
+            user_code: 'ABCD-1234',
+            verification_uri: 'https://idp.example.invalid/activate',
+            expires_in: 300,
+            interval: 1,
+          }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    vi.resetModules();
+    const { startDeviceFlow } = await import('./registry-login.js');
+    const flow = await startDeviceFlow(TARGET);
+
+    expect(flow).toMatchObject({
+      api: TARGET,
+      idp: { clientId: 'client_test', deviceEndpoint: DEVICE_ENDPOINT, tokenEndpoint: TOKEN_ENDPOINT },
+      device: { deviceCode: 'devcode-1', userCode: 'ABCD-1234' },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('startDeviceFlow refuses a URL that answers but is not a NanoClaw registry, worded exactly as run() words it', async () => {
+    // No env clientId this time, so probeBroker actually probes the broker.
+    vi.stubEnv('NANOCLAW_WORKOS_CLIENT_ID', '');
+    homeWith(undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, text: async () => '<html>Not Found</html>' })));
+
+    vi.resetModules();
+    const { startDeviceFlow } = await import('./registry-login.js');
+    await expect(startDeviceFlow(TARGET)).rejects.toMatchObject({
+      name: 'LoginError',
+      message: `No NanoClaw registry at ${TARGET} (HTTP 404 with no NanoClaw registry response).`,
+    });
+  });
+
+  it('startDeviceFlow refuses a real registry with no identity provider configured', async () => {
+    vi.stubEnv('NANOCLAW_WORKOS_CLIENT_ID', '');
+    homeWith(undefined);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ status: 503, text: async () => JSON.stringify({ device_flow_available: false }) })),
+    );
+
+    vi.resetModules();
+    const { startDeviceFlow } = await import('./registry-login.js');
+    await expect(startDeviceFlow(TARGET)).rejects.toMatchObject({
+      name: 'LoginError',
+      message: 'Browser authentication is not configured for this registry.',
+    });
+  });
+
+  it('finishDeviceFlow polls until approved, enrolls, and persists the credential — portal.ts never touches account.json directly', async () => {
+    const home = homeWith(undefined);
+    let pollCount = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === TOKEN_ENDPOINT) {
+        pollCount++;
+        if (pollCount === 1) {
+          return { status: 400, text: async () => JSON.stringify({ error: 'authorization_pending' }) };
+        }
+        return { status: 200, text: async () => JSON.stringify({ access_token: 'idp-token-1' }) };
+      }
+      if (url === `${TARGET}/v1/enroll`) {
+        return {
+          status: 201,
+          text: async () =>
+            JSON.stringify({ account_id: 'acct_new', token: 'nct_new', email: 'someone@example.invalid' }),
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    vi.resetModules();
+    const { finishDeviceFlow } = await import('./registry-login.js');
+    const credential = await finishDeviceFlow({
+      api: TARGET,
+      idp: { clientId: 'client_test', deviceEndpoint: DEVICE_ENDPOINT, tokenEndpoint: TOKEN_ENDPOINT },
+      device: {
+        deviceCode: 'devcode-1',
+        userCode: 'ABCD-1234',
+        verificationUri: 'https://idp.example.invalid/activate',
+        expiresInS: 300,
+        intervalS: 1,
+      },
+    });
+
+    expect(credential).toMatchObject({ api: TARGET, account_id: 'acct_new', token: 'nct_new' });
+    expect(storedToken(home)).toBe('nct_new');
+    expect(pollCount).toBe(2);
+  });
+
+  it('finishDeviceFlow surfaces a declined sign-in as a LoginError', async () => {
+    homeWith(undefined);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === TOKEN_ENDPOINT) return { status: 400, text: async () => JSON.stringify({ error: 'access_denied' }) };
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    vi.resetModules();
+    const { finishDeviceFlow } = await import('./registry-login.js');
+    await expect(
+      finishDeviceFlow({
+        api: TARGET,
+        idp: { clientId: 'client_test', deviceEndpoint: DEVICE_ENDPOINT, tokenEndpoint: TOKEN_ENDPOINT },
+        device: {
+          deviceCode: 'devcode-1',
+          userCode: 'ABCD-1234',
+          verificationUri: 'https://idp.example.invalid/activate',
+          expiresInS: 300,
+          intervalS: 1,
+        },
+      }),
+    ).rejects.toMatchObject({ name: 'LoginError', message: 'The sign-in was declined in the browser.' });
+  });
+});
