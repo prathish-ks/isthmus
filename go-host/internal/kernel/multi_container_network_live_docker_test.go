@@ -12,15 +12,17 @@ package kernel
 // actually observed, from a real container, via a real daemon" standard
 // for the mount-confinement case.
 //
-// NOT executed or verified by this promotion's own work session (no Docker
-// daemon in that sandbox — see the "What 'the gate passed' means" section
-// of docs/promotion-v2.4.0.md and this project's own established "real CI
-// evidence over local" principle). Written carefully against
-// mount_confinement_live_docker_test.go's exact conventions and reviewed
-// for correctness, but its first real verification has to be an actual CI
-// run (or a machine with Docker) — same "correct by careful reading,
-// confirmed on real infrastructure later" posture already applied
-// elsewhere in this package's live-Docker suite.
+// Verified against a real daemon both locally (this sandbox, once Docker
+// became available — repeatedly, `-count=1`, no caching) and on real
+// GitHub Actions CI (see "real CI evidence over local" — this project's
+// own standing principle). The first CI run genuinely caught something
+// local runs hadn't: TestLive_Wake_MultiContainerSession_
+// PrivateNetworkIsolatesAgentAndReachesProxy's own alias-resolution check
+// failed once on a GitHub Actions runner with no local reproduction —
+// root-caused to a Docker embedded-DNS propagation race the runner's
+// daemon exposed and the local one didn't happen to (see
+// dockerExecOKEventually's own comment). Fixed with a short poll instead
+// of a single attempt, re-verified 3x fresh locally and re-run on CI.
 
 import (
 	"context"
@@ -72,6 +74,36 @@ func dockerExecOK(t *testing.T, containerName string, timeout time.Duration, arg
 	// site below. Neither is external/attacker-controlled input.
 	_, err := exec.CommandContext(ctx, "docker", full...).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	return err == nil
+}
+
+// dockerExecOKEventually retries dockerExecOK for up to totalTimeout,
+// polling every 250ms. Real-world root cause this exists for (found on a
+// GitHub Actions run, not reproduced on the slower/warmer local daemon this
+// test was first written and verified against): Docker's embedded DNS
+// (127.0.0.11) registers a newly `network connect`-ed container's alias
+// asynchronously relative to that connect call returning — both containers
+// here are already started by the time this test runs its own checks (Wake
+// starts auxiliaries before the agent), so the alias itself is correctly
+// configured; what's not guaranteed is that the daemon's DNS server has
+// finished propagating it the instant the agent's own process starts
+// resolving. A single immediate nslookup can lose that race on a slower or
+// more heavily loaded daemon; polling for a few seconds tolerates the
+// propagation window without weakening what the check actually proves —
+// it still fails for real (a name that genuinely never resolves, like
+// check 3 below, exhausts every retry and fails exactly the same as a
+// single attempt would).
+func dockerExecOKEventually(t *testing.T, containerName string, totalTimeout time.Duration, args ...string) bool {
+	t.Helper()
+	deadline := time.Now().Add(totalTimeout)
+	for {
+		if dockerExecOK(t, containerName, 2*time.Second, args...) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 // multiContainerLiveSession builds a real, launchable two-container
@@ -153,7 +185,10 @@ func TestLive_Wake_MultiContainerSession_PrivateNetworkIsolatesAgentAndReachesPr
 	// what resolves a user-defined network's container aliases — a
 	// successful resolution here is real, daemon-mediated confirmation of
 	// network membership and the alias, not an inference from argv.
-	if !dockerExecOK(t, payload.ContainerName, 5*time.Second, "nslookup", "gateway-proxy") {
+	//
+	// Polled rather than a single attempt: see dockerExecOKEventually's own
+	// comment for the real DNS-propagation race this tolerates.
+	if !dockerExecOKEventually(t, payload.ContainerName, 10*time.Second, "nslookup", "gateway-proxy") {
 		t.Fatal("expected the agent to resolve its auxiliary container's alias (gateway-proxy) on the shared private network")
 	}
 
