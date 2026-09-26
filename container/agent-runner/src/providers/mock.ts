@@ -5,6 +5,13 @@ import type { AgentProvider, AgentQuery, ProviderEvent, ProviderOptions, QueryIn
 /**
  * Mock provider for testing. Returns canned responses.
  * Supports push() — queued messages produce additional results.
+ *
+ * v2.4.0 promotion, Workstream C15: its runtime contract lives in
+ * provider-contracts/mock.ts and attaches via registerProviderContract, the
+ * same two-step path every provider uses; this module does not import it.
+ * `supportsNativeSlashCommands`/`emitsMidTurnText` stay instance fields here
+ * too, matching `providers/types.ts`'s own divergence — see that file's
+ * comment.
  */
 export class MockProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = false;
@@ -32,7 +39,7 @@ export class MockProvider implements AgentProvider {
     this.textFactory = textFactory;
   }
 
-  registerMemorySessionHook(_hook: MemorySessionHookRegistration): void {}
+  registerMemorySessionHook(_hook: MemorySessionHookRegistration, _memory?: unknown): void {}
 
   isSessionInvalid(_err: unknown): boolean {
     return false;

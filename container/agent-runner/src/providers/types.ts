@@ -1,5 +1,15 @@
 import type { MemorySessionHookRegistration } from '../memory/session-hook.js';
 
+/**
+ * A speed tier name. The vocabulary is provider-declared (the host validates
+ * `--speed` against the provider's `inference.speedTiers`), so this is an
+ * opaque token here; a provider reacts to the names it declared and ignores
+ * the rest.
+ *
+ * v2.4.0 promotion, Workstream C15.
+ */
+export type ProviderSpeed = string;
+
 export interface AgentProvider {
   /**
    * True if the provider's underlying SDK handles slash commands natively and
@@ -23,10 +33,28 @@ export interface AgentProvider {
    * result-door delivery path: text events are delivery-inert and blocks in
    * the final result text are delivered from there.
    */
+  // v2.4.0 promotion, Workstream C15: deliberately NOT migrated to the
+  // runtime contract's `commands.formatting`/`textDelivery` fields, unlike
+  // upstream. That migration also requires reconciling `poll-loop.ts` to
+  // read from the contract instead of these instance fields — and
+  // poll-loop.ts's own v2.3.0->v2.4.0 diff bundles that migration together
+  // with a substantial, unrelated multi-turn reply-routing rewrite
+  // (`queuedTurns`/`adoptTurn`/`pushRetry`, `db/session-routing.ts`,
+  // `db/session-state.ts`) that is not part of this port. Keeping these
+  // fields here means poll-loop.ts needs zero changes for this promotion —
+  // the contract still declares `commands.formatting`/`textDelivery`
+  // (verifier-checked, so shape stays correct), just not yet consumed by
+  // anything. See ADR-032's addendum for the full reasoning.
   readonly emitsMidTurnText?: boolean;
 
-  /** Register shared memory through the provider's native session-start mechanism. */
-  registerMemorySessionHook(hook: MemorySessionHookRegistration): void;
+  /**
+   * Register shared memory through the provider's native session-start
+   * mechanism. `memory` is the contract's resolved memory capability (core
+   * calls the contract's `memory` function with the hook, or takes its
+   * declared constant, and passes the result); absent for providers without
+   * a contract or without a memory capability.
+   */
+  registerMemorySessionHook(hook: MemorySessionHookRegistration, memory?: unknown): void;
 
   /**
    * Optional. Called by the poll-loop after each completed exchange (a
@@ -34,8 +62,11 @@ export interface AgentProvider {
    * on-disk transcript implement this to persist exchanges themselves (e.g.
    * markdown into the agent's `conversations/` dir); providers that persist
    * and archive their own transcript (e.g. the Claude Agent SDK's `.jsonl`)
-   * omit it. Best-effort: the loop catches and logs anything it throws. The
-   * implementation lives with the provider, never in the runner.
+   * omit it. Best-effort: the loop catches and logs anything it throws.
+   * Contractless providers implement this directly. For a declared
+   * core-owned archive (a contract's `history.afterExchange`), the factory
+   * replaces it with the core executor while the provider implementation
+   * remains an old-core compatibility fallback.
    */
   onExchangeComplete?(exchange: ProviderExchange): void;
 
@@ -93,6 +124,14 @@ export interface ProviderOptions {
    * through to the underlying SDK. If omitted, the SDK default is used.
    */
   effort?: string;
+  /**
+   * Provider-declared speed tier (`standard` or `fast` for Claude). A provider
+   * maps `fast` onto its own fast serving tier when it has one; `standard`
+   * keeps the provider default; a tier it did not declare never reaches it.
+   *
+   * v2.4.0 promotion, Workstream C15.
+   */
+  speed?: ProviderSpeed;
 }
 
 export interface QueryInput {
@@ -157,12 +196,18 @@ export interface AgentQuery {
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   /**
-   * A completed turn. `isError` is set when the underlying SDK flagged the
-   * turn as an error (e.g. a non-retryable Anthropic 403 billing_error). The
-   * poll-loop uses it to surface the result text to the user instead of
-   * dropping it as un-wrapped scratchpad, and to skip the re-wrap nudge.
+   * A completed turn. `isError` marks a failed turn and prevents retries.
+   * `text` is model output; `error` is an optional user-facing provider error
+   * (e.g. a billing/quota notice), kept separate from model scratchpad and
+   * raw diagnostics. Failures without `error` receive a generic notice.
+   *
+   * v2.4.0 promotion, Workstream C15: `error` is new. `poll-loop.ts` is not
+   * reconciled in this pass (see the `emitsMidTurnText` comment above), so
+   * this field is populated by `providers/claude.ts` but not yet consumed —
+   * declared-but-unconsumed, the same staging pattern this promotion has
+   * used elsewhere (host-side `inference` before its own consumer landed).
    */
-  | { type: 'result'; text: string | null; isError?: boolean }
+  | { type: 'result'; text: string | null; isError?: boolean; error?: string }
   /**
    * An assistant text segment emitted mid-turn (e.g. between tool calls).
    * The SDK's final `result` carries only the LAST assistant text, so a

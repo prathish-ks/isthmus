@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'bun:test';
 
+// Registers Claude's runtime contract — createProvider('claude') throws
+// without it (Workstream C15: the provider now requires its resolved
+// configuration, which only exists once a contract is attached).
+import '../provider-contracts/claude.js';
 import { createProvider, type ProviderName } from './factory.js';
 import { ClaudeProvider } from './claude.js';
 import { MockProvider } from './mock.js';

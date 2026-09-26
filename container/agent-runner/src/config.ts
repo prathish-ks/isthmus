@@ -20,6 +20,14 @@ export interface RunnerConfig {
   mcpServers: Record<string, McpServerConfig>;
   model?: string;
   effort?: string;
+  /**
+   * Provider-declared speed tier. Not currently produced by the host — the
+   * `--speed` CLI flag this would back isn't wired into this tree yet (see
+   * `src/provider-contracts/claude.ts`'s own header on the host side).
+   * Parsed defensively so `container.json` gaining this key later is a
+   * no-op change here, not a new one (v2.4.0 promotion, Workstream C15).
+   */
+  speed?: string;
 }
 
 const DEFAULT_MAX_MESSAGES = 10;
@@ -49,6 +57,7 @@ export function loadConfig(): RunnerConfig {
     mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
     model: (raw.model as string) || undefined,
     effort: (raw.effort as string) || undefined,
+    speed: (raw.speed as string) || undefined,
   };
 
   return _config;

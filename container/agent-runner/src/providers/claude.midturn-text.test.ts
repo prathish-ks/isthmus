@@ -21,6 +21,13 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
 
 const { ClaudeProvider } = await import('./claude.js');
 const { MEMORY_SESSION_HOOK } = await import('../memory/session-hook.js');
+// Workstream C15: ClaudeProvider now requires the contract's resolved
+// configuration as its second constructor argument. Resolved from the real
+// contract + real resolve functions (not a hand-built stand-in), so this
+// test exercises the actual wiring createProvider() would produce.
+const { claudeRuntimeContract } = await import('../provider-contracts/claude.js');
+const { resolveRuntimeConfiguration } = await import('../provider-contracts/realize.js');
+const TEST_CONFIGURATION = resolveRuntimeConfiguration(claudeRuntimeContract, {});
 
 let tmp: string;
 let prevHome: string | undefined;
@@ -39,7 +46,7 @@ afterEach(() => {
 
 describe('assistant text block surfacing', () => {
   it('declares the emitsMidTurnText capability the poll-loop keys one-door delivery on', () => {
-    expect(new ClaudeProvider({}).emitsMidTurnText).toBe(true);
+    expect(new ClaudeProvider({}, TEST_CONFIGURATION).emitsMidTurnText).toBe(true);
   });
 
   it('yields one text event per assistant message with text, before the result', async () => {
@@ -60,7 +67,7 @@ describe('assistant text block surfacing', () => {
       { type: 'result', subtype: 'success', result: 'final text' },
     );
 
-    const provider = new ClaudeProvider({});
+    const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
     provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
     const q = provider.query({ prompt: 'hi', cwd: tmp });
 
@@ -85,7 +92,7 @@ describe('assistant text block surfacing', () => {
       { type: 'result', subtype: 'success', result: 'done' },
     );
 
-    const provider = new ClaudeProvider({});
+    const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
     provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
     const q = provider.query({ prompt: 'hi', cwd: tmp });
 
@@ -115,7 +122,7 @@ describe('assistant text block surfacing', () => {
       { type: 'result', subtype: 'success', result: '<message to="user">The answer is 4.</message>' },
     );
 
-    const provider = new ClaudeProvider({});
+    const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
     provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
     const q = provider.query({ prompt: 'hi', cwd: tmp });
 
@@ -136,7 +143,7 @@ describe('assistant text block surfacing', () => {
       { type: 'result', subtype: 'success', result: 'closed here</message>' },
     );
 
-    const provider = new ClaudeProvider({});
+    const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
     provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
     const q = provider.query({ prompt: 'hi', cwd: tmp });
 
@@ -163,7 +170,7 @@ describe('result text is an independent SDK field (divergence surface)', () => {
       { type: 'result', subtype: 'success', result: '<message to="user">only in the result field</message>' },
     );
 
-    const provider = new ClaudeProvider({});
+    const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
     provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
     const q = provider.query({ prompt: 'hi', cwd: tmp });
 
@@ -183,15 +190,21 @@ describe('result text is an independent SDK field (divergence surface)', () => {
       { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['billing hard-stop'] },
     );
 
-    const provider = new ClaudeProvider({});
+    const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
     provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
     const q = provider.query({ prompt: 'hi', cwd: tmp });
 
-    const events: { type: string; text?: string | null; isError?: boolean }[] = [];
-    for await (const e of q.events) events.push(e as { type: string; text?: string | null; isError?: boolean });
+    const events: { type: string; text?: string | null; error?: string; isError?: boolean }[] = [];
+    for await (const e of q.events)
+      events.push(e as { type: string; text?: string | null; error?: string; isError?: boolean });
 
     const result = events.find((e) => e.type === 'result');
-    expect(result?.text).toBe('billing hard-stop');
+    // Workstream C15: the provider now separates the dedicated error field
+    // from model text output — `errors[]` lands in `.error`, never folded
+    // into `.text` (which stays null here since the SDK sent no `result`
+    // field on this error-subtype message).
+    expect(result?.text).toBeNull();
+    expect(result?.error).toBe('billing hard-stop');
     expect(result?.isError).toBe(true);
     // 'billing hard-stop' never appeared in a text event — only 'partial progress' did.
     expect(events.filter((e) => e.type === 'text').map((e) => e.text)).toEqual(['partial progress']);
