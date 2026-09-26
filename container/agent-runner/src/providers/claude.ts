@@ -291,22 +291,24 @@ export class ClaudeProvider implements AgentProvider {
         // The append (agent name + destinations) is rebuilt at every container
         // start.
         //
-        // v2.4.0 promotion, Workstream C15: upstream's own v2.4.0 adds
-        // `snapshot: false` here, fixing a real bug — left to the SDK
-        // default, Claude Code records this prompt on a session's first
-        // request and resends that record on every resume, so a resumed
-        // agent keeps its old name/destination list until compaction. NOT
-        // applied here: the installed `@anthropic-ai/claude-agent-sdk`
-        // (`^0.3.238`, matching this fork's pinned v2.3.0-era version) has no
-        // `snapshot` field on this option — upstream's v2.4.0 bumps to
-        // `^0.3.280`, and bumping this dependency is its own deliberate
-        // supply-chain decision (CLAUDE.md's "Container Runtime (Bun)"
-        // section: check the npm release date, pin deliberately, never `bun
-        // update` blindly) — not something to fold silently into this port.
-        // The bug this would fix is real and still present; the fix is
-        // deferred to that separate decision, not declined.
+        // v2.4.0 promotion, Workstream C15: `snapshot: false` here, matching
+        // upstream's own v2.4.0, fixes a real bug — left to the SDK default
+        // (`snapshot: true`), Claude Code records this prompt on a session's
+        // first request and resends that record on every resume, so a
+        // resumed agent keeps its old name/destination list until
+        // compaction. Previously left un-applied on the belief that the
+        // installed SDK (`^0.3.238`) had no `snapshot` field and the fix was
+        // blocked on a deliberate, separate supply-chain decision to bump to
+        // `^0.3.280` (CLAUDE.md's "Container Runtime (Bun)" section: check
+        // the npm release date, pin deliberately, never `bun update`
+        // blindly) — that premise was checked against a stale installed
+        // `node_modules` rather than the actually-pinned lockfile version:
+        // `package.json`/`bun.lock` already pin `^0.3.278`, landed via an
+        // unrelated Dependabot commit earlier in this same branch, and
+        // 0.3.278 already has `snapshot` on this option. No dependency
+        // change needed; applying the fix now.
         systemPrompt: instructions
-          ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions }
+          ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions, snapshot: false }
           : undefined,
         allowedTools: [...this.mcp.allowedTools],
         disallowedTools: [...this.executionPolicy.disallowedTools],

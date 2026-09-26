@@ -255,9 +255,24 @@ export async function maybeAutoProvisionSlack(
   // manager token, from an install predating the portal, still wins).
   if (portalEnabled() && !managerToken) {
     const version = hostVersion(deps.root ?? process.cwd());
-    return deps.browserConsent
-      ? runSlackPortal(core, agentName, version, { browserConsent: true })
-      : runSlackPortal(core, agentName, version);
+    try {
+      return await (deps.browserConsent
+        ? runSlackPortal(core, agentName, version, { browserConsent: true })
+        : runSlackPortal(core, agentName, version));
+    } catch (error) {
+      // Safety net, not the primary fix: registerDevice (portal.ts) already
+      // treats an unreachable portal as a graceful skip for the common,
+      // earliest failure point (the very first request the flow makes). This
+      // catches whatever that doesn't — a later call in the same flow
+      // (client.wait/reconcile, brokerListWorkspaces, ...) failing the same
+      // way — so this function keeps the "never throws for offline" promise
+      // its own header comment makes regardless of which call inside
+      // runSlackPortal happens to be the one that hits it. Falls through to
+      // the manual-provisioning prompt below, exactly like an ordinary
+      // decline — not a special error path a caller has to know to expect.
+      p.log.warn("Couldn't complete Slack setup through the portal — continuing with manual setup instead.");
+      setupLog.userInput('slack_portal_unavailable', error instanceof Error ? error.message : String(error));
+    }
   }
   // Automatic provisioning leads as the default; supplying your own bot
   // token stays available as the explicit, advanced alternative.

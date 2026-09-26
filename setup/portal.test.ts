@@ -278,8 +278,28 @@ describe('browser setup handoffs', () => {
     expect(mock.stop).toHaveBeenCalledTimes(3);
     expect(mock.start).not.toHaveBeenCalled();
     expect(mock.open).not.toHaveBeenCalled();
-    mock.register.mockRejectedValueOnce(new Error('offline'));
-    await expect(runImagePortal()).rejects.toThrow('offline');
+    // A genuine unrecognized failure — a real HTTP status this module has no
+    // specific handling for — still surfaces. Distinct from the offline case
+    // below: this one reached the portal and got back an answer, just not
+    // one of the three this function knows how to skip gracefully around.
+    mock.register.mockRejectedValueOnce(Object.assign(new Error('server exploded'), { status: 500 }));
+    await expect(runImagePortal()).rejects.toThrow('server exploded');
+  });
+  it('skips the stage gracefully when the portal is simply unreachable, rather than aborting the caller', async () => {
+    // No `.status` at all — the shape a bare `fetch` failure (network down,
+    // DNS failure, request timeout) actually throws, distinct from every
+    // case above which all carry a real HTTP status because the request
+    // reached the portal and got an answer. Previously this fell through to
+    // the same `throw error` as a genuine unrecognized failure, which
+    // propagated out of runImagePortal/runSlackPortal uncaught — this is the
+    // regression test for that fix.
+    mock.register.mockRejectedValueOnce(new Error('fetch failed'));
+    await expect(runImagePortal()).resolves.toBeUndefined();
+    expect(mock.image).toHaveBeenCalledExactlyOnceWith('local');
+    expect(warnings()).toContainEqual(expect.stringContaining("Couldn't reach the NanoClaw portal"));
+
+    mock.register.mockRejectedValueOnce(new Error('fetch failed'));
+    await expect(runSlackPortal(core(), 'Nano')).resolves.toEqual({ __portal_skip: 'slack' });
   });
   it('uses the browser-selected workspace and name, saving credentials before completion', async () => {
     const provider = core();

@@ -823,4 +823,28 @@ describe('community portal entry point', () => {
       state.portalEnabled.mockReturnValue(false);
     }
   });
+
+  it('falls through to the manual-provisioning prompt when the portal call throws, instead of propagating', async () => {
+    // Regression test: this file's own header comment promises
+    // maybeAutoProvisionSlack "never throws... for expected bootstrap
+    // failures (offline, ...)" — previously the portal branch had no
+    // try/catch at all, so any throw from inside runSlackPortal (a later
+    // call in that flow failing, not just the first one — registerDevice's
+    // own fix in portal.ts covers that specific early case) propagated
+    // straight out of this function.
+    state.portalEnabled.mockReturnValue(true);
+    state.runSlackPortal.mockRejectedValueOnce(new Error('fetch failed'));
+    state.selectLabels.push('I will create it myself');
+    const root = track(rootWithModule());
+    const core = fakeCore();
+    state.installToken = undefined;
+    try {
+      const result = await maybeAutoProvisionSlack('Nano', { root, importModule: async () => core });
+      expect(result).toBeUndefined();
+      expect(state.warns).toContainEqual(expect.stringContaining("Couldn't complete Slack setup"));
+      expect(brightSelect).toHaveBeenCalled();
+    } finally {
+      state.portalEnabled.mockReturnValue(false);
+    }
+  });
 });

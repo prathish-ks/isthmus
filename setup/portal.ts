@@ -83,6 +83,22 @@ async function registerDevice(client: SetupClient): Promise<boolean> {
       );
       return false;
     }
+    // No recognized HTTP status at all (errorStatus returns undefined) means
+    // the request never got a response to have one — device-client.ts's
+    // `call` only attaches `.status` once `fetch` itself resolves; a plain
+    // network failure, DNS error, or the request timeout throws before that,
+    // as a bare error with no `.status`. This is exactly what errorCode's own
+    // 'unavailable' fallback exists to name. Skipping this step gracefully
+    // here, like the three known-refusal cases above, is what makes
+    // maybeAutoProvisionSlack's own graceful fallback to the manual-token
+    // flow reachable when the portal is merely unreachable — previously this
+    // fell through to `throw error` below, which propagates uncaught all the
+    // way to setup/auto.ts's top-level handler and aborts the entire wizard
+    // instead of degrading to the flow that exists for exactly this purpose.
+    if (status === undefined && errorCode(error) === 'unavailable') {
+      p.log.warn("Couldn't reach the NanoClaw portal right now — continuing without it for this step.");
+      return false;
+    }
     throw error;
   }
 }
