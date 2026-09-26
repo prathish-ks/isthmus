@@ -60,11 +60,14 @@ func dockerNetworkInspect(t *testing.T, networkName string) map[string]any {
 	return results[0]
 }
 
-// dockerExecOK runs a command inside a real container and reports only
-// whether it succeeded — the live, from-inside half of a reachability
-// claim, independent of anything this package's own network-construction
-// logic believes it built.
-func dockerExecOK(t *testing.T, containerName string, timeout time.Duration, args ...string) bool {
+// dockerExecResult runs a command inside a real container and returns
+// whether it succeeded plus its combined stdout/stderr — the live,
+// from-inside half of a reachability claim, independent of anything this
+// package's own network-construction logic believes it built. The output
+// is kept (not discarded) so a caller can log it on failure — necessary to
+// actually diagnose a failure on a CI runner nobody can attach a debugger
+// to.
+func dockerExecResult(t *testing.T, containerName string, timeout time.Duration, args ...string) (ok bool, output string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -72,38 +75,78 @@ func dockerExecOK(t *testing.T, containerName string, timeout time.Duration, arg
 	// #nosec G204 -- containerName is kernel-derived from a fixed test
 	// fixture; the remaining args are fixed string literals at every call
 	// site below. Neither is external/attacker-controlled input.
-	_, err := exec.CommandContext(ctx, "docker", full...).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
-	return err == nil
+	out, err := exec.CommandContext(ctx, "docker", full...).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	return err == nil, strings.TrimSpace(string(out))
 }
 
-// dockerExecOKEventually retries dockerExecOK for up to totalTimeout,
-// polling every 250ms. Real-world root cause this exists for (found on a
-// GitHub Actions run, not reproduced on the slower/warmer local daemon this
-// test was first written and verified against): Docker's embedded DNS
-// (127.0.0.11) registers a newly `network connect`-ed container's alias
-// asynchronously relative to that connect call returning — both containers
-// here are already started by the time this test runs its own checks (Wake
-// starts auxiliaries before the agent), so the alias itself is correctly
-// configured; what's not guaranteed is that the daemon's DNS server has
-// finished propagating it the instant the agent's own process starts
-// resolving. A single immediate nslookup can lose that race on a slower or
-// more heavily loaded daemon; polling for a few seconds tolerates the
-// propagation window without weakening what the check actually proves —
-// it still fails for real (a name that genuinely never resolves, like
-// check 3 below, exhausts every retry and fails exactly the same as a
-// single attempt would).
-func dockerExecOKEventually(t *testing.T, containerName string, totalTimeout time.Duration, args ...string) bool {
+// dockerExecOK is dockerExecResult without the output, for the (majority
+// of) call sites that only care about success/failure.
+func dockerExecOK(t *testing.T, containerName string, timeout time.Duration, args ...string) bool {
+	t.Helper()
+	ok, _ := dockerExecResult(t, containerName, timeout, args...)
+	return ok
+}
+
+// dockerExecOKEventually retries dockerExecResult for up to totalTimeout,
+// polling every 250ms, returning the last attempt's output either way (so a
+// caller can log it whether the final result was success or failure).
+//
+// This exists because a single immediate attempt failed once on a GitHub
+// Actions run with no local reproduction — first suspected as Docker's
+// embedded DNS (127.0.0.11) registering a newly `network connect`-ed
+// container's alias asynchronously relative to that connect call
+// returning. A 10s version of this retry loop was tried next and *still*
+// failed on CI, for the entire window, not just an initial attempt — which
+// argues against pure propagation lag (that would resolve within a couple
+// of retries, not exhaust 10 seconds) and toward something more structural
+// in that environment's Docker networking that a longer wait alone may not
+// fix. This version widens the window further (a cheap hedge, in case the
+// lag genuinely is just longer than expected there) but more importantly
+// keeps every attempt's raw output so the caller can log the actual
+// nslookup/getent failure text and container network state on the next
+// failure, instead of guessing a third time from a bare pass/fail.
+func dockerExecOKEventually(t *testing.T, containerName string, totalTimeout time.Duration, args ...string) (ok bool, lastOutput string) {
 	t.Helper()
 	deadline := time.Now().Add(totalTimeout)
 	for {
-		if dockerExecOK(t, containerName, 2*time.Second, args...) {
-			return true
+		ok, lastOutput = dockerExecResult(t, containerName, 2*time.Second, args...)
+		if ok {
+			return true, lastOutput
 		}
 		if time.Now().After(deadline) {
-			return false
+			return false, lastOutput
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+// logNetworkDiagnostics dumps everything this package's own live-Docker
+// suite can cheaply observe about a session's private network and its two
+// containers' actual network state — for t.Log, not t.Fatal, so it runs
+// only when explicitly called (on a failure path) and never fails the test
+// itself if any individual probe does. Exists so a CI failure comes with
+// enough real data to root-cause it (raw resolver output, actual assigned
+// aliases/IPs, DNS config inside the container) instead of triggering
+// another guess-and-push cycle.
+func logNetworkDiagnostics(t *testing.T, networkName, agentContainer, auxiliaryContainer string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	run := func(name string, args ...string) {
+		// #nosec G204 -- every argument here is a fixed literal or one of
+		// this test's own kernel-derived container/network names, never
+		// external input.
+		out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput() // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		t.Logf("DIAGNOSTIC %s (err=%v):\n%s", name, err, strings.TrimSpace(string(out)))
+	}
+	run("network inspect", "network", "inspect", networkName)
+	run("agent inspect NetworkSettings", "inspect", "--format", "{{json .NetworkSettings.Networks}}", agentContainer)
+	run("auxiliary inspect NetworkSettings", "inspect", "--format", "{{json .NetworkSettings.Networks}}", auxiliaryContainer)
+	run("agent resolv.conf", "exec", agentContainer, "cat", "/etc/resolv.conf")
+	getentOK, getentOut := dockerExecResult(t, agentContainer, 5*time.Second, "getent", "hosts", "gateway-proxy")
+	t.Logf("DIAGNOSTIC agent getent hosts gateway-proxy (ok=%v):\n%s", getentOK, getentOut)
+	run("agent logs", "logs", "--tail", "20", agentContainer)
+	run("auxiliary logs", "logs", "--tail", "20", auxiliaryContainer)
 }
 
 // multiContainerLiveSession builds a real, launchable two-container
@@ -112,16 +155,29 @@ func dockerExecOKEventually(t *testing.T, containerName string, totalTimeout tim
 // validateNetworkAccessTarget requires for the network/auxiliary path to
 // engage at all). Mirrors liveAgentSession's own realism bar: real images,
 // real (short-lived, cleaned-up-by-t.Cleanup) commands.
+//
+// The 90s sleep is deliberately much longer than any check this file runs
+// against these containers (dockerExecOKEventually's own retry window is
+// 20s) — found the hard way: an earlier version used a 20s sleep, which
+// raced dockerExecOKEventually's own then-20s deadline, so a deliberately
+// forced failure (to verify logNetworkDiagnostics itself produces useful
+// output) surfaced "No such container" instead of the intended DNS
+// diagnostics, because the container had already exited from old age by
+// the time the retry loop gave up. Not itself the root cause of the real
+// CI failure (that one failed resolving the *correct* name inside a 10s
+// window, comfortably under the old sleep's remaining lifetime) — but a
+// real, separate bug this file should not carry regardless, and one that
+// would have made a genuine future failure's diagnostics equally useless.
 func multiContainerLiveSession(t *testing.T) mount.Session {
 	t.Helper()
 	spec := validSession()
 	spec.Containers[0].Image = "alpine:3"
-	spec.Containers[0].Command = []string{"sleep", "20"}
+	spec.Containers[0].Command = []string{"sleep", "90"}
 	spec.Containers = append(spec.Containers, mount.Container{
 		Role:    "proxy",
 		Env:     map[string]string{},
 		Image:   "alpine:3",
-		Command: []string{"sleep", "20"},
+		Command: []string{"sleep", "90"},
 	})
 	spec.NetworkAccess = mount.NetworkAccessIntent{
 		Endpoint: "gateway-proxy",
@@ -187,8 +243,12 @@ func TestLive_Wake_MultiContainerSession_PrivateNetworkIsolatesAgentAndReachesPr
 	// network membership and the alias, not an inference from argv.
 	//
 	// Polled rather than a single attempt: see dockerExecOKEventually's own
-	// comment for the real DNS-propagation race this tolerates.
-	if !dockerExecOKEventually(t, payload.ContainerName, 10*time.Second, "nslookup", "gateway-proxy") {
+	// comment for why, and for why this has already been widened once and
+	// still failed on CI for the full window — diagnostics are logged on
+	// failure specifically because a second blind guess isn't warranted.
+	if ok, out := dockerExecOKEventually(t, payload.ContainerName, 20*time.Second, "nslookup", "gateway-proxy"); !ok {
+		t.Logf("last nslookup attempt output:\n%s", out)
+		logNetworkDiagnostics(t, wantNetwork, payload.ContainerName, wantAuxiliaryName)
 		t.Fatal("expected the agent to resolve its auxiliary container's alias (gateway-proxy) on the shared private network")
 	}
 
