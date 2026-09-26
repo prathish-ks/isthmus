@@ -149,7 +149,7 @@ func TestLive_Wake_DockerSocketMount_NoAllowlistConfigured_RealContainerGetsSock
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = newDockerExecutor("").Kill(ctx, payload.ContainerName, 1)
+		_ = newDockerExecutor("").Kill(ctx, payload.ContainerName, nil, "", 1)
 	})
 
 	mounts := dockerInspectMounts(t, payload.ContainerName)
@@ -201,7 +201,7 @@ func TestLive_Wake_DockerSocketMount_WithAllowlistConfigured_NeverReachesDocker(
 		t.Cleanup(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			_ = newDockerExecutor("").Kill(ctx, wantName, 1)
+			_ = newDockerExecutor("").Kill(ctx, wantName, nil, "", 1)
 		})
 		t.Fatalf("expected an allowlist-configured kernel to deny the Docker-socket mount, got success %+v", resp)
 	}

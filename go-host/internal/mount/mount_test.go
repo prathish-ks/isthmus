@@ -4,16 +4,23 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
-// basePolicy mirrors capture.ts's `policy` object exactly.
+// basePolicy mirrors capture.ts's `policy` object, plus GatewayTrustRoot
+// (v2.4.0 promotion) — set here, not left empty, because a real deployment
+// always configures it (see ClassGatewayTrust/ClassRequiredByPath's own
+// comments on why an empty root is a defensive-guard case, not a normal
+// one). "/data/gateway-trust" doesn't collide with any other fixture path
+// used across this file's existing cases.
 func basePolicy() Policy {
 	return Policy{
-		GroupsRoot:    "/data/groups",
-		DataRoot:      "/data",
-		SurfaceRoots:  []string{"/app/container/agent-runner/src", "/app/container/skills", "/app/container/CLAUDE.md"},
-		MaterialsRoot: "/data/session-materials",
+		GroupsRoot:       "/data/groups",
+		DataRoot:         "/data",
+		SurfaceRoots:     []string{"/app/container/agent-runner/src", "/app/container/skills", "/app/container/CLAUDE.md"},
+		MaterialsRoot:    "/data/session-materials",
+		GatewayTrustRoot: "/data/gateway-trust",
 	}
 }
 
@@ -402,5 +409,247 @@ func TestOriginProvider_UnhardenedDefaultUnaffected(t *testing.T) {
 	session := baseSpec([]Spec{spec})
 	if err := ValidateSpec(session, policy, caps()); err != nil {
 		t.Fatalf("expected the unhardened default to still allow this mount, got denied: %v", err)
+	}
+}
+
+// ---------- gateway-trust (v2.4.0 promotion, commit 249bbe93) ----------
+
+// Table-driven, mirroring TestParityWithCapture_DefaultPolicyMatchesPinnedBaseline's
+// style: every rule types.ts's own diff added for 'gateway-trust', exercised
+// against the real ValidateSpec entry point rather than the unexported
+// helpers directly, so a regression anywhere in the admission chain (class
+// pinning, ro-only, role scope) is caught the same way a real caller would
+// hit it.
+func TestGatewayTrust_AdmissionRules(t *testing.T) {
+	policy := basePolicy() // GatewayTrustRoot: "/data/gateway-trust"
+	cases := []struct {
+		name      string
+		spec      Session
+		wantAllow bool
+	}{
+		{
+			"correctly-classed-readonly-on-agent-role-allowed",
+			baseSpec([]Spec{m(ClassGatewayTrust, "/data/gateway-trust/ca.pem", "/etc/ssl/gateway-ca.pem", ModeRO)}),
+			true, // unlike identity-material, gateway-trust IS allowed on the agent role
+		},
+		// The non-agent-role case (a gateway-trust mount on an auxiliary proxy
+		// container, the real Iron Proxy shape) needs a genuine second
+		// container to satisfy the "exactly one agent container" invariant —
+		// baseSpec's single-container helper can't express that, so it's
+		// TestGatewayTrust_AllowedOnAuxiliaryProxyRole below instead of a row
+		// here.
+		{
+			"writable-gateway-trust-mount-rejected-even-off-agent-role",
+			baseSpec([]Spec{m(ClassGatewayTrust, "/data/gateway-trust/ca.pem", "/etc/ssl/gateway-ca.pem", ModeRW)}, func(c *Container) { c.Role = "proxy" }),
+			false, // ro-only is unconditional, not role-scoped like identity-material's agent restriction
+		},
+		{
+			"path-under-gateway-trust-root-mislabeled-as-allowlisted-extra-rejected",
+			baseSpec([]Spec{m(ClassAllowlistedExtra, "/data/gateway-trust/ca.pem", "/etc/ssl/gateway-ca.pem", ModeRO)}),
+			false, // ClassRequiredByPath pins this path to gateway-trust; the composer doesn't get to relabel it, same principle as identity-material/install-surface
+		},
+		{
+			"path-under-gateway-trust-root-mislabeled-as-identity-material-rejected",
+			baseSpec([]Spec{m(ClassIdentityMaterial, "/data/gateway-trust/ca.pem", "/etc/ssl/gateway-ca.pem", ModeRO)}),
+			false,
+		},
+		{
+			"gateway-trust-label-on-path-outside-the-root-rejected",
+			baseSpec([]Spec{m(ClassGatewayTrust, "/data/session-materials/ag-1/not-actually-gateway-trust", "/etc/ssl/gateway-ca.pem", ModeRO)}),
+			false, // mountAllowed's gateway-trust case requires the path to actually be under GatewayTrustRoot
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateSpec(tc.spec, policy, caps())
+			allowed := err == nil
+			if allowed != tc.wantAllow {
+				t.Fatalf("ValidateSpec(%s) = %v, want allow=%v", tc.name, err, tc.wantAllow)
+			}
+		})
+	}
+}
+
+// gateway-trust on a non-agent role — the real Iron Proxy shape (CA material
+// mounted into an auxiliary proxy container, not the agent). Needs a genuine
+// two-container session (agent + proxy) to satisfy ValidateSpec's "exactly
+// one agent container" invariant while still putting the mount under test on
+// the non-agent one; baseSpec's single-container helper can't express that.
+func TestGatewayTrust_AllowedOnAuxiliaryProxyRole(t *testing.T) {
+	policy := basePolicy()
+	spec := Session{
+		Key:    SessionKey{InstallSlug: "test", AgentGroupID: "ag-1", SessionID: "sess-1"},
+		Labels: map[string]string{GroupFolderLabel: "test-agent"},
+		Containers: []Container{
+			{Role: "agent", Env: map[string]string{}},
+			{Role: "proxy", Env: map[string]string{}, Mounts: []Spec{
+				m(ClassGatewayTrust, "/data/gateway-trust/ca.pem", "/etc/ssl/gateway-ca.pem", ModeRO),
+			}},
+		},
+		RuntimeTier: "container",
+	}
+	if err := ValidateSpec(spec, policy, caps()); err != nil {
+		t.Fatalf("expected a read-only gateway-trust mount on a non-agent (proxy) role to validate, got denied: %v", err)
+	}
+}
+
+// GatewayTrustRoot unset (the pre-v2.4.0-fixture zero value, or any caller
+// that hasn't migrated its Policy construction yet) must fail closed — deny
+// a gateway-trust mount, not implicitly allow it via underRoot's
+// empty-root-matches-every-absolute-path behavior. This is the regression
+// this package's own existing test suite caught when GatewayTrustRoot was
+// first added (see ClassRequiredByPath's doc comment) — kept as an explicit
+// test so it can't silently regress again.
+func TestGatewayTrust_UnconfiguredRootFailsClosed(t *testing.T) {
+	policy := basePolicy()
+	policy.GatewayTrustRoot = ""
+
+	t.Run("mount_correctly_classed_still_denied", func(t *testing.T) {
+		spec := baseSpec([]Spec{m(ClassGatewayTrust, "/data/gateway-trust/ca.pem", "/etc/ssl/gateway-ca.pem", ModeRO)})
+		if err := ValidateSpec(spec, policy, caps()); err == nil {
+			t.Fatal("expected denial: GatewayTrustRoot unconfigured must fail closed, not allow every path")
+		}
+	})
+
+	t.Run("unrelated_mount_not_misclassified_as_gateway_trust", func(t *testing.T) {
+		// The actual bug this guard fixes: before the empty-root guard, EVERY
+		// absolute hostPath satisfied underRoot(path, "") — including this
+		// entirely unrelated, correctly-classed group-state mount (chosen
+		// deliberately over identity-material: identity-material is never
+		// valid on the agent role at all, for reasons unrelated to
+		// GatewayTrustRoot, which would confound what this specific case is
+		// meant to prove — see mount.go's own role-scope comment).
+		spec := baseSpec([]Spec{m(ClassGroupState, "/data/v2-sessions/ag-1/sess-1", "/workspace", ModeRW)})
+		if err := ValidateSpec(spec, policy, caps()); err != nil {
+			t.Fatalf("expected this group-state mount to validate normally regardless of GatewayTrustRoot being unset, got: %v", err)
+		}
+	})
+}
+
+// ClassRequiredByPath checks GatewayTrustRoot before MaterialsRoot — pins
+// that order so a hostPath under both roots (a misconfiguration nothing else
+// prevents) classifies as gateway-trust here, matching the identical
+// precedence this package's TS mirror (classRequiredByPath, drivers/types.ts)
+// now also uses. Before this test and the matching TS one existed, nothing
+// on either side would have caught the two mirrors disagreeing on which
+// class wins the overlap.
+func TestClassRequiredByPath_GatewayTrustPrecedesMaterials(t *testing.T) {
+	policy := basePolicy()
+	policy.MaterialsRoot = "/data/shared-root"
+	policy.GatewayTrustRoot = "/data/shared-root/gateway-trust"
+
+	got := ClassRequiredByPath("/data/shared-root/gateway-trust/ca.pem", policy)
+	if got != ClassGatewayTrust {
+		t.Fatalf("expected ClassGatewayTrust for a path under both roots, got %q", got)
+	}
+}
+
+// ResolveSymlinks hardening (this package's own Go-only addition, item 1 in
+// the package doc comment) must cover gateway-trust the same way it already
+// covers identity-material/install-surface — a symlink planted inside an
+// otherwise-legal gateway-trust directory must not be able to point the
+// real bind target outside GatewayTrustRoot.
+func TestGatewayTrust_ResolveSymlinksEscapeDenied(t *testing.T) {
+	trustDir := t.TempDir()
+	outsideDir := t.TempDir()
+	realTarget := filepath.Join(outsideDir, "not-actually-trusted.pem")
+	if err := os.WriteFile(realTarget, []byte("fake"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(trustDir, "ca.pem")
+	if err := os.Symlink(realTarget, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	policy := basePolicy()
+	policy.GatewayTrustRoot = trustDir
+	policy.ResolveSymlinks = true
+
+	spec := baseSpec([]Spec{m(ClassGatewayTrust, symlinkPath, "/etc/ssl/gateway-ca.pem", ModeRO)})
+	if err := ValidateSpec(spec, policy, caps()); err == nil {
+		t.Fatal("expected denial: symlink under GatewayTrustRoot resolves outside it")
+	}
+}
+
+// ---------- NetworkAccessIntent (v2.4.0 promotion, Workstream A2) ----------
+
+// The actual wire-contract concern A2 exists for: TS's NetworkAccessIntent
+// serializes as {"endpoint":"...","target":{"kind":"...","identity":"..."}}
+// (a discriminated union flattened into one object with a "kind" tag) --
+// this proves Go's mirror produces and consumes exactly that shape, field
+// names included, not just that the Go types compile.
+func TestNetworkAccessIntent_JSONRoundTrip(t *testing.T) {
+	cases := []struct {
+		name       string
+		intent     NetworkAccessIntent
+		wantFields map[string]any
+	}{
+		{
+			"host-target-has-no-identity-or-role-field",
+			NetworkAccessIntent{Endpoint: "gateway.internal:443", Target: NetworkAccessTarget{Kind: NetworkTargetHost}},
+			map[string]any{"endpoint": "gateway.internal:443", "target": map[string]any{"kind": "host"}},
+		},
+		{
+			"runtime-target-carries-identity",
+			NetworkAccessIntent{Endpoint: "gateway.internal:443", Target: NetworkAccessTarget{Kind: NetworkTargetRuntime, Identity: "fly-machine-abc123"}},
+			map[string]any{"endpoint": "gateway.internal:443", "target": map[string]any{"kind": "runtime", "identity": "fly-machine-abc123"}},
+		},
+		{
+			"session-container-target-carries-role",
+			NetworkAccessIntent{Endpoint: "gateway.internal:443", Target: NetworkAccessTarget{Kind: NetworkTargetSessionContainer, Role: "proxy"}},
+			map[string]any{"endpoint": "gateway.internal:443", "target": map[string]any{"kind": "session-container", "role": "proxy"}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.intent)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatalf("unmarshal into generic map: %v", err)
+			}
+			if !reflect.DeepEqual(decoded, tc.wantFields) {
+				t.Fatalf("wire shape mismatch:\n got:  %#v\n want: %#v\n raw:  %s", decoded, tc.wantFields, raw)
+			}
+
+			// Round-trip back into the typed struct and confirm equality —
+			// proves decoding is as faithful as encoding.
+			var roundTripped NetworkAccessIntent
+			if err := json.Unmarshal(raw, &roundTripped); err != nil {
+				t.Fatalf("unmarshal into NetworkAccessIntent: %v", err)
+			}
+			if roundTripped != tc.intent {
+				t.Fatalf("round-trip mismatch: got %+v, want %+v", roundTripped, tc.intent)
+			}
+		})
+	}
+}
+
+// Session.NetworkAccess rides the same "carried whole across
+// CapabilityRequestPayload" wire path as everything else in Session — this
+// confirms it actually appears under the "networkAccess" key TS expects
+// when a whole Session is marshaled, not just when NetworkAccessIntent is
+// marshaled in isolation.
+func TestSession_NetworkAccessFieldName(t *testing.T) {
+	spec := baseSpec(nil)
+	spec.NetworkAccess = NetworkAccessIntent{Endpoint: "gateway.internal:443", Target: NetworkAccessTarget{Kind: NetworkTargetHost}}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	na, ok := decoded["networkAccess"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a \"networkAccess\" object key in the marshaled Session, got: %s", raw)
+	}
+	if na["endpoint"] != "gateway.internal:443" {
+		t.Fatalf("expected networkAccess.endpoint to round-trip, got: %#v", na)
 	}
 }

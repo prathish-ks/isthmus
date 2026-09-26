@@ -101,10 +101,14 @@ export class DockerSessionDriver implements SessionDriver {
       encryptedVolumes: false,
       unrealized: [],
       sharedNetworkNamespace: false,
-      // Realizes the agent container only, and REFUSES specs carrying more —
-      // see the role check in `prepare`. Flips only when this driver actually
-      // manages auxiliary containers, never before.
-      auxiliaryContainers: false,
+      // v2.4.0 promotion, Workstream B: `prepare` sends the whole spec to
+      // `internal/kernel` (ADR-016) — Go's `Wake` owns creating every
+      // container in it, the private network, and auxiliary teardown
+      // symmetry (`go-host/internal/kernel/exec.go`). This driver's own job
+      // stays validation-and-delegation either way, so a spec carrying an
+      // auxiliary container realizes correctly with no TypeScript-side
+      // container-creation logic added here.
+      auxiliaryContainers: true,
       // The daemon this driver shells for sessions is the same one
       // buildAgentGroupImage builds against; rebuild-in-place is real here.
       imageBuild: true,
@@ -118,20 +122,6 @@ export class DockerSessionDriver implements SessionDriver {
   async prepare(spec: SessionSpec): Promise<SessionHandle> {
     validateSpec(spec, this.#policy, this.capabilities());
 
-    const extra = spec.containers.filter((c) => c.role !== 'agent');
-    if (extra.length > 0) {
-      // Refusal, not omission. This driver realizes the agent container only,
-      // and a spec is a statement of what the session IS — realizing a subset
-      // would validate containers that never exist, leaving (say) a dead proxy
-      // address in the agent's env to be discovered at first egress instead of
-      // here. Composition gates on capabilities().auxiliaryContainers, so this
-      // is the backstop for a composer that did not.
-      throw specInvalid(
-        `docker driver does not manage container role '${extra[0].role}'; ` +
-          `auxiliary containers require a driver with capabilities().auxiliaryContainers`,
-      );
-    }
-    const agent = spec.containers.find((c) => c.role === 'agent')!;
     // Predicted locally for the idempotency check below — byte-identical to
     // `internal/kernel`'s own `ContainerName` port (EC-02), so this never
     // drifts from what the kernel actually derives. Discovery/inspection
@@ -153,7 +143,10 @@ export class DockerSessionDriver implements SessionDriver {
     // as a fresh empty directory — see `assertMountSourcesExist`). After the
     // idempotency return: an existing container's mounts are already bound,
     // and a source deleted since must not refuse adoption of a live session.
-    assertMountSourcesExist(agent.mounts);
+    // Every container's mounts, not just the agent's — v2.4.0 promotion,
+    // Workstream B: an auxiliary container's mount source can go missing
+    // exactly the same way an agent's can, and `Wake` realizes all of them.
+    assertMountSourcesExist(spec.containers.flatMap((c) => c.mounts));
 
     // Network topology is driver-private: injected at registration (see
     // `drivers/index.ts`), never carried on the spec. EC-02 moves the actual

@@ -27,7 +27,12 @@ export interface SessionKey {
  */
 export type ContainerRole = string;
 
-export type MountClass = 'group-state' | 'install-surface' | 'identity-material' | 'allowlisted-extra';
+export type MountClass =
+  | 'group-state'
+  | 'install-surface'
+  | 'identity-material'
+  | 'gateway-trust'
+  | 'allowlisted-extra';
 
 export interface MountSpec {
   /**
@@ -44,6 +49,10 @@ export interface MountSpec {
    *   container's leased identity. Pinned to the deployment's materialsRoot; mode
    *   MUST be 'ro'; NEVER mountable into the 'agent' role — this makes the
    *   no-credentials-in-agents invariant an admission-checkable rule.
+   * - 'gateway-trust': the Iron Proxy gateway's trust root (v2.4.0 promotion,
+   *   Workstream B), mirroring `mount.ClassGatewayTrust` (Go). Pinned to
+   *   policy.gatewayTrustRoot; mode MUST be 'ro' — a gateway an auxiliary
+   *   container trusts is read-only for the same reason install-surface is.
    * - 'allowlisted-extra': arbitrary host paths vetted upstream by the mount allowlist.
    */
   class: MountClass;
@@ -105,6 +114,24 @@ export interface ContainerSpec {
   // each driver. Changing it means a new posture version, not a per-session knob.
 }
 
+/**
+ * Mirrors `mount.NetworkAccessTarget` (Go) / `WireNetworkAccessTarget`
+ * (kernel/protocol.ts) — v2.4.0 promotion, Workstream B. One flat object
+ * with a `kind` tag, not several typed variants: see either mirror's own
+ * doc comment for why.
+ */
+export interface NetworkAccessTarget {
+  kind: 'host' | 'runtime' | 'session-container';
+  identity?: string;
+  role?: string;
+}
+
+/** Mirrors `mount.NetworkAccessIntent` (Go) / `WireNetworkAccessIntent` (kernel/protocol.ts). */
+export interface NetworkAccessIntent {
+  endpoint: string;
+  target: NetworkAccessTarget;
+}
+
 export interface SessionResources {
   /**
    * Deliberately optional: today's Docker path sets no `--memory` unless the
@@ -149,6 +176,19 @@ export interface SessionSpec {
    * inherited from the image.
    */
   runAs?: { uid: number; gid: number };
+  /**
+   * Where an auxiliary container's endpoint reaches, for a multi-container
+   * session (v2.4.0 promotion, Workstream B) — mirrors `mount.Session.NetworkAccess`
+   * (Go), which is a required (non-pointer) field there. Optional here, deliberately
+   * diverging from the Go mirror: this tree's composer does not yet build
+   * gateway-provider specs (no code composes a `gateway-trust` mount or an
+   * auxiliary 'proxy'-role container), so making this required would force
+   * every existing `SessionSpec` construction site to invent a value it has
+   * no real answer for. `kernel/client.ts` omits the wire field entirely when
+   * this is unset, which the Go kernel reads as the zero value — a no-op for
+   * every session that carries no auxiliary container.
+   */
+  networkAccess?: NetworkAccessIntent;
   /** Grace before SIGKILL. Docker `stop -t`, or the realization's termination grace. */
   stopGraceSeconds: number;
 }
@@ -427,6 +467,15 @@ export interface MountPolicy {
   dataRoot: string;
   surfaceRoots: string[];
   materialsRoot: string;
+  /**
+   * The Iron Proxy gateway's trust root (v2.4.0 promotion, Workstream B),
+   * mirroring `mount.Policy.GatewayTrustRoot` (Go). Required, like every
+   * other root here — an empty string is the Go side's own "unconfigured,
+   * fail closed" sentinel (`ClassRequiredByPath`/`mountAllowed` both guard
+   * on it), and a `MountPolicy` composed without a real value inherits that
+   * behavior for free rather than needing a TS-side copy of the guard.
+   */
+  gatewayTrustRoot: string;
 }
 
 export function validateSpec(spec: SessionSpec, policy: MountPolicy, capabilities?: DriverCapabilities): void {
@@ -486,6 +535,9 @@ export function validateSpec(spec: SessionSpec, policy: MountPolicy, capabilitie
       }
       if (mount.class === 'install-surface' && mount.mode !== 'ro') {
         throw deniedByPolicy(`install-surface mount ${mount.hostPath} must be ro`);
+      }
+      if (mount.class === 'gateway-trust' && mount.mode !== 'ro') {
+        throw deniedByPolicy(`gateway-trust mount ${mount.hostPath} must be ro`);
       }
       if (mount.class === 'identity-material' && (mount.mode !== 'ro' || container.role === 'agent')) {
         // The no-credentials invariant, as a checkable rule: identity materials
@@ -584,6 +636,19 @@ export function looksLikeCredential(value: string): boolean {
  * be claimed by a path that has not earned it".
  */
 export function classRequiredByPath(hostPath: string, policy: MountPolicy): MountClass | null {
+  // Gateway-trust checked before materials: matches `mount.ClassRequiredByPath`
+  // (Go)'s order exactly, which itself matches upstream's own v2.4.0 ordering
+  // (commit 249bbe93) — kept identical on both sides so a hostPath under both
+  // roots (a misconfiguration nothing else prevents) classifies the same way
+  // regardless of which side evaluates it, rather than depending on the two
+  // roots staying disjoint by convention alone.
+  //
+  // Guard against an empty gatewayTrustRoot: `underRoot(path, '')` matches
+  // every canonical absolute path (empty root + '/' prefix), so an
+  // unconfigured root would silently misclassify every mount as
+  // gateway-trust instead of failing closed. Mirrors the same guard on
+  // `mount.ClassRequiredByPath` (Go) — see that function's own comment.
+  if (policy.gatewayTrustRoot !== '' && underRoot(hostPath, policy.gatewayTrustRoot)) return 'gateway-trust';
   if (underRoot(hostPath, policy.materialsRoot)) return 'identity-material';
   if (policy.surfaceRoots.some((root) => underRoot(hostPath, root))) return 'install-surface';
   return null;
@@ -634,6 +699,9 @@ function mountAllowed(mount: MountSpec, spec: SessionSpec, policy: MountPolicy):
     }
     case 'identity-material':
       return underRoot(mount.hostPath, policy.materialsRoot);
+    case 'gateway-trust':
+      // Same empty-root fail-closed guard as `classRequiredByPath` above.
+      return policy.gatewayTrustRoot !== '' && underRoot(mount.hostPath, policy.gatewayTrustRoot);
     case 'group-state': {
       if (mount.groupScope !== spec.key.agentGroupId) return false;
       if (underRoot(mount.hostPath, `${policy.dataRoot}/v2-sessions/${mount.groupScope}`)) return true;

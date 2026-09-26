@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ func findCreateCall(calls []recordingCall) (recordingCall, bool) {
 
 func TestDockerExecutor_Wake_IncludesFullHardeningPosture(t *testing.T) {
 	d, calls := newFakeDockerExecutor(t, "")
-	if _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
+	if _, _, _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
 		t.Fatalf("Wake: %v", err)
 	}
 	create, ok := findCreateCall(*calls)
@@ -92,7 +93,7 @@ func TestDockerExecutor_Wake_IncludesFullHardeningPosture(t *testing.T) {
 func TestDockerExecutor_Wake_DerivesNameFromKeyNotCaller(t *testing.T) {
 	d, calls := newFakeDockerExecutor(t, "")
 	spec := testWakeSpec()
-	_, gotName, err := d.Wake(context.Background(), spec, containerdefaults.RunAs{}, containerdefaults.Resources{})
+	_, gotName, _, _, err := d.Wake(context.Background(), spec, containerdefaults.RunAs{}, containerdefaults.Resources{})
 	if err != nil {
 		t.Fatalf("Wake: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestDockerExecutor_Wake_DerivesNameFromKeyNotCaller(t *testing.T) {
 
 func TestDockerExecutor_Wake_SplitsEntrypointFromCommand(t *testing.T) {
 	d, calls := newFakeDockerExecutor(t, "")
-	if _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
+	if _, _, _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
 		t.Fatalf("Wake: %v", err)
 	}
 	create, _ := findCreateCall(*calls)
@@ -129,7 +130,7 @@ func TestDockerExecutor_Wake_SplitsEntrypointFromCommand(t *testing.T) {
 
 func TestDockerExecutor_Wake_ContributedEnvAppendedAfterComposedEnv(t *testing.T) {
 	d, calls := newFakeDockerExecutor(t, "")
-	if _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
+	if _, _, _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
 		t.Fatalf("Wake: %v", err)
 	}
 	create, _ := findCreateCall(*calls)
@@ -152,7 +153,7 @@ func TestDockerExecutor_Wake_ContributedEnvAppendedAfterComposedEnv(t *testing.T
 
 func TestDockerExecutor_Wake_AppendsFixedNetworkWhenConfigured(t *testing.T) {
 	d, calls := newFakeDockerExecutor(t, "nanoclaw-egress")
-	if _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
+	if _, _, _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
 		t.Fatalf("Wake: %v", err)
 	}
 	create, _ := findCreateCall(*calls)
@@ -164,7 +165,7 @@ func TestDockerExecutor_Wake_AppendsFixedNetworkWhenConfigured(t *testing.T) {
 
 func TestDockerExecutor_Wake_NoNetworkFlagWhenUnconfigured(t *testing.T) {
 	d, calls := newFakeDockerExecutor(t, "")
-	if _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
+	if _, _, _, _, err := d.Wake(context.Background(), testWakeSpec(), containerdefaults.RunAs{}, containerdefaults.Resources{}); err != nil {
 		t.Fatalf("Wake: %v", err)
 	}
 	create, _ := findCreateCall(*calls)
@@ -175,12 +176,155 @@ func TestDockerExecutor_Wake_NoNetworkFlagWhenUnconfigured(t *testing.T) {
 	}
 }
 
-func TestDockerExecutor_Wake_RejectsAuxiliaryContainerRole(t *testing.T) {
+// Pre-v2.4.0-promotion, this driver refused any non-agent container role
+// outright — see the pre-249bbe93 version of this test,
+// TestWake_AuxiliaryContainerRole_Denied in adversarial_test.go, updated
+// alongside this one. Workstream A3 replaced that blanket refusal with
+// validateNetworkAccessTarget's two specific rules; a spec that adds an
+// auxiliary container WITHOUT a matching session-container networkAccess
+// target still fails, but now for that reason, not "auxiliary containers
+// are unsupported" (which is no longer true — see
+// TestDockerExecutor_Wake_AuxiliaryContainer_CreatesNetworkAndBothContainers,
+// below, for the accepted case).
+func TestDockerExecutor_Wake_AuxiliaryWithoutMatchingNetworkAccessTarget_Rejected(t *testing.T) {
 	d, _ := newFakeDockerExecutor(t, "")
 	spec := testWakeSpec()
 	spec.Containers = append(spec.Containers, mount.Container{Role: "proxy"})
-	if _, _, err := d.Wake(context.Background(), spec, containerdefaults.RunAs{}, containerdefaults.Resources{}); err == nil {
-		t.Fatal("expected an error for a non-agent container role; this driver does not manage auxiliary containers")
+	// spec.NetworkAccess left at its zero value: Target.Kind == "", which
+	// is not "session-container" — validateNetworkAccessTarget's first
+	// rule fires.
+	if _, _, _, _, err := d.Wake(context.Background(), spec, containerdefaults.RunAs{}, containerdefaults.Resources{}); err == nil {
+		t.Fatal("expected denial: an auxiliary container with no matching session-container networkAccess target")
+	} else if !strings.Contains(err.Error(), "cannot use both a central gateway network and an auxiliary gateway container") {
+		t.Fatalf("expected validateNetworkAccessTarget's specific reason, got: %v", err)
+	}
+}
+
+// validateNetworkAccessTarget's OTHER rule: a session-container target must
+// actually name one of the session's own auxiliary containers, not an
+// arbitrary role string. Distinct code path from the rejection test above
+// (that one fires when Target.Kind isn't "session-container" at all; this
+// one fires when it IS "session-container" but Role doesn't match anything
+// in spec.Containers).
+func TestDockerExecutor_Wake_SessionContainerTargetNamesNonexistentRole_Rejected(t *testing.T) {
+	d, _ := newFakeDockerExecutor(t, "")
+	spec := testWakeSpec()
+	spec.Containers = append(spec.Containers, mount.Container{Role: "proxy"})
+	spec.NetworkAccess = mount.NetworkAccessIntent{
+		Endpoint: "gateway.internal:443",
+		// "session-container" kind, but no container in spec.Containers
+		// has role "wrong-role" — must be rejected, not silently treated
+		// as targeting "proxy" or falling through to the agent's own
+		// network args.
+		Target: mount.NetworkAccessTarget{Kind: mount.NetworkTargetSessionContainer, Role: "wrong-role"},
+	}
+	if _, _, _, _, err := d.Wake(context.Background(), spec, containerdefaults.RunAs{}, containerdefaults.Resources{}); err == nil {
+		t.Fatal("expected denial: a session-container networkAccess target naming a role with no matching auxiliary container")
+	} else if !strings.Contains(err.Error(), "session-container network target must name an auxiliary container") {
+		t.Fatalf("expected validateNetworkAccessTarget's specific reason, got: %v", err)
+	}
+}
+
+// The positive case: a correctly-specified auxiliary container (a
+// session-container networkAccess target naming it) is genuinely realized
+// — network created, both containers created and started, aliased
+// correctly on the private network. This is the actual new capability
+// Workstream A3 exists to add, so it needs its own real proof, not just an
+// absence-of-denial inference from the rejection test above.
+func TestDockerExecutor_Wake_AuxiliaryContainer_CreatesNetworkAndBothContainers(t *testing.T) {
+	d, calls := newFakeDockerExecutor(t, "")
+	spec := testWakeSpec()
+	spec.Containers = append(spec.Containers, mount.Container{
+		Role:  "proxy",
+		Env:   map[string]string{},
+		Image: "nanoclaw-proxy:v1",
+	})
+	spec.NetworkAccess = mount.NetworkAccessIntent{
+		Endpoint: "gateway.internal:443",
+		Target:   mount.NetworkAccessTarget{Kind: mount.NetworkTargetSessionContainer, Role: "proxy"},
+	}
+
+	containerID, containerName, auxiliaryNames, privateNetwork, err := d.Wake(context.Background(), spec, containerdefaults.RunAs{}, containerdefaults.Resources{})
+	if err != nil {
+		t.Fatalf("Wake: %v", err)
+	}
+	if containerID == "" || containerName == "" {
+		t.Fatalf("expected a real container id/name, got id=%q name=%q", containerID, containerName)
+	}
+	wantPrivateNetwork := sessionNetworkName(spec.Key)
+	if privateNetwork != wantPrivateNetwork {
+		t.Fatalf("privateNetwork = %q, want %q", privateNetwork, wantPrivateNetwork)
+	}
+	wantAuxiliaryName := auxiliaryContainerName(spec.Key, "proxy")
+	if len(auxiliaryNames) != 1 || auxiliaryNames[0] != wantAuxiliaryName {
+		t.Fatalf("auxiliaryNames = %v, want [%q]", auxiliaryNames, wantAuxiliaryName)
+	}
+
+	var sawNetworkCreate, sawAuxiliaryCreate, sawNetworkConnect, sawAgentCreate bool
+	var sawAuxiliaryStartBeforeAgentStart, sawAuxiliaryStart, sawAgentStart bool
+	for _, c := range *calls {
+		joined := strings.Join(c.args, " ")
+		switch {
+		case len(c.args) > 1 && c.args[0] == "network" && c.args[1] == "create":
+			sawNetworkCreate = true
+			if !strings.Contains(joined, "--internal") {
+				t.Fatalf("network create missing --internal: %v", c.args)
+			}
+			if !strings.Contains(joined, wantPrivateNetwork) {
+				t.Fatalf("network create did not name the session's own private network: %v", c.args)
+			}
+		case len(c.args) > 0 && c.args[0] == "create" && strings.Contains(joined, "--name "+wantAuxiliaryName):
+			sawAuxiliaryCreate = true
+			if !strings.Contains(joined, "--read-only") {
+				t.Fatalf("auxiliary container create missing --read-only hardening: %v", c.args)
+			}
+			if strings.Contains(joined, "--network "+wantPrivateNetwork) {
+				t.Fatalf("auxiliary container must NOT be created directly on the private network (its own uplink is the bridge network; it joins the private network via a separate network connect) — args: %v", c.args)
+			}
+			if !strings.Contains(joined, "--network bridge") {
+				t.Fatalf("auxiliary container missing its own bridge uplink: %v", c.args)
+			}
+		case len(c.args) > 1 && c.args[0] == "network" && c.args[1] == "connect":
+			sawNetworkConnect = true
+			if !strings.Contains(joined, "--alias gateway.internal:443") {
+				t.Fatalf("network connect did not alias the auxiliary to the configured gateway endpoint: %v", c.args)
+			}
+			if !strings.Contains(joined, wantPrivateNetwork) || !strings.Contains(joined, wantAuxiliaryName) {
+				t.Fatalf("network connect did not target the private network + auxiliary container: %v", c.args)
+			}
+		case len(c.args) > 0 && c.args[0] == "create" && strings.Contains(joined, "--name "+containerName):
+			sawAgentCreate = true
+			if strings.Contains(joined, "--read-only") {
+				t.Fatalf("agent container must NOT be created --read-only: %v", c.args)
+			}
+			if !strings.Contains(joined, "--network "+wantPrivateNetwork) {
+				t.Fatalf("agent container must be attached to the session's private network, not the driver's fixed network: %v", c.args)
+			}
+		case len(c.args) > 1 && c.args[0] == "start" && c.args[1] == wantAuxiliaryName:
+			sawAuxiliaryStart = true
+		case len(c.args) > 1 && c.args[0] == "start" && c.args[1] == containerName:
+			sawAgentStart = true
+			// By the time the agent starts, the auxiliary must already have.
+			sawAuxiliaryStartBeforeAgentStart = sawAuxiliaryStart
+		}
+	}
+	if !sawNetworkCreate {
+		t.Fatal("expected a docker network create call")
+	}
+	if !sawAuxiliaryCreate {
+		t.Fatal("expected a docker create call for the auxiliary container")
+	}
+	if !sawNetworkConnect {
+		t.Fatal("expected a docker network connect call for the auxiliary container")
+	}
+	if !sawAgentCreate {
+		t.Fatal("expected a docker create call for the agent container")
+	}
+	if !sawAgentStart {
+		t.Fatal("expected a docker start call for the agent container")
+	}
+	if !sawAuxiliaryStartBeforeAgentStart {
+		t.Fatal("expected the auxiliary container to be started before the agent container")
 	}
 }
 
@@ -205,7 +349,7 @@ func TestDockerExecutor_BuildImage_PipesDockerfileOnStdin(t *testing.T) {
 
 func TestDockerExecutor_Kill_StopsGracefullyThenRemoves(t *testing.T) {
 	d, calls := newFakeDockerExecutor(t, "")
-	if err := d.Kill(context.Background(), "some-container", 7); err != nil {
+	if err := d.Kill(context.Background(), "some-container", nil, "", 7); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	if len(*calls) != 2 {
@@ -225,11 +369,122 @@ func TestDockerExecutor_Kill_StopsGracefullyThenRemoves(t *testing.T) {
 
 func TestDockerExecutor_Kill_ZeroOrNegativeGraceDefaultsToOne(t *testing.T) {
 	d, calls := newFakeDockerExecutor(t, "")
-	if err := d.Kill(context.Background(), "c1", 0); err != nil {
+	if err := d.Kill(context.Background(), "c1", nil, "", 0); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	stop := (*calls)[0]
 	if !strings.Contains(strings.Join(stop.args, " "), "-t 1") {
 		t.Fatalf("expected default grace of 1 second, got: %v", stop.args)
+	}
+}
+
+// Kill's teardown symmetry with Wake's multi-container creation (v2.4.0
+// promotion, Workstream A3): auxiliaries stop+rm in REVERSE creation order,
+// then the private network — mirroring DockerHandle.stop's own order
+// (docker-driver.ts, commit 249bbe93) exactly. Two auxiliaries used
+// specifically so "reverse order" is an observable, not an assumed,
+// property.
+func TestDockerExecutor_Kill_TearsDownAuxiliariesInReverseThenNetwork(t *testing.T) {
+	d, calls := newFakeDockerExecutor(t, "")
+	if err := d.Kill(context.Background(), "agent-1", []string{"aux-first", "aux-second"}, "session-net", 5); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	var seq []string
+	for _, c := range *calls {
+		if len(c.args) < 2 {
+			continue
+		}
+		// "network rm X" is a 3-arg call (args[0]=="network") — summarize
+		// as its own two-word verb, distinct from the 2-arg "stop"/"rm"
+		// calls this loop otherwise reduces to "<verb> <target>".
+		if c.args[0] == "network" && len(c.args) >= 2 {
+			seq = append(seq, "network "+c.args[1]+" "+c.args[len(c.args)-1])
+			continue
+		}
+		seq = append(seq, c.args[0]+" "+c.args[len(c.args)-1])
+	}
+	want := []string{
+		"stop agent-1", "rm agent-1",
+		"stop aux-second", "rm aux-second",
+		"stop aux-first", "rm aux-first",
+		"network rm session-net",
+	}
+	if len(seq) != len(want) {
+		t.Fatalf("call sequence = %v, want %v", seq, want)
+	}
+	for i := range want {
+		if seq[i] != want[i] {
+			t.Fatalf("call %d = %q, want %q (full sequence: %v)", i, seq[i], want[i], seq)
+		}
+	}
+}
+
+// An ordinary single-container session (nil auxiliaryNames, "" privateNetwork
+// — the zero value every pre-v2.4.0 Kill call already passed) must not issue
+// any network-teardown call at all.
+func TestDockerExecutor_Kill_NoAuxiliariesOrNetwork_OnlyTearsDownAgent(t *testing.T) {
+	d, calls := newFakeDockerExecutor(t, "")
+	if err := d.Kill(context.Background(), "agent-1", nil, "", 5); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("expected exactly stop+rm for the agent only, got %d calls: %v", len(*calls), *calls)
+	}
+}
+
+// The "allocate all or leave nothing" property Wake's own doc comment
+// promises: a failure partway through a multi-container wake (the agent
+// create, after the network and auxiliary already succeeded) must roll
+// back everything already created, not leave a live auxiliary container or
+// network behind.
+func TestDockerExecutor_Wake_AgentCreateFailure_RollsBackAuxiliaryAndNetwork(t *testing.T) {
+	var calls []recordingCall
+	d := &dockerExecutor{
+		dockerBin: "docker",
+		runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			calls = append(calls, recordingCall{name: name, args: args})
+			if len(args) > 0 && args[0] == "create" {
+				// Fail specifically the agent's create (identifiable as the
+				// one NOT creating the auxiliary role's own name) — the
+				// auxiliary and the network must already have succeeded by
+				// the time this fires.
+				joined := strings.Join(args, " ")
+				if strings.Contains(joined, "nanoclaw-proxy") {
+					return []byte("fake-aux-id\n"), nil
+				}
+				return nil, fmt.Errorf("simulated docker daemon failure on agent create")
+			}
+			return nil, nil
+		},
+	}
+	spec := testWakeSpec()
+	spec.Containers = append(spec.Containers, mount.Container{Role: "proxy", Env: map[string]string{}, Image: "nanoclaw-proxy:v1"})
+	spec.NetworkAccess = mount.NetworkAccessIntent{
+		Endpoint: "gateway.internal:443",
+		Target:   mount.NetworkAccessTarget{Kind: mount.NetworkTargetSessionContainer, Role: "proxy"},
+	}
+
+	_, _, _, _, err := d.Wake(context.Background(), spec, containerdefaults.RunAs{}, containerdefaults.Resources{})
+	if err == nil {
+		t.Fatal("expected the simulated agent-create failure to surface as an error")
+	}
+
+	wantAuxiliaryName := auxiliaryContainerName(spec.Key, "proxy")
+	wantNetwork := sessionNetworkName(spec.Key)
+	var sawAuxiliaryRemoved, sawNetworkRemoved bool
+	for _, c := range calls {
+		joined := strings.Join(c.args, " ")
+		if c.args[0] == "rm" && strings.Contains(joined, wantAuxiliaryName) {
+			sawAuxiliaryRemoved = true
+		}
+		if len(c.args) > 1 && c.args[0] == "network" && c.args[1] == "rm" && strings.Contains(joined, wantNetwork) {
+			sawNetworkRemoved = true
+		}
+	}
+	if !sawAuxiliaryRemoved {
+		t.Fatalf("expected the already-created auxiliary container to be rolled back, calls: %+v", calls)
+	}
+	if !sawNetworkRemoved {
+		t.Fatalf("expected the already-created private network to be rolled back, calls: %+v", calls)
 	}
 }

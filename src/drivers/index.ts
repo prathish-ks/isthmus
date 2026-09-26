@@ -60,7 +60,7 @@ import type { MountPolicy, SessionDriver, SessionSpec } from './types.js';
 
 const DEFAULT_DRIVER_KIND = 'docker';
 
-const SETTINGS = ['NANOCLAW_RUNTIME_DRIVER', 'NANOCLAW_SESSION_MATERIAL_ROOT'] as const;
+const SETTINGS = ['NANOCLAW_RUNTIME_DRIVER', 'NANOCLAW_SESSION_MATERIAL_ROOT', 'NANOCLAW_GATEWAY_TRUST_ROOT'] as const;
 
 /** `process.env` wins, then `.env`, then the default. */
 export function readSetting(key: (typeof SETTINGS)[number], env: NodeJS.ProcessEnv = process.env): string {
@@ -123,6 +123,11 @@ export function mountPolicy(env: NodeJS.ProcessEnv = process.env): MountPolicy {
     // identity-material mount is denied by a policy naming a path that looks
     // correct.
     materialsRoot: readSetting('NANOCLAW_SESSION_MATERIAL_ROOT', env) || path.join(DATA_DIR, 'session-materials'),
+    // v2.4.0 promotion, Workstream B: mirrors materialsRoot's own pattern.
+    // No composer builds a gateway-trust mount yet, so this root is unused
+    // today — it exists so `validateSpec` fails closed by construction
+    // rather than by an unconfigured empty string, the moment one does.
+    gatewayTrustRoot: readSetting('NANOCLAW_GATEWAY_TRUST_ROOT', env) || path.join(DATA_DIR, 'gateway-trust'),
   };
 }
 

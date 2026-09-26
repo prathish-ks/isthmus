@@ -227,11 +227,16 @@ func (k *Kernel) handleWake(ctx context.Context, req CapabilityRequestPayload) (
 		return CapabilityResponsePayload{}, &ErrorInfo{Code: ErrDenied, Detail: err.Error()}
 	}
 
-	containerID, containerName, err := k.executor.Wake(ctx, *req.Session, runAs, resources)
+	containerID, containerName, auxiliaryNames, privateNetwork, err := k.executor.Wake(ctx, *req.Session, runAs, resources)
 	if err != nil {
 		return CapabilityResponsePayload{}, &ErrorInfo{Code: ErrExecFailed, Detail: err.Error()}
 	}
-	rt := lifecycle.NewRuntime(containerName, time.Now().UnixMilli(), false)
+	// NewRuntimeWithNetwork over NewRuntime even for the (overwhelmingly
+	// common) single-container case: auxiliaryNames/privateNetwork are
+	// already "" / nil from Wake in that case, so this is a no-op widening,
+	// not a behavior change — see lifecycle.Runtime's own field comment for
+	// why a later Kill needs these recorded now rather than re-derived then.
+	rt := lifecycle.NewRuntimeWithNetwork(containerName, time.Now().UnixMilli(), false, auxiliaryNames, privateNetwork)
 	rt.SetStopGraceSeconds(req.Session.StopGraceSeconds)
 	k.registry.Register(req.Session.Key.SessionID, rt)
 	k.audit(auditEntry{capability: CapabilityContainerWake, sessionID: req.Session.Key.SessionID, allowed: true})
@@ -283,10 +288,13 @@ func (k *Kernel) handleKill(ctx context.Context, req CapabilityRequestPayload) (
 		// killed.
 		return CapabilityResponsePayload{}, &ErrorInfo{Code: ErrUnknownSession, Detail: fmt.Sprintf("no running session %q known to this kernel", req.SessionID)}
 	}
-	// Grace seconds come from the kernel's own registry — recorded at wake
-	// time from the validated spec — never re-asserted by the caller at
-	// kill time (EC-02; see lifecycle.Runtime.StopGraceSeconds).
-	if err := k.executor.Kill(ctx, rt.ContainerName, rt.StopGraceSeconds()); err != nil {
+	// Grace seconds, auxiliary container names, and the private network (if
+	// any) all come from the kernel's own registry — recorded at wake time
+	// from what Wake itself actually created — never re-asserted by the
+	// caller at kill time (EC-02 for grace seconds; the identical
+	// discipline extended to auxiliaries/network by the v2.4.0 promotion's
+	// Workstream A3, see lifecycle.Runtime's own field comment).
+	if err := k.executor.Kill(ctx, rt.ContainerName, rt.AuxiliaryNames, rt.PrivateNetwork, rt.StopGraceSeconds()); err != nil {
 		return CapabilityResponsePayload{}, &ErrorInfo{Code: ErrExecFailed, Detail: err.Error()}
 	}
 	rt.SetStopReason(req.Reason)

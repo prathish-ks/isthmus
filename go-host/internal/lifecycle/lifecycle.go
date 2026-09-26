@@ -284,6 +284,18 @@ type Runtime struct {
 	ContainerName string
 	StartedAtMs   int64
 	Adopted       bool
+	// AuxiliaryNames and PrivateNetwork (v2.4.0 promotion, Workstream A3)
+	// record what dockerExecutor.Wake additionally created for a
+	// multi-container (gateway) session, mirroring DockerHandle's own
+	// auxiliaryNames/privateNetwork instance fields (docker-driver.ts,
+	// commit 249bbe93) — read-only bookkeeping for the identical reason
+	// ContainerName already is: a later Kill must tear these down using
+	// what THIS process itself created, never a caller-supplied name.
+	// AuxiliaryNames is nil and PrivateNetwork is "" for an ordinary
+	// single-container session (the overwhelming majority today) — the
+	// zero value correctly means "nothing extra to tear down."
+	AuxiliaryNames []string
+	PrivateNetwork string
 
 	mu               sync.Mutex
 	finished         bool
@@ -298,6 +310,21 @@ type Runtime struct {
 // a resolve callback).
 func NewRuntime(containerName string, startedAtMs int64, adopted bool) *Runtime {
 	return &Runtime{ContainerName: containerName, StartedAtMs: startedAtMs, Adopted: adopted}
+}
+
+// NewRuntimeWithNetwork is NewRuntime plus the v2.4.0-promotion auxiliary
+// bookkeeping (see the field comments above) — a separate constructor
+// rather than widening NewRuntime's signature, so every pre-existing
+// single-container call site keeps compiling unchanged (LAW-01/LAW-02:
+// this is bookkeeping plumbing, not a behavior change for the common case).
+func NewRuntimeWithNetwork(containerName string, startedAtMs int64, adopted bool, auxiliaryNames []string, privateNetwork string) *Runtime {
+	return &Runtime{
+		ContainerName:  containerName,
+		StartedAtMs:    startedAtMs,
+		Adopted:        adopted,
+		AuxiliaryNames: auxiliaryNames,
+		PrivateNetwork: privateNetwork,
+	}
 }
 
 // AddExitCallback mirrors killContainer's onExit registration
