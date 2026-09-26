@@ -1659,3 +1659,26 @@ closure) resolves — flagged per-line below rather than glossed over.
   open and `ci.yml` runs green for real. Tag-immutability re-check and
   `docs/upstream-pin.json`/`docs/baseline.md` (G4) remain unchecked by
   design — both belong only to the final pin-move PR.
+- 2026-09-26 — **Independent code review on PR #1
+  (`feat/mount-gateway-trust-class`) before opening it, two findings, both
+  fixed.** Read the actual diff fresh rather than re-trusting this
+  document's own "Done" rows: (1) `validateNetworkAccessTarget`'s second
+  rejection branch (a session-container target naming a role with no
+  matching auxiliary container, `internal/kernel/exec.go`) had zero test
+  coverage, unlike every sibling rule in the same diff — added
+  `TestDockerExecutor_Wake_SessionContainerTargetNamesNonexistentRole_Rejected`.
+  (2) `mount.ClassRequiredByPath` (Go) checks `GatewayTrustRoot` before
+  `MaterialsRoot`; the TS mirror (`classRequiredByPath`,
+  `drivers/types.ts`) checked the opposite order — the two "byte-identical
+  mirror" implementations disagreed on precedence for a hostPath under
+  both roots, a misconfiguration nothing else prevents. Reordered TS to
+  match Go exactly; added a pinning test on both sides. One plausible
+  cross-branch bug was chased and ruled out, not just assumed fine: Iron
+  Proxy's (C8) `networkAccess.target.kind: 'runtime'` looked like it might
+  collide with this PR's "auxiliary containers require a session-container
+  target" rule — confirmed by reading `ironProxyContribution`'s actual
+  return shape that it never populates `containers`, so the rule never
+  fires for Iron Proxy sessions. Fixed in commit `513f3cb4`; full
+  `go-host` suite and full `drivers/` suite green after. See
+  `docs/promotion-v2.4.0.md`'s own commit history for the reported
+  findings' exact wording.
