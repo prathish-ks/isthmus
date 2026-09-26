@@ -54,7 +54,7 @@ import * as path from 'node:path';
 
 import { OneCLI, type ApprovalRequest } from '@onecli-sh/sdk';
 
-import { ONECLI_API_KEY, ONECLI_URL } from '../config.js';
+import { ONECLI_API_KEY, ONECLI_GATEWAY_CONTAINER, ONECLI_URL } from '../config.js';
 import type { MountSpec, NetworkAccessIntent } from '../drivers/types.js';
 import { log } from '../log.js';
 
@@ -76,6 +76,21 @@ const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
  */
 function onecliNetworkAccess(): NetworkAccessIntent {
   return { endpoint: ONECLI_URL, target: { kind: 'host' } };
+}
+
+/**
+ * The install-wide egress-lockdown descriptor (`GatewayProviderDefinition
+ * .egressGateway`, ADR-033) — a different question from
+ * `onecliNetworkAccess()` above despite the shared type: OneCLI *does* run
+ * as a single, locally-managed Docker container the host's own lockdown
+ * network attaches to by name, even though that container is never one of
+ * a session's own `driver`-realized containers (which is what `kind:
+ * 'host'` above is about). `identity` is the container name
+ * `egress-lockdown.ts` attaches to the network and looks up membership by;
+ * `endpoint` is the alias the agent reaches it through inside that network.
+ */
+function onecliEgressGateway(): NetworkAccessIntent {
+  return { endpoint: 'host.docker.internal', target: { kind: 'runtime', identity: ONECLI_GATEWAY_CONTAINER } };
 }
 
 // The exact, fixed host paths @onecli-sh/sdk's lib/index.js writes to for a
@@ -231,6 +246,7 @@ export function toGatewayApprovalRequest(
 
 registerGatewayProvider('onecli', () => ({
   kind: 'onecli',
+  egressGateway: onecliEgressGateway,
   // The container skill (`container/skills/onecli-gateway`) that teaches an
   // agent how the proxy works — reserved for the selective-exposure filter
   // (`selectGatewayAgentSkills`) a second, competing gateway (Iron Proxy,

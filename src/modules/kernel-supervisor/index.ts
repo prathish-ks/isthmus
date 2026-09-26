@@ -31,7 +31,9 @@ import os from 'os';
 import path from 'path';
 
 import { DATA_DIR, EGRESS_LOCKDOWN, GROUPS_DIR, KERNEL_SOCKET_PATH, MOUNT_ALLOWLIST_PATH } from '../../config.js';
+import type { NetworkAccessIntent } from '../../drivers/types.js';
 import { EGRESS_NETWORK, ensureEgressNetwork } from '../../egress-lockdown.js';
+import { getGatewayProvider } from '../../gateway-providers/index.js';
 import { onHostShutdown, onHostStart } from '../../host-lifecycle.js';
 import { ensureRuntimeSocketDir } from '../../install-slug.js';
 import { log } from '../../log.js';
@@ -165,6 +167,14 @@ function ensureServeConfig(): string {
  * before every kernel start: establish the network here (throws if lockdown
  * is on but can't be established, matching ensureEgressNetwork's own
  * documented contract), and pin the kernel to it for the process's lifetime.
+ *
+ * Which gateway to attach is resolved from whichever one is actually
+ * configured (`resolveEgressGatewayAccess`, defaulting to
+ * `getGatewayProvider().egressGateway?.()`) rather than assuming OneCLI —
+ * v2.4.0 promotion, ADR-033. A configured gateway that declares no
+ * `egressGateway()` fails this check the same way an unreachable one does:
+ * lockdown refuses to start rather than silently falling through to open
+ * egress.
  */
 /**
  * Injectable so tests can exercise every EGRESS_LOCKDOWN/conflict/throw
@@ -181,11 +191,18 @@ function ensureServeConfig(): string {
 export interface DockerNetworkDeps {
   egressLockdown: boolean;
   egressNetwork: string;
-  ensureEgressNetwork: () => boolean;
+  /** Which gateway to attach — undefined means the configured gateway declares none. */
+  resolveEgressGatewayAccess: () => NetworkAccessIntent | undefined;
+  ensureEgressNetwork: (access: NetworkAccessIntent) => boolean;
 }
 
 export function defaultDockerNetworkDeps(): DockerNetworkDeps {
-  return { egressLockdown: EGRESS_LOCKDOWN, egressNetwork: EGRESS_NETWORK, ensureEgressNetwork };
+  return {
+    egressLockdown: EGRESS_LOCKDOWN,
+    egressNetwork: EGRESS_NETWORK,
+    resolveEgressGatewayAccess: () => getGatewayProvider().egressGateway?.(),
+    ensureEgressNetwork,
+  };
 }
 
 export function dockerNetworkArgs(deps: DockerNetworkDeps = defaultDockerNetworkDeps()): string[] {
@@ -201,7 +218,14 @@ export function dockerNetworkArgs(deps: DockerNetworkDeps = defaultDockerNetwork
           `or set it to the same value.`,
       );
     }
-    deps.ensureEgressNetwork(); // fail-fast: throws EgressLockdownError if it can't be established
+    const access = deps.resolveEgressGatewayAccess();
+    if (!access) {
+      throw new Error(
+        `NANOCLAW_EGRESS_LOCKDOWN=true but the configured gateway declares no egress-lockdown attachment ` +
+          `(GatewayProviderDefinition.egressGateway). Refusing to start with unenforceable egress lockdown.`,
+      );
+    }
+    deps.ensureEgressNetwork(access); // fail-fast: throws EgressLockdownError if it can't be established
     return ['-docker-network', deps.egressNetwork];
   }
   if (process.env.NANOCLAW_KERNEL_DOCKER_NETWORK) {

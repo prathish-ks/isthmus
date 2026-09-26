@@ -152,6 +152,24 @@ export type GatewayConnectionResult =
 export interface GatewayProviderDefinition {
   /** Identity, for logs and selection — never a branch above the seam. */
   readonly kind: string;
+  /**
+   * How this gateway attaches to the host's egress-lockdown Docker network
+   * (`NANOCLAW_EGRESS_LOCKDOWN=true`) — install-wide, session-independent.
+   * Read once at kernel-supervisor startup (`egress-lockdown.ts`), before
+   * any session exists to source a per-session `GatewayContribution
+   * .networkAccess` from. Deliberately a separate field from that one, not
+   * derived from it: this answers "which single Docker container does the
+   * host's own lockdown network attach to," `GatewayContribution
+   * .networkAccess` answers "what network may THIS session's containers
+   * reach" (Go-kernel-validated, per session) — two different questions
+   * that happen to share the `NetworkAccessIntent` shape (v2.4.0
+   * promotion, ADR-033). Undefined means this gateway is not a single
+   * locally-running Docker container agent traffic can be routed through —
+   * egress lockdown then refuses to start rather than silently allow open
+   * egress, the same fail-closed contract as an established access that
+   * turns out to be unreachable.
+   */
+  egressGateway?(): NetworkAccessIntent;
   /** Shared approval health for separated host processes. Missing/expired leases must read false. */
   availability?: {
     /** Only the process owning the approval subscription publishes; refreshes a bounded lease. */
