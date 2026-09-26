@@ -136,6 +136,13 @@ not just absorbing them passively — while:
   its multi-host claim/lease coordination, checked against all nine design
   laws; see the ADR for the full reasoning and the new Workstream C7/C8/C9
   tasks this produced. No Go kernel changes result from either decision.
+- **Added 2026-09-26, per external review — the file-inventory CSV (D0,
+  `docs/promotion-v2.4.0-file-inventory.csv`) is the source of truth for
+  what's actually in scope, not this section's prose.** Every scope
+  re-open recorded above is reflected there as classified rows; if the two
+  ever disagree, the CSV wins. Before the final pin-move PR, confirm the
+  CSV's rows match the scope decisions this section records — zero rows
+  whose classification contradicts a decision made here.
 
 ## PR boundaries
 
