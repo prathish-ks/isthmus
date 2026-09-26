@@ -324,3 +324,79 @@ func TestLive_Wake_MultiContainerSession_AuxiliaryIsReadOnly(t *testing.T) {
 		t.Fatal("auxiliary container did not respond to docker exec at all — the write-failure check above is not meaningful without this")
 	}
 }
+
+// TestLive_Wake_AgentCreateFailure_RollsBackAuxiliaryAndNetworkForReal is the
+// live-daemon counterpart to
+// TestDockerExecutor_Wake_AgentCreateFailure_RollsBackAuxiliaryAndNetwork
+// (exec_test.go), raised per external review on this PR: that unit test
+// only proves the *right argv* (`rm`, `network rm`) was issued to a fake
+// runner that always reports success — it can't tell a real "the rollback
+// commands ran and actually worked" apart from "the rollback commands were
+// merely attempted." This test forces a real docker daemon to genuinely
+// fail the agent's own `docker create` (a name collision with a container
+// this test plants first — deterministic and instant, unlike an
+// image-pull failure, which would depend on network/registry state this
+// package's live-Docker suite otherwise avoids depending on), after the
+// auxiliary and network have already been really created, and then asks
+// the real daemon — not this package's own bookkeeping — whether they are
+// actually gone afterward.
+func TestLive_Wake_AgentCreateFailure_RollsBackAuxiliaryAndNetworkForReal(t *testing.T) {
+	requireLiveDocker(t)
+
+	k := New(testPolicy(), withExecutor(newDockerExecutor("")))
+	spec := multiContainerLiveSession(t)
+
+	// Plant a real container occupying the exact name Wake's own agent
+	// create will ask for — ContainerName is the same derivation Wake uses
+	// internally, not a guess. `docker create --name <taken> ...` then
+	// fails for real, for the most ordinary reason a real daemon actually
+	// produces this error ("Conflict. The container name ... is already in
+	// use"), not a simulated one.
+	agentName := ContainerName(spec.Key)
+	collisionCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(collisionCtx, "docker", "create", "--name", agentName, "alpine:3", "true").CombinedOutput(); err != nil { // #nosec G204 -- fixed args, agentName is kernel-derived from a fixed test fixture // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		t.Fatalf("failed to plant the name-collision container: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = exec.CommandContext(ctx, "docker", "rm", "--force", agentName).CombinedOutput() // #nosec G204 -- fixed args, kernel-derived name // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	})
+
+	resp := dispatch(t, k, OpCapabilityRequest, CapabilityRequestPayload{
+		Capability: CapabilityContainerWake,
+		Session:    &spec,
+	})
+	if resp.OK {
+		t.Fatalf("expected the name-collision to surface as a real docker create failure, got success: %+v", resp.Payload)
+	}
+	if resp.Error == nil || resp.Error.Code != ErrExecFailed {
+		t.Fatalf("expected ErrExecFailed from the real docker create conflict, got %+v", resp.Error)
+	}
+
+	wantNetwork := sessionNetworkName(spec.Key)
+	wantAuxiliaryName := auxiliaryContainerName(spec.Key, "proxy")
+
+	// The real daemon's own word on it, not this package's belief about
+	// what it cleaned up: the auxiliary container must genuinely be gone.
+	inspectCtx, cancelInspect := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelInspect()
+	if out, err := exec.CommandContext(inspectCtx, "docker", "inspect", wantAuxiliaryName).CombinedOutput(); err == nil { // #nosec G204 -- fixed literal + kernel-derived name // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		t.Fatalf("expected the auxiliary container to be genuinely gone after rollback, but docker inspect still finds it: %s", strings.TrimSpace(string(out)))
+	}
+	// And the private network — same standard.
+	netCtx, cancelNet := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelNet()
+	if out, err := exec.CommandContext(netCtx, "docker", "network", "inspect", wantNetwork).CombinedOutput(); err == nil { // #nosec G204 -- fixed literal + kernel-derived name // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		t.Fatalf("expected the private network to be genuinely gone after rollback, but docker network inspect still finds it: %s", strings.TrimSpace(string(out)))
+	}
+	// And the planted collision container must be untouched — rollback
+	// only ever tears down what THIS Wake call itself created, never an
+	// arbitrary same-named container it merely collided with.
+	if _, err := exec.CommandContext(context.Background(), "docker", "inspect", agentName).CombinedOutput(); err != nil { // #nosec G204 -- fixed literal + kernel-derived name // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+		t.Fatalf("expected the planted collision container to survive untouched, but it's gone: %v", err)
+	}
+
+	t.Logf("CONFIRMED LIVE: a real docker create conflict on the agent rolled back a genuinely-created auxiliary %s and network %s, confirmed absent via docker inspect, without touching the unrelated same-named container", wantAuxiliaryName, wantNetwork)
+}

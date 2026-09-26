@@ -131,6 +131,40 @@ func TestDispatch_OldV1HostAgainstNewKernel_RejectedNotMisparsed(t *testing.T) {
 	}
 }
 
+// The sibling case the test above deliberately keeps minimal (an empty
+// OpStatusTrace payload) but a real old TS host would never send: a genuine
+// v1-shaped container.wake request, full mount.Session included, with no
+// networkAccess field at all (v1 predates it) — the actual wire shape a
+// pre-v2.4.0 host produces. Server.go's Dispatch checks env.Version before
+// ever touching env.Payload (confirmed directly, not assumed — see line
+// 104), so this should be rejected wholesale, with the payload never
+// reaching json.Unmarshal for the op-specific request type at all. The
+// fakeExecutor's own wakeCalls counter is the proof that isn't just an
+// inference from the response: if some future refactor ever let a
+// version-mismatched request fall through to a partial decode-and-execute
+// path, this call count would be the thing that catches it.
+func TestDispatch_OldV1HostAgainstNewKernel_RealisticWakePayload_NeverReachesExecutor(t *testing.T) {
+	exec := &fakeExecutor{}
+	k := New(testPolicy(), withExecutor(exec))
+
+	spec := validSession()
+	raw, err := json.Marshal(CapabilityRequestPayload{Capability: CapabilityContainerWake, Session: &spec})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	resp := k.Dispatch(context.Background(), Envelope{Version: "v1", Op: OpCapabilityRequest, RequestID: "r", Payload: raw})
+
+	if resp.OK {
+		t.Fatalf("expected an old v1 envelope to be rejected by the v2 kernel, got success: %+v", resp)
+	}
+	if resp.Error == nil || resp.Error.Code != ErrUnsupportedVersion {
+		t.Fatalf("expected ErrUnsupportedVersion specifically (not some other failure mode), got: %+v", resp)
+	}
+	if exec.wakeCalls != 0 {
+		t.Fatalf("expected the executor's Wake to never be called for a version-rejected request, got %d calls", exec.wakeCalls)
+	}
+}
+
 func TestDispatch_RejectsUnknownOp(t *testing.T) {
 	k := New(testPolicy(), withExecutor(&fakeExecutor{}))
 	resp := k.Dispatch(context.Background(), Envelope{Version: ProtocolVersion, Op: "container.exec_raw", RequestID: "r"})
