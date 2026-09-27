@@ -11,6 +11,9 @@ vi.mock('./container-runtime.js', () => ({ CONTAINER_RUNTIME_BIN: 'docker-test' 
 
 const NETWORK = 'egress-net-test';
 const GATEWAY = 'onecli-gw-test';
+// The shape GatewayProviderDefinition.egressGateway() returns (ADR-033) —
+// tests build this directly rather than going through a real gateway.
+const ACCESS = { endpoint: 'host.docker.internal', target: { kind: 'runtime' as const, identity: GATEWAY } };
 
 /**
  * `EGRESS_LOCKDOWN` is a module-level const read from config at import, so each
@@ -21,7 +24,6 @@ async function load(lockdown: boolean) {
   vi.doMock('./config.js', () => ({
     EGRESS_LOCKDOWN: lockdown,
     EGRESS_NETWORK: NETWORK,
-    ONECLI_GATEWAY_CONTAINER: GATEWAY,
   }));
   return import('./egress-lockdown.js');
 }
@@ -69,7 +71,22 @@ beforeEach(() => {
 describe('ensureEgressNetwork', () => {
   it('is a no-op returning false when lockdown is off — never shells out', async () => {
     const { ensureEgressNetwork } = await load(false);
-    expect(ensureEgressNetwork()).toBe(false);
+    expect(ensureEgressNetwork(ACCESS)).toBe(false);
+    expect(mocks.execFileSync).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op returning false when lockdown is on but no access was resolved', async () => {
+    const { ensureEgressNetwork } = await load(true);
+    expect(ensureEgressNetwork(undefined)).toBe(false);
+    expect(mocks.execFileSync).not.toHaveBeenCalled();
+  });
+
+  it('throws when the resolved access is not a single Docker container target', async () => {
+    const { ensureEgressNetwork, EgressLockdownError } = await load(true);
+    expect(() => ensureEgressNetwork({ endpoint: 'x', target: { kind: 'host' } })).toThrow(EgressLockdownError);
+    expect(() => ensureEgressNetwork({ endpoint: 'x', target: { kind: 'host' } })).toThrow(
+      /is not a single Docker container/,
+    );
     expect(mocks.execFileSync).not.toHaveBeenCalled();
   });
 
@@ -77,7 +94,7 @@ describe('ensureEgressNetwork', () => {
     const { ensureEgressNetwork } = await load(true);
     scriptDocker({ inspect: true, members: [`other\n${GATEWAY}\n`] });
 
-    expect(ensureEgressNetwork()).toBe(true);
+    expect(ensureEgressNetwork(ACCESS)).toBe(true);
     expect(verbs()).toEqual(['inspect', 'inspect']);
     expect(mocks.execFileSync).toHaveBeenNthCalledWith(1, 'docker-test', ['network', 'inspect', NETWORK], {
       stdio: 'pipe',
@@ -93,12 +110,12 @@ describe('ensureEgressNetwork', () => {
     expect(mocks.log.info).not.toHaveBeenCalled();
   });
 
-  it('creates the internal network when missing, then attaches the gateway with the host alias', async () => {
+  it('creates the internal network when missing, then attaches the gateway with its declared alias', async () => {
     const { ensureEgressNetwork } = await load(true);
     // First format-inspect: nobody attached; after connect: gateway present.
     scriptDocker({ inspect: false, create: true, connect: true, members: ['', `${GATEWAY}\n`] });
 
-    expect(ensureEgressNetwork()).toBe(true);
+    expect(ensureEgressNetwork(ACCESS)).toBe(true);
     expect(verbs()).toEqual(['inspect', 'create', 'inspect', 'connect', 'inspect']);
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'docker-test',
@@ -107,12 +124,13 @@ describe('ensureEgressNetwork', () => {
     );
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'docker-test',
-      ['network', 'connect', '--alias', 'host.docker.internal', NETWORK, GATEWAY],
+      ['network', 'connect', '--alias', ACCESS.endpoint, NETWORK, GATEWAY],
       expect.anything(),
     );
-    expect(mocks.log.info).toHaveBeenCalledWith('Egress lockdown: OneCLI gateway attached', {
+    expect(mocks.log.info).toHaveBeenCalledWith('Egress lockdown: gateway attached', {
       network: NETWORK,
       gateway: GATEWAY,
+      endpoint: ACCESS.endpoint,
     });
   });
 
@@ -122,7 +140,7 @@ describe('ensureEgressNetwork', () => {
 
     let thrown: unknown;
     try {
-      ensureEgressNetwork();
+      ensureEgressNetwork(ACCESS);
     } catch (err) {
       thrown = err;
     }
@@ -130,7 +148,6 @@ describe('ensureEgressNetwork', () => {
     expect((thrown as Error).name).toBe('EgressLockdownError');
     expect((thrown as Error).message).toContain(`the "${NETWORK}" internal network could not be created`);
     expect((thrown as Error).message).toContain('NANOCLAW_EGRESS_LOCKDOWN=true');
-    expect((thrown as Error).message).toContain(`"${GATEWAY}"`);
     expect((thrown as Error).message).toContain('NANOCLAW_EGRESS_LOCKDOWN=false to opt out');
     // Fail-fast: never tries to attach to a network it could not establish.
     expect(verbs()).toEqual(['inspect', 'create']);
@@ -140,10 +157,8 @@ describe('ensureEgressNetwork', () => {
     const { ensureEgressNetwork, EgressLockdownError } = await load(true);
     scriptDocker({ inspect: true, connect: false, members: [''] });
 
-    expect(() => ensureEgressNetwork()).toThrow(EgressLockdownError);
-    expect(() => ensureEgressNetwork()).toThrow(
-      `the OneCLI gateway "${GATEWAY}" could not be attached to "${NETWORK}"`,
-    );
+    expect(() => ensureEgressNetwork(ACCESS)).toThrow(EgressLockdownError);
+    expect(() => ensureEgressNetwork(ACCESS)).toThrow(`the gateway "${GATEWAY}" could not be attached to "${NETWORK}"`);
     expect(mocks.log.info).not.toHaveBeenCalled();
   });
 
@@ -151,7 +166,7 @@ describe('ensureEgressNetwork', () => {
     const { ensureEgressNetwork, EgressLockdownError } = await load(true);
     scriptDocker({ inspect: true, connect: true, members: ['someone-else\n'] });
 
-    expect(() => ensureEgressNetwork()).toThrow(EgressLockdownError);
+    expect(() => ensureEgressNetwork(ACCESS)).toThrow(EgressLockdownError);
     expect(verbs()).toEqual(['inspect', 'inspect', 'connect', 'inspect']);
   });
 
@@ -160,13 +175,13 @@ describe('ensureEgressNetwork', () => {
     // members: [] → the format-inspect throws every time.
     scriptDocker({ inspect: true, connect: true, members: [] });
 
-    expect(() => ensureEgressNetwork()).toThrow(/could not be attached/);
+    expect(() => ensureEgressNetwork(ACCESS)).toThrow(/could not be attached/);
   });
 
   it('does not match the gateway name as a substring of another member', async () => {
     const { ensureEgressNetwork } = await load(true);
     scriptDocker({ inspect: true, connect: false, members: [`${GATEWAY}-shadow\n`] });
-    expect(() => ensureEgressNetwork()).toThrow(/could not be attached/);
+    expect(() => ensureEgressNetwork(ACCESS)).toThrow(/could not be attached/);
   });
 
   // Regression test for a fixed bug: membership used to be checked by
@@ -175,18 +190,24 @@ describe('ensureEgressNetwork', () => {
   // pieces, none of which match the full name, so the (fully attached)
   // gateway was wrongly reported as not attached. Matching is now
   // newline-delimited with an exact per-line comparison, so a name
-  // containing a space is never split apart.
+  // containing a space is never split apart. Preserved verbatim through the
+  // v2.4.0 gateway generalization (ADR-033) — a real Isthmus hardening fix,
+  // not reverted to upstream's weaker space-split version.
   it('matches a gateway container name that contains an embedded space', async () => {
-    vi.resetModules();
+    const { ensureEgressNetwork } = await load(true);
     const gatewayWithSpace = 'onecli gw special';
-    vi.doMock('./config.js', () => ({
-      EGRESS_LOCKDOWN: true,
-      EGRESS_NETWORK: NETWORK,
-      ONECLI_GATEWAY_CONTAINER: gatewayWithSpace,
-    }));
-    const { ensureEgressNetwork } = await import('./egress-lockdown.js');
     scriptDocker({ inspect: true, members: [`${gatewayWithSpace}\n`] });
 
+    expect(ensureEgressNetwork({ endpoint: 'x', target: { kind: 'runtime', identity: gatewayWithSpace } })).toBe(true);
+  });
+
+  it('remembers the last resolved access so a later no-argument call (host-sweep.ts re-heal) reuses it', async () => {
+    const { ensureEgressNetwork } = await load(true);
+    scriptDocker({ inspect: true, members: [`${GATEWAY}\n`] });
+
+    expect(ensureEgressNetwork(ACCESS)).toBe(true);
+    mocks.execFileSync.mockClear();
+    scriptDocker({ inspect: true, members: [`${GATEWAY}\n`] });
     expect(ensureEgressNetwork()).toBe(true);
   });
 });

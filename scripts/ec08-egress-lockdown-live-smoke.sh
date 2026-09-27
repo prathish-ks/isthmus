@@ -103,6 +103,11 @@ echo "stand-in gateway container started: $GATEWAY_NAME (alpine, sleep infinity)
 echo
 
 export NANOCLAW_EGRESS_LOCKDOWN=true
+# "none" here resolves to ec08-egress-lockdown-live-smoke.ts's own local
+# stub registration for that kind (registerGatewayProvider('none', ...)) —
+# NOT the real onecli provider. Do not default this to "onecli": that
+# bypasses the script's stub and makes sessions.ensure() hit the real
+# OneCLI cloud API, which has no credentials on any CI runner.
 export NANOCLAW_GATEWAY_PROVIDER="${NANOCLAW_GATEWAY_PROVIDER:-none}"
 
 pnpm exec tsx scripts/ec08-egress-lockdown-live-smoke.ts

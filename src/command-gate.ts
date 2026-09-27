@@ -6,13 +6,34 @@
  * - Admin commands: checked against user_roles; denied senders get a
  *   "Permission denied" response written directly to messages_out
  * - Normal messages: pass through unchanged
+ *
+ * v2.4.0 promotion, Workstream C14 step 6: filtered commands, and the
+ * provider-native slice of admin commands, are now derived from every
+ * registered provider host contract's `commands` declaration
+ * (`listProviderHostContracts()`) — a provider declares its own native
+ * commands once, in its own contract, rather than this file growing a
+ * special case per provider. `/clear`/`/upload-trace` stay hardcoded here:
+ * they're NanoClaw's own commands, not any provider's, so they don't
+ * belong in a provider contract. Claude's contract
+ * (`provider-contracts/claude.ts`) declares the same `/compact`/`/context`/
+ * `/cost`/`/files` this file hardcoded before, so this is behavior-
+ * preserving for every install today. The side-effecting import below
+ * ensures every contract has registered before these sets are computed.
  */
+import './provider-contracts/index.js';
+import { listProviderHostContracts } from './provider-contracts/registry.js';
 import { hasAdminPrivilege } from './modules/permissions/db/user-roles.js';
 
 export type GateResult = { action: 'pass' } | { action: 'filter' } | { action: 'deny'; command: string };
 
-const FILTERED_COMMANDS = new Set(['/start', '/help', '/login', '/logout', '/doctor', '/config', '/remote-control']);
-const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/files', '/upload-trace']);
+const FILTERED_COMMANDS = new Set(
+  listProviderHostContracts().flatMap((contract) => contract.commands?.nativeFiltered ?? []),
+);
+const ADMIN_COMMANDS = new Set([
+  '/clear',
+  '/upload-trace',
+  ...listProviderHostContracts().flatMap((contract) => contract.commands?.nativeAdmin ?? []),
+]);
 
 /**
  * Classify a message and decide whether it should reach the container.
