@@ -297,6 +297,13 @@ function skillBackingContainmentRoot(
   groupDir: string,
   sessionDirectory?: string,
 ): string {
+  // False positive: `groupDir` is the host-constructed group folder path
+  // (container-runner.ts), never raw external input — this returns a
+  // trusted root for `resolveWithinRoot` to check untrusted segments
+  // against, same disposition as this project's other
+  // path-join-resolve-traversal false positives (see .github/workflows/
+  // ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   if (location.kind === 'group-directory') return path.resolve(groupDir);
   const volume = volumes.get(location.volumeId);
   if (!volume) throw new Error(`Provider skill backing references unknown volume '${location.volumeId}'`);
@@ -316,6 +323,9 @@ export function syncSharedSkillLinks(
 ): void {
   const desired = new Set(desiredSkills);
   for (const entry of fs.readdirSync(skillsDir)) {
+    // False positive: `entry` is an existing directory-entry name returned by
+    // `fs.readdirSync` on `skillsDir` itself, never external input.
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
     const entryPath = path.join(skillsDir, entry);
     let isSymlink = false;
     try {
@@ -327,6 +337,11 @@ export function syncSharedSkillLinks(
   }
 
   for (const skill of desiredSkills) {
+    // False positive: `desiredSkills` traces back to the group's
+    // operator-configured `skills` selection (container-runner.ts's
+    // `selectedSkillNames`) or a real shared-skills directory listing —
+    // never agent- or externally-supplied text.
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
     const linkPath = path.join(skillsDir, skill);
     let entry: fs.Stats | undefined;
     try {
@@ -345,8 +360,14 @@ export function syncSharedSkillLinks(
   }
 }
 
+// False positive on both calls below: this IS the containment check
+// (mirrors Go's `underRoot` pattern) — it resolves both paths, then
+// explicitly rejects anything that escapes `resolvedRoot` a few lines down,
+// rather than being an unguarded join/resolve the rule should flag.
 function resolveWithinRoot(root: string, ...segments: string[]): string {
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const resolvedRoot = path.resolve(root);
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const resolved = path.resolve(resolvedRoot, ...segments);
   const relative = path.relative(resolvedRoot, resolved);
   if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
@@ -358,6 +379,9 @@ function resolveWithinRoot(root: string, ...segments: string[]): string {
 function ensureDirectoryWithinRoot(root: string, directory: string): void {
   // Lexical containment only: like the legacy path, symlinks placed by the
   // operator (relocated state, shared skills) are followed, not rejected.
+  // False positive: the two `path.resolve` calls below feed straight into
+  // `resolveWithinRoot`'s own containment check, same as its callers above.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   resolveWithinRoot(root, path.relative(path.resolve(root), path.resolve(directory)));
   fs.mkdirSync(directory, { recursive: true });
 }
