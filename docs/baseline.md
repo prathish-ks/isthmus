@@ -4,11 +4,30 @@ Recorded: 2026-08-29 (workspace pinned this date)
 
 ## Stable Baseline (pin for reproducible development)
 
+**Updated 2026-09-27** — pin promoted from v2.3.0 to v2.4.0. See
+`docs/promotion-v2.4.0.md` for the full promotion record and
+`go-host/docs/ADR-035-v2.4.0-pin-promotion-closure.md` for the closing
+review superseding `ADR-017-p9-07-upstream-overlap-review.md`'s v2.3.0-era
+one. The v2.3.0 entry below is preserved as history, not deleted, per
+this project's own established practice of recording pin history honestly
+rather than overwriting it.
+
+- **NanoClaw version**: v2.4.0
+- **Commit SHA**: `143db6c907c652773a536c7c9e96269fdad0a4a4`
+- **Tag object**: annotated tag, SHA `58c5ede4737e7c3c2487a80d9beeab9409cf4f80` (dereferences to the commit above); verified live against `github.com/nanocoai/nanoclaw` at promotion time, matching the SHA captured at this promotion's Step 0 exactly — no drift
+- **Release date**: 23 Sep 2026 (per the tag's own tagger date)
+- **Working branch at the time of this pin move**: `main` (`prathish-ks/isthmus`) — the promotion landed via [PR #51](https://github.com/prathish-ks/isthmus/pull/51) (kernel capability) and [PR #52](https://github.com/prathish-ks/isthmus/pull/52) (gateway bypass closure), both merged, both with real GitHub Actions CI evidence (`ci` check run `success` on each PR's final commit)
+
+<details>
+<summary>v2.3.0 (superseded 2026-09-27, kept for history)</summary>
+
 - **NanoClaw version**: v2.3.0
 - **Commit SHA**: `54d9d9a50c0e572fa3969d63ab87a4dd3d75cc6f`
 - **Tag object**: `6077de45f0200723694c52227a3b578d1da82e77` (annotated tag; dereferences to the commit above)
 - **Release date**: 24 Aug 2026 (per NanoClaw's release notes / this workbook)
 - **Working branch**: `go-host-experiment`, branched directly from the `v2.3.0` tag (not from `main`), so all early Go-host work sits on top of a fixed, known-good revision.
+
+</details>
 
 ## Repository / remotes
 

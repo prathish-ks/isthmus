@@ -132,5 +132,5 @@ go test -mod=vendor ./internal/mount/ -fuzz=FuzzValidateSpec -fuzztime=60s
   pin-promotion process the matrix above is a snapshot of.
 - [`../docs/baseline.md`](../docs/baseline.md) and
   [`../docs/upstream-pin.json`](../docs/upstream-pin.json) — the pinned
-  upstream revision itself (`v2.3.0` as of this writing) and the
+  upstream revision itself (`v2.4.0` as of this writing) and the
   machine-readable form CI's `upstream-watch` job diffs against.
