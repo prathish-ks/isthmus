@@ -205,17 +205,35 @@ claims — all three fixed and closed the same day, not merely disclosed:
   *what kind* of logic or dependency was added, which is a judgment call,
   not (today) a pattern a script can reliably check. Flagged rather than
   quietly left blank.
-- **Gateway-session-lifecycle wrapping is a deliberately deferred v2.4.0
-  item, not silently dropped.** `container-runner.ts`'s upstream diff bundles
-  three concerns (Workstream B's seam audit); C14 closed the mount-
-  composition one (ADR-032), but the durable, lease-managed
-  `claimSessionRun`/`ensureGatewaySession`/`stopGatewaySessionsForUnavailability`
-  machinery remains genuinely unresolved — recommended as its own follow-on
-  effort, gated on its own ADR, in `docs/promotion-v2.4.0.md`'s Workstream B
-  row for that file. Similarly, `poll-loop.ts`'s multi-turn reply-routing
-  rewrite (bundled with the container-side provider-contract migration C15
-  otherwise ported) was deliberately excluded from C15's scope for the same
-  reason — see ADR-032's C15 section.
+- ~~**Gateway-session-lifecycle wrapping is a deliberately deferred v2.4.0
+  item.**~~ **Closed 2026-09-27, PR [#52](https://github.com/prathish-ks/isthmus/pull/52)
+  @ `d85fef9b`, during that PR's own review cycle (not a new PR).**
+  `container-runner.ts`'s upstream diff bundled three concerns (Workstream
+  B's seam audit); C14 closed the mount-composition one (ADR-032), and the
+  durable, lease-managed lifecycle this entry originally flagged as
+  unresolved is now closed too: `ActiveSessionRuntime` owns a real
+  `gatewaySession` control (a tracked `AbortController` + the lease),
+  releases it on every terminal path (normal end, kill, and every failure
+  between `sessions.ensure()` and a runtime being registered — claim loss,
+  capability rejection, `driver.prepare` failure), and subscribes
+  `lease.onUnavailable(...)` to drive that session's teardown. See
+  `docs/promotion-v2.4.0.md`'s C8/C1 rows for the full history of how the
+  gap was found and closed. **Deliberately left open, not this closure's
+  job**: lease continuity across a host restart — a graceful shutdown
+  doesn't kill running containers, so `adoptRunningSessions` re-tracks them
+  without ever re-calling `sessions.ensure()`, meaning an adopted session's
+  in-memory lease from the *previous* process is simply gone. A separate,
+  larger question, tracked as a real follow-up.
+- **`poll-loop.ts`'s multi-turn reply-routing rewrite remains genuinely
+  deferred, not silently dropped.** Bundled with the container-side
+  provider-contract migration C15 otherwise ported, and deliberately
+  excluded from C15's scope for the same "don't let a substantial,
+  unrelated rewrite ride along with a mechanical port" reason as the
+  gateway-lifecycle item above — see ADR-032's C15 section. Unlike that
+  item, this one has no provider yet that needs it (Iron Proxy doesn't
+  touch `poll-loop.ts`), so there's no forcing function pulling it forward;
+  recommended as its own follow-on effort, gated on its own ADR, whenever
+  one appears.
 - ~~**This table itself is not yet enforced.**~~ **Closed 2026-09-24.** The
   seam-coverage and boundary tables' entries are now mirrored in
   `docs/wiring-registry.json` and re-checked on every PR by the required
