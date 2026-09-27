@@ -179,6 +179,47 @@ describe('Iron Proxy provider', () => {
     fs.rmSync(path.join(materialRoot, 'iron-proxy'), { recursive: true, force: true });
   });
 
+  // Regression test for a real integration gap found in review: egress
+  // lockdown (ADR-033) fails closed when the configured gateway declares no
+  // `egressGateway()` — Iron Proxy didn't declare one, so
+  // `NANOCLAW_GATEWAY_PROVIDER=iron-proxy` + `NANOCLAW_EGRESS_LOCKDOWN=true`
+  // could never start, despite Iron Proxy being exactly the kind of local
+  // Docker gateway lockdown is for. Same shape as the per-session
+  // `networkAccess` above, because it answers the same fact at the install
+  // level rather than the per-session one.
+  it('declares an egressGateway() matching its own per-session network target', () => {
+    const provider = defineIronProxyProvider(settings);
+    expect(provider.egressGateway).toBeTypeOf('function');
+    expect(provider.egressGateway!()).toEqual({
+      endpoint: 'iron-proxy',
+      target: { kind: 'runtime', identity: settings.containerName },
+    });
+  });
+
+  describe('connections.connect', () => {
+    it('is unsupported with no Iron Control project location configured', async () => {
+      const provider = defineIronProxyProvider(settings);
+      expect(await provider.connections!.connect({ agentGroupId: 'group', host: 'api.example.com' })).toEqual({
+        status: 'unsupported',
+        message: 'Iron Control project location is unavailable.',
+      });
+    });
+
+    it('directs the operator to the Iron Control console when managed with a console URL', async () => {
+      const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'iron-proxy-connect-'));
+      fs.writeFileSync(path.join(projectRoot, '.env'), 'NANOCLAW_IRON_CONTROL_URL=https://console.example.test\n');
+      const provider = defineIronProxyProvider({ ...settings, projectRoot, managed: true });
+      const result = await provider.connections!.connect({ agentGroupId: 'group', host: 'api.example.com' });
+      expect(result).toMatchObject({
+        status: 'action_required',
+        action: 'operator_console',
+        connect_url: 'https://console.example.test/console/secrets',
+      });
+      expect((result as { message: string }).message).toContain('api.example.com');
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    });
+  });
+
   it('keeps its Unix socket portable for long checkout paths', async () => {
     const projectRoot = path.join(os.tmpdir(), 'checkout', 'nested'.repeat(20));
     const configured = readIronProxySettings({ NANOCLAW_IRON_PROXY_IMAGE: digest }, projectRoot);

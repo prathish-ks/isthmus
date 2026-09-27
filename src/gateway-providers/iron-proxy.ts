@@ -8,6 +8,7 @@ import path from 'node:path';
 import { stringify as stringifyYaml } from 'yaml';
 
 import { CONTAINER_RUNTIME_BIN } from '../container-runtime.js';
+import type { NetworkAccessIntent } from '../drivers/types.js';
 import { readEnvFile } from '../env.js';
 import { getInstallSlug } from '../install-slug.js';
 import { log } from '../log.js';
@@ -351,6 +352,21 @@ export function ironProxyContribution(settings: IronProxySettings, input: Gatewa
   };
 }
 
+/**
+ * Which single Docker container the host's own egress-lockdown network
+ * attaches to (ADR-033) — the install-wide question, not a per-session one.
+ * Same shape every session's own `networkAccess` above already answers for
+ * itself, because it's the same fact: Iron Proxy runs as one centrally
+ * managed container (`settings.containerName`), reachable at `PROXY_HOST`.
+ * Without this, selecting `iron-proxy` with `NANOCLAW_EGRESS_LOCKDOWN=true`
+ * fails closed — the same contract an unreachable gateway gets — even
+ * though Iron Proxy is exactly the kind of local Docker gateway lockdown is
+ * for.
+ */
+function ironProxyEgressGateway(settings: IronProxySettings): NetworkAccessIntent {
+  return { endpoint: PROXY_HOST, target: { kind: 'runtime', identity: settings.containerName } };
+}
+
 interface LiveLease extends IronApprovalIdentity {
   unavailable?: string;
   notify?: (reason: string) => void;
@@ -488,6 +504,7 @@ export function defineIronProxyProvider(initialSettings?: IronProxySettings): Ga
     // drops only its signed capability and approval state.
     sessions: { ensure },
     approvals: { subscribe: (decide, signal) => currentBridge().subscribe(decide, signal) },
+    egressGateway: () => ironProxyEgressGateway(currentSettings()),
   };
 }
 

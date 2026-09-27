@@ -46,6 +46,7 @@ import { GROUP_FOLDER_LABEL, labelValueLegal, specInvalid } from './drivers/type
 import type { ContainerSpec, GuardContext, MountSpec, SessionFailure, SessionSpec } from './drivers/types.js';
 import { KernelClient, type KernelClientLike } from './kernel/client.js';
 import { gatewayRuntimeIdentity, getGatewayProvider, type GatewayContribution } from './gateway-providers/index.js';
+import { releaseGatewaySession, type GatewaySessionControl } from './gateway-session-lifecycle.js';
 import { initGroupFilesystem } from './group-init.js';
 import { getAgentMailbox } from './mailbox/index.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
@@ -120,6 +121,17 @@ interface ActiveSessionRuntime {
   stopReason?: string;
   /** Incarnation this process claimed in session_claims, if the write landed. */
   claimIncarnation?: number;
+  /**
+   * The gateway's per-session lease and the real `AbortController` whose
+   * signal was handed to `sessions.ensure()` — undefined for a session
+   * adopted from a previous host process (no `ensure()` call was made in
+   * this process; see `adoptRunningSessions`). Released via
+   * `releaseGatewaySession` from every terminal path in `finish()`, and
+   * eagerly from any failure path between `ensure()` and this field being
+   * set (see `spawnContainer`) so a lease from an aborted spawn never
+   * lingers.
+   */
+  gatewaySession?: GatewaySessionControl;
 }
 
 const activeContainers = new Map<string, ActiveSessionRuntime>();
@@ -284,6 +296,16 @@ async function spawnContainer(session: Session): Promise<void> {
   // Driver-topology selection is NOT here — that stays driver-private (see
   // `drivers/index.ts`); `networkAccess` is an intent the driver realizes or
   // rejects, never a topology itself.
+  //
+  // A real, tracked controller — not a throwaway one — so the lease can be
+  // released deterministically: stored on `gatewaySession` below, aborted by
+  // `releaseGatewaySession` on every terminal path in `finish()`, and by the
+  // catch blocks between here and `registerRuntime` for a spawn that never
+  // reaches a tracked runtime at all (claim loss, spec/capability rejection,
+  // `driver.prepare` failure). Iron Proxy (Workstream C8) is the first
+  // gateway whose lease actually uses `release`/`onUnavailable`; OneCLI's own
+  // lease still declares neither, so this changes nothing for it.
+  const gatewayController = new AbortController();
   const lease = await getGatewayProvider().sessions.ensure(
     {
       key: sessionKey,
@@ -293,22 +315,25 @@ async function spawnContainer(session: Session): Promise<void> {
       containerName,
       capabilities: driver.capabilities(),
     },
-    // A throwaway signal, not a tracked one: this step of the C7 restructuring
-    // wires the new sessions.ensure() shape in place of the old contribute()
-    // call without yet threading the lease's own lifetime (release on
-    // teardown, onUnavailable mid-session watching) through
-    // ActiveSessionRuntime — OneCLI's own lease declares neither capability,
-    // so nothing observes this signal today. A future change ties this to a
-    // real per-session AbortController, stored the same way upstream's own
-    // `ActiveSessionRuntime.gateway` field does, once a gateway that actually
-    // uses release/onUnavailable (Iron Proxy, Workstream C8) exists to prove
-    // it against.
-    new AbortController().signal,
+    gatewayController.signal,
   );
+  const gatewaySession: GatewaySessionControl = { lease, controller: gatewayController };
+  // Drives this exact session's teardown, exactly once, the same way an
+  // operator-initiated kill does — `killContainer` is a no-op if called
+  // before `registerRuntime` below (nothing to look up yet), which is fine:
+  // the catch blocks between here and there release the lease directly for
+  // every failure that can happen in that window.
+  lease.onUnavailable?.((reason) => {
+    killContainer(session.id, `gateway unavailable: ${reason}`);
+  });
   const gateway = lease.contribution;
   if (gateway.containers?.length && !driver.capabilities().auxiliaryContainers) {
     // Named at composition, where the error can say which side to change —
     // not left for the driver's refusal backstop to discover.
+    await releaseGatewaySession(gatewaySession, {
+      kind: 'session-ended',
+      reason: 'rejected before a runtime was registered: auxiliary containers unsupported by driver',
+    }).catch(() => {});
     throw specInvalid(
       `gateway provider composed auxiliary containers, but driver '${driver.kind}' does not manage them ` +
         `(capabilities().auxiliaryContainers is false)`,
@@ -349,11 +374,19 @@ async function spawnContainer(session: Session): Promise<void> {
     handle = await driver.prepare(spec);
   } catch (err) {
     if (claimIncarnation !== null) await releaseClaimQuietly(session.id, claimIncarnation);
+    // No tracked runtime exists yet for `finish()` to release this from —
+    // covers claim loss (another host already owns the session) and a
+    // `driver.prepare` rejection alike.
+    await releaseGatewaySession(gatewaySession, {
+      kind: 'session-ended',
+      reason: 'spawn failed before a runtime was registered',
+    }).catch(() => {});
     throw err;
   }
 
   const runtime = registerRuntime(session.id, handle, containerName, false);
   runtime.claimIncarnation = claimIncarnation;
+  runtime.gatewaySession = gatewaySession;
 
   try {
     await armSessionLifecycle({
@@ -367,6 +400,13 @@ async function spawnContainer(session: Session): Promise<void> {
     });
   } catch (err) {
     if (runtime.claimIncarnation !== undefined) await releaseClaimQuietly(session.id, runtime.claimIncarnation);
+    // Same reasoning as above: this branch never reaches `finish()`, so it
+    // is the one place responsible for releasing a lease already attached
+    // to `runtime`.
+    await releaseGatewaySession(gatewaySession, {
+      kind: 'session-ended',
+      reason: 'session lifecycle failed to arm',
+    }).catch(() => {});
     if (activeContainers.get(session.id) === runtime && !runtime.finished) {
       activeContainers.delete(session.id);
       runtime.resolveFinished();
@@ -443,6 +483,23 @@ async function finish(sessionId: string, runtime: ActiveSessionRuntime, failure?
     stopTypingRefresh(sessionId);
   } catch (err) {
     log.error('Failed to stop typing refresh', { sessionId, containerName, err });
+  }
+  // Undefined for a session adopted from a previous host process — nothing
+  // to release here since no `ensure()` call was made in this process (see
+  // `adoptRunningSessions` and `ActiveSessionRuntime.gatewaySession`'s own
+  // comment). `finish()` is the single terminal path (normal exit, failure,
+  // and an operator/self kill via `killContainer` all funnel through
+  // `finishAndResolve`), so this is the one place a lease attached to a
+  // registered runtime needs releasing.
+  if (runtime.gatewaySession) {
+    try {
+      await releaseGatewaySession(runtime.gatewaySession, {
+        kind: 'session-ended',
+        reason: runtime.stopReason ?? 'session ended',
+      });
+    } catch (err) {
+      log.error('Failed to release gateway session lease', { sessionId, containerName, err });
+    }
   }
 
   if (failure && failure.kind !== 'started-then-died') {
