@@ -6,8 +6,9 @@ between "TypeScript's chosen shape" and "this kernel's own types" sits, how a
 future upstream break is meant to be caught and handled, and the version-range
 strategy this project follows. Companion to `docs/compatibility-matrix.md`
 (P9-09, the per-component Stable/Preview/Unsupported table) and
-`ADR-017-p9-07-upstream-overlap-review.md` (the dated review this document's
-claims are current as of).
+`go-host/docs/ADR-035-v2.4.0-pin-promotion-closure.md` (the dated review
+this document's claims are current as of, superseding
+`ADR-017-p9-07-upstream-overlap-review.md`'s v2.3.0-era one).
 
 ## 1. What this kernel actually consumes from upstream
 
