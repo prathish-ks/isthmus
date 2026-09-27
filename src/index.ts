@@ -7,7 +7,7 @@
 import { backfillContainerConfigs } from './backfill-container-configs.js';
 import { CENTRAL_DB_PATH } from './config.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
-import { adoptRunningSessions } from './container-runner.js';
+import { adoptRunningSessions, releaseAllGatewaySessions } from './container-runner.js';
 import { closeDb, initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { getSessionDriver } from './drivers/index.js';
@@ -189,6 +189,13 @@ async function shutdown(signal: string): Promise<void> {
   await stopHostModules();
   stopDeliveryPolls();
   stopHostSweep();
+  // Detaches this process's observation of every active session's gateway
+  // lease (kind: 'host-detached') without killing any container — they
+  // survive for adoptRunningSessions to re-admit in the successor process.
+  // See releaseAllGatewaySessions's own doc comment for the one known,
+  // named gap (Iron Proxy doesn't yet distinguish this from a real
+  // session end).
+  await releaseAllGatewaySessions('host-shutdown');
   await stopCliServer();
   await stopHostInstanceLease();
   try {
