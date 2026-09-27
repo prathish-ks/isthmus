@@ -85,7 +85,7 @@ func TestContainerSpawnPerfBudget(t *testing.T) {
 	ctx := context.Background()
 
 	spawnStart := time.Now()
-	_, name, err := exec.Wake(ctx, spec, containerdefaults.RunAs{}, containerdefaults.Resources{})
+	_, name, _, _, err := exec.Wake(ctx, spec, containerdefaults.RunAs{}, containerdefaults.Resources{})
 	spawnElapsed := time.Since(spawnStart)
 	if err != nil {
 		t.Fatalf("Wake: %v", err)
@@ -93,11 +93,11 @@ func TestContainerSpawnPerfBudget(t *testing.T) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = exec.Kill(ctx, name, 1)
+		_ = exec.Kill(ctx, name, nil, "", 1)
 	})
 
 	killStart := time.Now()
-	if err := exec.Kill(ctx, name, 1); err != nil {
+	if err := exec.Kill(ctx, name, nil, "", 1); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	killElapsed := time.Since(killStart)

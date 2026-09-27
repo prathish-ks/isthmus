@@ -2,16 +2,16 @@
  * Approvals module root — import-time wiring.
  *
  * Importing the module must (1) register the approvals response handler,
- * (2) start the OneCLI handler once the delivery adapter is bound, and
- * (3) stop it from the host shutdown path. The OneCLI handler itself is
- * stubbed; the lifecycle registries are real.
+ * (2) start the gateway approval coordinator once the delivery adapter is
+ * bound, and (3) stop it from the host shutdown path. The coordinator
+ * itself is stubbed; the lifecycle registries are real.
  */
 import { describe, expect, it, vi } from 'vitest';
 
 import { setDeliveryAdapter, type ChannelDeliveryAdapter } from '../../delivery.js';
+import { startGatewayApprovalCoordinator, stopGatewayApprovalCoordinator } from '../../gateway-approval-coordinator.js';
 import { getHostShutdownCallbacks } from '../../host-lifecycle.js';
 import { getResponseHandlers } from '../../response-registry.js';
-import { startOneCLIApprovalHandler, stopOneCLIApprovalHandler } from './onecli-approvals.js';
 import { handleApprovalsResponse } from './response-handler.js';
 import * as approvals from './index.js';
 
@@ -19,11 +19,11 @@ vi.mock('../../container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('./onecli-approvals.js', () => ({
-  ONECLI_ACTION: 'onecli_credential',
-  resolveOneCLIApproval: vi.fn(),
-  startOneCLIApprovalHandler: vi.fn(),
-  stopOneCLIApprovalHandler: vi.fn(),
+vi.mock('../../gateway-approval-coordinator.js', () => ({
+  GATEWAY_APPROVAL_ACTION: 'gateway_credential',
+  resolveGatewayApproval: vi.fn(),
+  startGatewayApprovalCoordinator: vi.fn(),
+  stopGatewayApprovalCoordinator: vi.fn(),
 }));
 
 describe('approvals module wiring', () => {
@@ -38,7 +38,7 @@ describe('approvals module wiring', () => {
     expect(getResponseHandlers()).toContain(handleApprovalsResponse);
   });
 
-  it('starts the OneCLI handler once the delivery adapter is bound', async () => {
+  it('starts the gateway approval coordinator once the delivery adapter is bound', async () => {
     const adapter: ChannelDeliveryAdapter = {
       async deliver(): Promise<string | undefined> {
         return undefined;
@@ -46,14 +46,14 @@ describe('approvals module wiring', () => {
     };
     setDeliveryAdapter(adapter);
     await vi.waitFor(() => {
-      expect(startOneCLIApprovalHandler).toHaveBeenCalledWith(adapter);
+      expect(startGatewayApprovalCoordinator).toHaveBeenCalledWith(adapter);
     });
   });
 
-  it('stops the OneCLI handler from the host shutdown path', async () => {
+  it('stops the coordinator from the host shutdown path', async () => {
     const callbacks = getHostShutdownCallbacks();
     expect(callbacks.length).toBeGreaterThan(0);
     for (const cb of callbacks) await cb();
-    expect(stopOneCLIApprovalHandler).toHaveBeenCalled();
+    expect(stopGatewayApprovalCoordinator).toHaveBeenCalled();
   });
 });

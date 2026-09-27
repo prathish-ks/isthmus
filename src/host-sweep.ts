@@ -31,6 +31,7 @@
 import fs from 'fs';
 
 import { ensureEgressNetwork } from './egress-lockdown.js';
+import { getSessionClaim } from './db/coordination.js';
 import { getActiveSessions, isTaskThread, updateSession } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { log } from './log.js';
@@ -212,7 +213,7 @@ async function maintainSessionMailbox(
 ): Promise<void> {
   const alive = isContainerRunning(session.id);
   if (alive && !justWoke) {
-    enforceRunningContainerSla(mailbox, mailbox, session, agentGroupId);
+    await enforceRunningContainerSla(mailbox, mailbox, session, agentGroupId);
   }
   if (!alive) {
     resetStuckProcessingRows(mailbox, mailbox, session, 'container not running');
@@ -256,18 +257,48 @@ function bashTimeoutMs(state: ContainerState | null): number | null {
   return state.toolDeclaredTimeoutMs;
 }
 
-function enforceRunningContainerSla(
+/**
+ * v2.4.0 promotion, Workstream C13: the incarnation gate. Evidence that
+ * predates the current incarnation's durable claim time is not evidence
+ * against this container. A heartbeat mtime older than the claim is the
+ * previous incarnation's file — treated as absent, so the spawn-time
+ * fallback gives the fresh container its grace. A processing claim older
+ * than the claim time was inherited from a crashed predecessor — its age is
+ * measured from this incarnation's start, so the fresh container gets a
+ * full tolerance window to clear it before it can kill. Without this, a
+ * multi-host claim takeover (Workstream C9's session_claims) races this
+ * function: the new incarnation's freshly-spawned container could read a
+ * stale heartbeat/claim timestamp left over from the incarnation the claim
+ * was just taken over from, and get killed for looking stuck when it only
+ * just started.
+ */
+async function enforceRunningContainerSla(
   inDb: InboundMailbox,
   outDb: OutboundMailbox,
   session: Session,
   agentGroupId: string,
-): void {
+): Promise<void> {
+  let incarnationStartMs = 0;
+  const claimRow = await getSessionClaim(session.id);
+  if (claimRow?.claimed_at) {
+    const parsed = Date.parse(claimRow.claimed_at);
+    if (!Number.isNaN(parsed)) incarnationStartMs = parsed;
+  }
+
+  const rawHeartbeatMs = heartbeatMtimeMs(agentGroupId, session.id);
+  const gatedHeartbeatMs = rawHeartbeatMs >= incarnationStartMs ? rawHeartbeatMs : 0;
+  const gatedClaims = outDb.getProcessingClaims().map((claim) => {
+    const claimedAt = Date.parse(claim.statusChanged);
+    if (Number.isNaN(claimedAt) || claimedAt >= incarnationStartMs) return claim;
+    return { ...claim, statusChanged: new Date(incarnationStartMs).toISOString() };
+  });
+
   const decision = decideStuckAction({
     now: Date.now(),
-    heartbeatMtimeMs: heartbeatMtimeMs(agentGroupId, session.id),
+    heartbeatMtimeMs: gatedHeartbeatMs,
     containerStartedAtMs: getContainerStartedAtMs(session.id),
     containerState: outDb.getContainerState(),
-    claims: outDb.getProcessingClaims(),
+    claims: gatedClaims,
   });
 
   if (decision.action === 'ok') return;

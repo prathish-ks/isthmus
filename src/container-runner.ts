@@ -9,6 +9,7 @@
  */
 import { exec } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 
@@ -29,14 +30,23 @@ import { updateContainerConfigScalars } from './db/container-configs.js';
 import { CONTAINER_RUNTIME_BIN } from './container-runtime.js';
 import { composeGroupProjectDoc, DEFAULT_PROJECT_DOC } from './project-doc-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
+import {
+  getLiveHostInstance,
+  getSessionClaim,
+  releaseSessionClaim,
+  shadowWrite,
+  tryClaimSession,
+} from './db/coordination.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getSession } from './db/sessions.js';
+import { getHostInstanceId } from './host-instance.js';
 import { getSessionDriver, isSessionEventsDriver } from './drivers/index.js';
 import type { SupervisedHandle, SupervisedSnapshot } from './drivers/session-events.js';
 import { GROUP_FOLDER_LABEL, labelValueLegal, specInvalid } from './drivers/types.js';
 import type { ContainerSpec, GuardContext, MountSpec, SessionFailure, SessionSpec } from './drivers/types.js';
 import { KernelClient, type KernelClientLike } from './kernel/client.js';
-import { getGatewayProvider, type GatewayContribution } from './gateway-providers/index.js';
+import { gatewayRuntimeIdentity, getGatewayProvider, type GatewayContribution } from './gateway-providers/index.js';
+import { releaseGatewaySession, type GatewaySessionControl } from './gateway-session-lifecycle.js';
 import { initGroupFilesystem } from './group-init.js';
 import { getAgentMailbox } from './mailbox/index.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
@@ -45,6 +55,17 @@ import { validateAdditionalMounts } from './modules/mount-security/index.js';
 // Provider host-side config barrel — each provider that needs host-side
 // container setup self-registers on import.
 import './providers/index.js';
+// Provider gateway-facts barrel (v2.4.0 promotion, Workstream C8) — model
+// domains/endpoints the gateway-approval coordinator and a gateway
+// provider's own credential adapter need. Separate from providers/index.js
+// above; see provider-contracts/registry.ts's own header for why.
+import './provider-contracts/index.js';
+import {
+  realizeProviderSpawnSurfaces,
+  providerStateVolumePath,
+  type ProviderSpawnRealization,
+} from './provider-contracts/realize.js';
+import { getProviderHostContract, hasProviderMountSurface } from './provider-contracts/registry.js';
 import {
   getProviderContainerConfig,
   providerProvidesAgentSurfaces,
@@ -98,9 +119,80 @@ interface ActiveSessionRuntime {
   finishedPromise: Promise<void>;
   resolveFinished: () => void;
   stopReason?: string;
+  /** Incarnation this process claimed in session_claims, if the write landed. */
+  claimIncarnation?: number;
+  /**
+   * The gateway's per-session lease and the real `AbortController` whose
+   * signal was handed to `sessions.ensure()` — undefined for a session
+   * adopted from a previous host process (no `ensure()` call was made in
+   * this process; see `adoptRunningSessions`). Released via
+   * `releaseGatewaySession` from every terminal path in `finish()`, and
+   * eagerly from any failure path between `ensure()` and this field being
+   * set (see `spawnContainer`) so a lease from an aborted spawn never
+   * lingers.
+   */
+  gatewaySession?: GatewaySessionControl;
 }
 
 const activeContainers = new Map<string, ActiveSessionRuntime>();
+
+// Claimant identity for the session_claims rows: the host's durable lease
+// instance id when the lease is running, else a process-scoped fallback
+// (tests, tools). The lease id is what makes claims answerable against
+// host_instances liveness below. v2.4.0 promotion, Workstream C9 (ADR-030).
+function claimantId(): string {
+  return getHostInstanceId() ?? `${os.hostname()}:${process.pid}`;
+}
+
+/**
+ * Claim a session this process is about to run. The `session_claims` row is
+ * the authority for which process/incarnation owns a session: losing the
+ * compare-and-set means another live claimant got there first, and the
+ * caller must not start a container for it. Returns the claimed incarnation,
+ * or null when the claim was lost. Throws on a failed write — a claim that
+ * cannot be recorded is a claim not held.
+ *
+ * A claim held by a LIVE peer host (a host_instances row that is not stopped
+ * and whose lease is unexpired) is refused outright — two live hosts must
+ * never trade a session back and forth. A claim whose holder is stopped,
+ * lease-expired, or unknown (older claimant-id schemes) stays takeover-able:
+ * a crashed claimant must never wedge a session.
+ */
+async function claimSessionRun(sessionId: string, containerRef: string): Promise<number | null> {
+  const current = await getSessionClaim(sessionId);
+  const self = claimantId();
+  if (current?.claimed_by && current.claimed_by !== self) {
+    const holder = await getLiveHostInstance(current.claimed_by, new Date().toISOString());
+    if (holder) {
+      log.warn('Refusing session claim held by a live peer host', {
+        sessionId,
+        holder: current.claimed_by,
+        claimant: self,
+      });
+      return null;
+    }
+  }
+  return tryClaimSession({
+    sessionId,
+    instanceId: self,
+    expectedIncarnation: current?.incarnation ?? 0,
+    containerRef,
+    now: new Date().toISOString(),
+  });
+}
+
+/** Release our claim at this incarnation. Never throws — a failed release is
+ *  self-healing (the next claimant's CAS supersedes it). */
+async function releaseClaimQuietly(sessionId: string, incarnation: number): Promise<void> {
+  await shadowWrite('session-claim-release', () =>
+    releaseSessionClaim({
+      sessionId,
+      instanceId: claimantId(),
+      incarnation,
+      now: new Date().toISOString(),
+    }),
+  );
+}
 
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
@@ -188,27 +280,60 @@ async function spawnContainer(session: Session): Promise<void> {
   // Resolve the effective provider + any host-side contribution it declares
   // (extra mounts, env passthrough). Computed once and threaded through both
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
-  const { provider, contribution } = await resolveProviderContribution(session, agentGroup, containerConfig);
+  const { provider, contribution, surfaces } = await resolveProviderContribution(session, agentGroup, containerConfig);
 
-  const mounts = await buildMounts(agentGroup, session, containerConfig, provider, contribution);
+  const mounts = await buildMounts(agentGroup, session, containerConfig, provider, contribution, surfaces);
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
   const mailboxEnvironment = await mailbox.runnerEnvironment(mailboxKey);
 
   const driver = getSessionDriver();
-  // The gateway's per-session contribution — typed env and mounts (and, on a
-  // driver that manages them, auxiliary containers), merged into the spec
-  // BEFORE validation so admission sees the whole session. Fail-closed exactly
-  // as the old wiring was: contribute() throwing aborts the spawn, the inbound
-  // row stays pending, and the sweep retries. Network selection is NOT here —
-  // topology is driver-private (see `drivers/index.ts`).
-  const gateway = await getGatewayProvider().contribute({
-    key: { installSlug: INSTALL_SLUG, agentGroupId: agentGroup.id, sessionId: session.id },
-    groupName: agentGroup.name,
-    capabilities: driver.capabilities(),
+  const sessionKey = { installSlug: INSTALL_SLUG, agentGroupId: agentGroup.id, sessionId: session.id };
+  // The gateway's per-session lease — its typed contribution (env, mounts,
+  // networkAccess, and, on a driver that manages them, auxiliary containers)
+  // is merged into the spec BEFORE validation so admission sees the whole
+  // session. Fail-closed exactly as the old wiring was: `ensure` throwing
+  // aborts the spawn, the inbound row stays pending, and the sweep retries.
+  // Driver-topology selection is NOT here — that stays driver-private (see
+  // `drivers/index.ts`); `networkAccess` is an intent the driver realizes or
+  // rejects, never a topology itself.
+  //
+  // A real, tracked controller — not a throwaway one — so the lease can be
+  // released deterministically: stored on `gatewaySession` below, aborted by
+  // `releaseGatewaySession` on every terminal path in `finish()`, and by the
+  // catch blocks between here and `registerRuntime` for a spawn that never
+  // reaches a tracked runtime at all (claim loss, spec/capability rejection,
+  // `driver.prepare` failure). Iron Proxy (Workstream C8) is the first
+  // gateway whose lease actually uses `release`/`onUnavailable`; OneCLI's own
+  // lease still declares neither, so this changes nothing for it.
+  const gatewayController = new AbortController();
+  const lease = await getGatewayProvider().sessions.ensure(
+    {
+      key: sessionKey,
+      disposition: 'create',
+      runtimeIdentity: gatewayRuntimeIdentity(sessionKey),
+      groupName: agentGroup.name,
+      containerName,
+      capabilities: driver.capabilities(),
+    },
+    gatewayController.signal,
+  );
+  const gatewaySession: GatewaySessionControl = { lease, controller: gatewayController };
+  // Drives this exact session's teardown, exactly once, the same way an
+  // operator-initiated kill does — `killContainer` is a no-op if called
+  // before `registerRuntime` below (nothing to look up yet), which is fine:
+  // the catch blocks between here and there release the lease directly for
+  // every failure that can happen in that window.
+  lease.onUnavailable?.((reason) => {
+    killContainer(session.id, `gateway unavailable: ${reason}`);
   });
+  const gateway = lease.contribution;
   if (gateway.containers?.length && !driver.capabilities().auxiliaryContainers) {
     // Named at composition, where the error can say which side to change —
     // not left for the driver's refusal backstop to discover.
+    await releaseGatewaySession(gatewaySession, {
+      kind: 'session-ended',
+      reason: 'rejected before a runtime was registered: auxiliary containers unsupported by driver',
+    }).catch(() => {});
     throw specInvalid(
       `gateway provider composed auxiliary containers, but driver '${driver.kind}' does not manage them ` +
         `(capabilities().auxiliaryContainers is false)`,
@@ -228,15 +353,40 @@ async function spawnContainer(session: Session): Promise<void> {
 
   log.info('Spawning session', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
 
-  // Clear any orphan heartbeat from a previous container instance — the sweep's
-  // ceiling check treats a missing file as "fresh spawn, give grace". Without
-  // this, the stale mtime can trigger an immediate kill before the new container
-  // touches the file itself.
-  fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
+  // Claim before touching runtime state. Another host may already own the
+  // session (v2.4.0 promotion, Workstream C9 — ADR-030). Any failure from
+  // here through driver.prepare releases the claim so a takeover-able retry
+  // (this host or a peer) isn't blocked by a claim nothing is running under.
+  let claimIncarnation: number | null = null;
+  let handle: SupervisedHandle;
+  try {
+    claimIncarnation = await claimSessionRun(session.id, containerName);
+    if (claimIncarnation === null) {
+      throw new Error(`session ${session.id} is claimed by another live host process — not spawning a duplicate`);
+    }
 
-  const handle = await driver.prepare(spec);
+    // Clear any orphan heartbeat from a previous container instance — the sweep's
+    // ceiling check treats a missing file as "fresh spawn, give grace". Without
+    // this, the stale mtime can trigger an immediate kill before the new container
+    // touches the file itself.
+    fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
+
+    handle = await driver.prepare(spec);
+  } catch (err) {
+    if (claimIncarnation !== null) await releaseClaimQuietly(session.id, claimIncarnation);
+    // No tracked runtime exists yet for `finish()` to release this from —
+    // covers claim loss (another host already owns the session) and a
+    // `driver.prepare` rejection alike.
+    await releaseGatewaySession(gatewaySession, {
+      kind: 'session-ended',
+      reason: 'spawn failed before a runtime was registered',
+    }).catch(() => {});
+    throw err;
+  }
 
   const runtime = registerRuntime(session.id, handle, containerName, false);
+  runtime.claimIncarnation = claimIncarnation;
+  runtime.gatewaySession = gatewaySession;
 
   try {
     await armSessionLifecycle({
@@ -249,6 +399,14 @@ async function spawnContainer(session: Session): Promise<void> {
       },
     });
   } catch (err) {
+    if (runtime.claimIncarnation !== undefined) await releaseClaimQuietly(session.id, runtime.claimIncarnation);
+    // Same reasoning as above: this branch never reaches `finish()`, so it
+    // is the one place responsible for releasing a lease already attached
+    // to `runtime`.
+    await releaseGatewaySession(gatewaySession, {
+      kind: 'session-ended',
+      reason: 'session lifecycle failed to arm',
+    }).catch(() => {});
     if (activeContainers.get(session.id) === runtime && !runtime.finished) {
       activeContainers.delete(session.id);
       runtime.resolveFinished();
@@ -325,6 +483,23 @@ async function finish(sessionId: string, runtime: ActiveSessionRuntime, failure?
     stopTypingRefresh(sessionId);
   } catch (err) {
     log.error('Failed to stop typing refresh', { sessionId, containerName, err });
+  }
+  // Undefined for a session adopted from a previous host process — nothing
+  // to release here since no `ensure()` call was made in this process (see
+  // `adoptRunningSessions` and `ActiveSessionRuntime.gatewaySession`'s own
+  // comment). `finish()` is the single terminal path (normal exit, failure,
+  // and an operator/self kill via `killContainer` all funnel through
+  // `finishAndResolve`), so this is the one place a lease attached to a
+  // registered runtime needs releasing.
+  if (runtime.gatewaySession) {
+    try {
+      await releaseGatewaySession(runtime.gatewaySession, {
+        kind: 'session-ended',
+        reason: runtime.stopReason ?? 'session ended',
+      });
+    } catch (err) {
+      log.error('Failed to release gateway session lease', { sessionId, containerName, err });
+    }
   }
 
   if (failure && failure.kind !== 'started-then-died') {
@@ -418,7 +593,25 @@ export async function adoptRunningSessions(): Promise<{ adopted: number; stopped
       stopped += 1;
       continue;
     }
+    // Claim-fence adoption too — a session a live peer host is already
+    // running must not also be tracked here (v2.4.0 promotion, Workstream C9
+    // — ADR-030). Neither adopted nor stopped: the container is left exactly
+    // as found, since it is either genuinely owned by a live peer (calling
+    // stop() would kill a session that host is legitimately supervising) or
+    // the claim store was unreachable (safer to leave a possibly-live
+    // container untracked than to risk two hosts supervising the same one).
+    let claimIncarnation: number | null;
+    try {
+      claimIncarnation = await claimSessionRun(session.id, handle.name);
+    } catch (err) {
+      log.warn('Failed to claim session at adoption — leaving it unadopted', { sessionId: session.id, err });
+      claimIncarnation = null;
+    }
+    if (claimIncarnation === null) {
+      continue;
+    }
     const runtime = registerRuntime(session.id, handle, handle.name, true);
+    runtime.claimIncarnation = claimIncarnation;
     runtime.stopReason = undefined;
     handle.onTerminal((failure) => {
       void finishAndResolve(session.id, failure);
@@ -451,23 +644,51 @@ export function resolveProviderName(
   return (sessionProvider || containerConfigProvider || 'claude').toLowerCase();
 }
 
-async function resolveProviderContribution(
+export async function resolveProviderContribution(
   session: Session,
   agentGroup: AgentGroup,
   containerConfig: import('./container-config.js').ContainerConfig,
-): Promise<{ provider: string; contribution: ProviderContainerContribution }> {
+): Promise<{ provider: string; contribution: ProviderContainerContribution; surfaces?: ProviderSpawnRealization }> {
   const provider = resolveProviderName(session.agent_provider, containerConfig.provider);
   const fn = getProviderContainerConfig(provider);
-  const contribution = fn
-    ? await fn({
-        sessionDir: sessionDir(agentGroup.id, session.id),
-        agentGroupId: agentGroup.id,
-        groupDir: path.resolve(GROUPS_DIR, agentGroup.folder),
-        selectedSkills: selectedSkillNames(containerConfig),
-        hostEnv: process.env,
-      })
-    : {};
-  return { provider, contribution };
+  // Isthmus divergence (see provider-contracts/registry.ts's own header): a
+  // registered contract with no declared mount/file surface (e.g. claude's
+  // C8 model-domain-only registration) has not opted into the C14 mount-
+  // composition rewrite — treated the same as no contract at all here.
+  const contract = hasProviderMountSurface(provider) ? getProviderHostContract(provider) : undefined;
+  if (!contract && !fn) {
+    // Same as before contracts existed: the group spawns with the default
+    // (Claude) surfaces. Say so once per spawn so an operator can spot it.
+    log.warn('Provider has no registered host contract or adapter; spawning with default surfaces', {
+      provider,
+      agentGroupId: agentGroup.id,
+    });
+  }
+  const context = {
+    sessionDir: sessionDir(agentGroup.id, session.id),
+    agentGroupId: agentGroup.id,
+    groupDir: path.resolve(GROUPS_DIR, agentGroup.folder),
+    selectedSkills: selectedSkillNames(containerConfig),
+    hostEnv: process.env,
+  };
+  if (!contract) return { provider, contribution: fn ? await fn(context) : {} };
+  if (contract.legacyHostAdapter === 'required' && !fn) {
+    throw new Error(`Provider '${provider}' host contract requires a legacy host adapter`);
+  }
+
+  const surfaces = await realizeProviderSpawnSurfaces(
+    provider,
+    contract,
+    agentGroup.id,
+    context.groupDir,
+    context.sessionDir,
+    context.selectedSkills,
+    {
+      legacyOverlay: () => Promise.resolve(fn?.({ ...context, coreOwnsProviderSurfaces: true as const }) ?? {}),
+      composeProjectDocument: (spec) => composeGroupProjectDoc(agentGroup, context.groupDir, spec),
+    },
+  );
+  return { provider, contribution: surfaces.contribution, surfaces };
 }
 
 export async function buildMounts(
@@ -476,25 +697,52 @@ export async function buildMounts(
   containerConfig: import('./container-config.js').ContainerConfig,
   provider: string,
   providerContribution: ProviderContainerContribution,
+  providerSurfaces?: ProviderSpawnRealization,
 ): Promise<VolumeMount[]> {
   const projectRoot = process.cwd();
 
-  // Default agent surfaces (composed project doc, skill links, provider state
-  // dir) apply unless the provider's registration declares it provides its own.
-  const defaultSurfaces = !providerProvidesAgentSurfaces(provider);
+  // Isthmus divergence (see provider-contracts/registry.ts's own header): a
+  // registered contract with no declared mount/file surface has not opted
+  // into the C14 mount-composition rewrite — treated the same as no
+  // contract at all here, so buildMounts falls back to the legacy path for
+  // it exactly as it did before this contract existed.
+  const contract = hasProviderMountSurface(provider) ? getProviderHostContract(provider) : undefined;
+  // Undeclared payloads stay on the legacy capability gate. Declared payloads
+  // (a contract with a real mount surface) are realized below from it.
+  const defaultSurfaces = !contract && !providerProvidesAgentSurfaces(provider);
 
   const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
   const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
-  if (defaultSurfaces) {
+  const sessDir = sessionDir(agentGroup.id, session.id);
+  const projectDocument = contract?.projectDocument;
+  let lateProjectDocumentMount: VolumeMount | undefined;
+  const lateStateVolumeMounts = new Map<string, VolumeMount>();
+  const lateSkillViewMounts = new Map<string, VolumeMount[]>();
+  let skillBackingPaths = new Map<string, string>();
+  if (contract) {
+    providerSurfaces ??= await realizeProviderSpawnSurfaces(
+      provider,
+      contract,
+      agentGroup.id,
+      groupDir,
+      sessDir,
+      selectedSkillNames(containerConfig),
+      {
+        legacyOverlay: async () => providerContribution,
+        composeProjectDocument: (spec) =>
+          composeGroupProjectDoc(agentGroup, groupDir, spec, selectedSkillNames(containerConfig)),
+      },
+    );
+    skillBackingPaths = providerSurfaces.skillBackingPaths;
+  } else if (defaultSurfaces) {
     syncSkillSymlinks(claudeDir, containerConfig);
 
     // Compose CLAUDE.md fresh every spawn: every instruction source inlined
     // into one flat file. See `project-doc-compose.ts`.
-    await composeGroupProjectDoc(agentGroup, groupDir, DEFAULT_PROJECT_DOC);
+    await composeGroupProjectDoc(agentGroup, groupDir, DEFAULT_PROJECT_DOC, selectedSkillNames(containerConfig));
   }
 
   const mounts: VolumeMount[] = [];
-  const sessDir = sessionDir(agentGroup.id, session.id);
   const scope = agentGroup.id;
 
   // Session workspace: mailbox-selected state plus outbox and heartbeat files.
@@ -552,20 +800,62 @@ export async function buildMounts(
   // The composed project document — one nested RO mount on top of the RW group
   // dir, holding the full text of every instruction source. `container/CLAUDE.md`
   // is read on the host at compose time, so nothing needs it inside the container.
-  const composedClaudeMd = path.join(groupDir, 'CLAUDE.md');
-  if (defaultSurfaces && fs.existsSync(composedClaudeMd)) {
-    mounts.push({
-      hostPath: composedClaudeMd,
-      containerPath: '/workspace/agent/CLAUDE.md',
+  // False positive: `fileName` is validated by `assertFileName` at contract
+  // registration time (provider-contracts/registry.ts) — it rejects '.', '..',
+  // and any '/' or '\\', so it can never escape `groupDir`. Same disposition as
+  // this project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+  const composedProjectDocument = path.join(groupDir, projectDocument?.fileName ?? DEFAULT_PROJECT_DOC.fileName);
+  if ((projectDocument || defaultSurfaces) && fs.existsSync(composedProjectDocument)) {
+    const mount: VolumeMount = {
+      hostPath: composedProjectDocument,
+      containerPath: projectDocument?.containerPath ?? '/workspace/agent/CLAUDE.md',
       readonly: true,
-      mountClass: 'group-state',
+      mountClass: projectDocument?.mountClass ?? 'group-state',
       scope,
-    });
+    };
+    if (mount.mountClass === 'allowlisted-extra') lateProjectDocumentMount = mount;
+    else mounts.push(mount);
   }
 
   // Per-group .claude-shared at /home/node/.claude (provider state, settings,
-  // skill symlinks). Per agent group, not per session.
-  if (defaultSurfaces) {
+  // skill symlinks). Per agent group, not per session. A contract's own
+  // declared state volumes replace this default entirely — see the
+  // provider-host-contract mount-composition rewrite (Workstream C14).
+  if (contract) {
+    for (const volume of contract.stateVolumes ?? []) {
+      const hostPath = providerStateVolumePath(volume, agentGroup.id, sessDir);
+      const mount: VolumeMount = {
+        hostPath,
+        containerPath: volume.containerPath,
+        readonly: volume.mode === 'ro',
+        mountClass: volume.mountClass,
+        scope,
+      };
+      if (mount.mountClass === 'allowlisted-extra') lateStateVolumeMounts.set(volume.id, mount);
+      else mounts.push(mount);
+    }
+    for (const view of contract.skillViews ?? []) {
+      const hostPath = skillBackingPaths.get(view.backingId);
+      if (!hostPath)
+        throw new Error(`Provider '${provider}' skill view references unknown backing '${view.backingId}'`);
+      const mount: VolumeMount = {
+        hostPath,
+        containerPath: view.containerPath,
+        readonly: view.mode === 'ro',
+        mountClass: view.mountClass,
+        scope,
+      };
+      if (mount.mountClass === 'allowlisted-extra') {
+        const backingMounts = lateSkillViewMounts.get(view.backingId) ?? [];
+        backingMounts.push(mount);
+        lateSkillViewMounts.set(view.backingId, backingMounts);
+      } else {
+        mounts.push(mount);
+      }
+    }
+  } else if (defaultSurfaces) {
     mounts.push({
       hostPath: claudeDir,
       containerPath: '/home/node/.claude',
@@ -603,11 +893,27 @@ export async function buildMounts(
     mounts.push(...validated.map((m) => ({ ...m, mountClass: 'allowlisted-extra' as const, scope })));
   }
 
+  // Declared allowlisted-extra surfaces replace the old callback contribution
+  // at the same late slot, in the spawn order derived from resource kinds.
+  if (contract) {
+    for (const volume of contract.stateVolumes ?? []) {
+      const mount = lateStateVolumeMounts.get(volume.id);
+      if (mount) mounts.push(mount);
+    }
+    for (const backing of contract.skillBackings ?? []) {
+      mounts.push(...(lateSkillViewMounts.get(backing.id) ?? []));
+    }
+    if (lateProjectDocumentMount) mounts.push(lateProjectDocumentMount);
+  }
+
   // Provider-contributed mounts (e.g. opencode-xdg). Vetted upstream by the
   // in-tree provider registration, which is exactly the 'allowlisted-extra'
   // contract — classing them group-state would deny any provider whose state
-  // root sits outside the group subtree.
-  if (providerContribution.mounts) {
+  // root sits outside the group subtree. Once a provider has a registered
+  // contract, its legacy `.mounts` contribution is dropped here — core now
+  // realizes every declared surface for it; only `.env` still passes through
+  // (see resolveProviderContribution's legacyOverlay).
+  if (!contract && providerContribution.mounts) {
     mounts.push(...providerContribution.mounts.map((m) => ({ ...m, mountClass: 'allowlisted-extra' as const, scope })));
   }
 
@@ -731,11 +1037,12 @@ export function composeSessionSpec(input: ComposeSessionSpecInput): SessionSpec 
 
   return {
     key: { installSlug: INSTALL_SLUG, agentGroupId: agentGroup.id, sessionId: session.id },
-    labels: { 'nanoclaw-container-name': containerName, [GROUP_FOLDER_LABEL]: agentGroup.folder },
+    labels: { ...gateway.labels, 'nanoclaw-container-name': containerName, [GROUP_FOLDER_LABEL]: agentGroup.folder },
     // The gateway's auxiliary containers ride beside the agent; capability-
     // gated in the spawn path before composition ever runs.
     containers: [agent, ...(gateway.containers ?? [])],
     network: 'shared-private',
+    networkAccess: gateway.networkAccess,
     hardening: 'standard',
     resources: {
       cpus: CONTAINER_CPU_LIMIT || undefined,

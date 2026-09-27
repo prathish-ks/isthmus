@@ -26,7 +26,21 @@
  * paper over a casing drift silently.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 'v1';
+/**
+ * v1 -> v2 (v2.4.0 promotion, Workstream B): `WireSession` gained
+ * `networkAccess` and `WireMountSpec.class` gained `'gateway-trust'`,
+ * mirroring `internal/mount`'s own v1->v2 bump
+ * (`go-host/internal/kernel/protocol.go`'s `ProtocolVersion` doc comment
+ * has the full mixed-version rationale — server.go's exact-string check
+ * before any payload decode means a mismatched pair simply refuses to
+ * talk, in either direction, rather than silently misinterpreting a
+ * v1-shaped payload as v2). This bump MUST land in the same change as the
+ * Go-side one — an un-bumped client talking to the v2 kernel (or vice
+ * versa) gets a clean `unsupported-version` denial instead of a
+ * connection at all, so there is no working "half-migrated" state to
+ * worry about, but there IS a broken one if only one side bumps.
+ */
+export const KERNEL_PROTOCOL_VERSION = 'v2';
 
 export type KernelOp = 'route.request' | 'session.lookup' | 'capability.request' | 'delivery.request' | 'status.trace';
 
@@ -73,13 +87,32 @@ export const CAPABILITY_CONTAINER_KILL: KernelCapability = 'container.kill';
 
 /** Mirrors mount.Spec (internal/mount/mount.go). Field names match 1:1 with `drivers/types.ts`'s `MountSpec`. */
 export interface WireMountSpec {
-  class: 'group-state' | 'install-surface' | 'identity-material' | 'allowlisted-extra';
+  class: 'group-state' | 'install-surface' | 'identity-material' | 'gateway-trust' | 'allowlisted-extra';
   hostPath: string;
   containerPath: string;
   mode: 'rw' | 'ro';
   groupScope?: string;
   /** Mirrors `mount.Spec.Origin` (Go) / `MountSpec.origin` (drivers/types.ts) — see either's doc comment. */
   origin?: 'operator' | 'provider';
+}
+
+/**
+ * Mirrors mount.NetworkAccessTarget (v2.4.0 promotion, Workstream B). One
+ * flat object with a `kind` tag, matching the wire shape a discriminated
+ * union actually serializes as — see `mount.NetworkAccessTarget`'s own Go
+ * doc comment for why this isn't modeled as several typed variant
+ * interfaces the way `GuardContext` below is.
+ */
+export interface WireNetworkAccessTarget {
+  kind: 'host' | 'runtime' | 'session-container';
+  identity?: string;
+  role?: string;
+}
+
+/** Mirrors mount.NetworkAccessIntent (v2.4.0 promotion, Workstream B). */
+export interface WireNetworkAccessIntent {
+  endpoint: string;
+  target: WireNetworkAccessTarget;
 }
 
 /**
@@ -106,13 +139,22 @@ export interface WireSessionKey {
   sessionId: string;
 }
 
-/** Mirrors mount.Session. */
+/**
+ * Mirrors mount.Session. `networkAccess` is optional here even though the
+ * Go struct field is not a pointer (v2.4.0 promotion, Workstream B — see
+ * that field's own comment on `drivers/types.ts`'s internal `SessionSpec`
+ * for why): omitting it entirely unmarshals to Go's zero value
+ * (`Target.Kind === ""`), which `validateNetworkAccessTarget` only ever
+ * consults when a session actually carries an auxiliary container — every
+ * ordinary single-container wake today is unaffected either way.
+ */
 export interface WireSession {
   key: WireSessionKey;
   labels?: Record<string, string>;
   containers?: WireContainer[];
   runtimeTier: string;
   stopGraceSeconds?: number;
+  networkAccess?: WireNetworkAccessIntent;
 }
 
 /** Mirrors mount.Capabilities. */

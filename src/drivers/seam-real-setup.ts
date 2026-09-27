@@ -14,7 +14,7 @@
 import { DockerSessionDriver } from './docker-driver.js';
 import { FakeCli } from './fake-cli.js';
 import { mountPolicy, resetSessionDriver, withSessionEvents } from './index.js';
-import { resetGatewayProvider, type GatewayProvider } from '../gateway-providers/index.js';
+import { resetGatewayProvider, type GatewayProviderDefinition } from '../gateway-providers/index.js';
 
 /**
  * Installs a real `DockerSessionDriver` (real `validateSpec`, real
@@ -37,7 +37,16 @@ import { resetGatewayProvider, type GatewayProvider } from '../gateway-providers
  * to run (e.g. asserting on the `attach` call after a wake).
  */
 export function setUpSeamRealDriver(): FakeCli {
-  const noGateway: GatewayProvider = { kind: 'none', contribute: async () => ({ env: {}, mounts: [] }) };
+  const noGateway: GatewayProviderDefinition = {
+    kind: 'none',
+    agentSkills: [],
+    sessions: {
+      ensure: async () => ({
+        contribution: { env: {}, mounts: [], networkAccess: { endpoint: '', target: { kind: 'host' } } },
+      }),
+    },
+    approvals: { subscribe: async () => {} },
+  };
   resetGatewayProvider(noGateway);
 
   const fakeCli = new FakeCli('docker');

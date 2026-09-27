@@ -23,18 +23,25 @@ import (
 // "the response was a denial" but "exec was never reached" — the actual
 // claim doc.go's enforcement design makes.
 type fakeExecutor struct {
-	wakeCalls    int
-	buildCalls   int
-	killCalls    int
-	killedName   string
-	killedGrace  int
-	dockerfileIn string
+	wakeCalls         int
+	buildCalls        int
+	killCalls         int
+	killedName        string
+	killedGrace       int
+	killedAuxiliaries []string
+	killedNetwork     string
+	dockerfileIn      string
+	// wakeAuxiliaries/wakeNetwork, when set, are what Wake returns — lets a
+	// test simulate a multi-container wake without a real Wake
+	// implementation (v2.4.0 promotion, Workstream A3).
+	wakeAuxiliaries []string
+	wakeNetwork     string
 }
 
-func (f *fakeExecutor) Wake(ctx context.Context, spec mount.Session, runAs containerdefaults.RunAs, resources containerdefaults.Resources) (string, string, error) {
+func (f *fakeExecutor) Wake(ctx context.Context, spec mount.Session, runAs containerdefaults.RunAs, resources containerdefaults.Resources) (string, string, []string, string, error) {
 	f.wakeCalls++
 	name := "container-" + spec.Key.SessionID
-	return name, name, nil
+	return name, name, f.wakeAuxiliaries, f.wakeNetwork, nil
 }
 
 func (f *fakeExecutor) BuildImage(ctx context.Context, contextDir, imageTag, dockerfile string) (string, error) {
@@ -43,9 +50,11 @@ func (f *fakeExecutor) BuildImage(ctx context.Context, contextDir, imageTag, doc
 	return imageTag, nil
 }
 
-func (f *fakeExecutor) Kill(ctx context.Context, containerName string, graceSeconds int) error {
+func (f *fakeExecutor) Kill(ctx context.Context, containerName string, auxiliaryNames []string, privateNetwork string, graceSeconds int) error {
 	f.killCalls++
 	f.killedName = containerName
+	f.killedAuxiliaries = auxiliaryNames
+	f.killedNetwork = privateNetwork
 	f.killedGrace = graceSeconds
 	return nil
 }
@@ -88,9 +97,71 @@ func dispatch(t *testing.T, k *Kernel, op Op, payload any) ResponseEnvelope {
 
 func TestDispatch_RejectsUnsupportedVersion(t *testing.T) {
 	k := New(testPolicy(), withExecutor(&fakeExecutor{}))
-	resp := k.Dispatch(context.Background(), Envelope{Version: "v2", Op: OpStatusTrace, RequestID: "r"})
+	// Deliberately not a hardcoded literal (a prior version of this test
+	// used "v2", which broke the moment the real ProtocolVersion became
+	// "v2" for real — see the v2.4.0 promotion's Workstream A2 commit): any
+	// string that isn't the CURRENT ProtocolVersion must still be rejected,
+	// regardless of which version that currently is, so derive the "wrong"
+	// value from the real constant instead of guessing a specific string.
+	wrongVersion := ProtocolVersion + "-nonexistent"
+	resp := k.Dispatch(context.Background(), Envelope{Version: wrongVersion, Op: OpStatusTrace, RequestID: "r"})
 	if resp.OK || resp.Error == nil || resp.Error.Code != ErrUnsupportedVersion {
-		t.Fatalf("expected unsupported-version denial, got %+v", resp)
+		t.Fatalf("expected unsupported-version denial for version %q, got %+v", wrongVersion, resp)
+	}
+}
+
+// The concrete real-world case the v2.4.0 promotion's mixed-version
+// compatibility question resolves to (see ProtocolVersion's own doc
+// comment): an old TS host, still speaking the pre-NetworkAccess "v1"
+// wire contract, talking to this (now "v2") kernel gets a clean,
+// explicit rejection naming both versions -- never a silent
+// misinterpretation of a v1-shaped payload as if it were v2, because the
+// version string is checked before any payload is ever decoded.
+func TestDispatch_OldV1HostAgainstNewKernel_RejectedNotMisparsed(t *testing.T) {
+	k := New(testPolicy(), withExecutor(&fakeExecutor{}))
+	resp := k.Dispatch(context.Background(), Envelope{Version: "v1", Op: OpStatusTrace, RequestID: "r"})
+	if resp.OK {
+		t.Fatalf("expected an old v1 envelope to be rejected by the v2 kernel, got success: %+v", resp)
+	}
+	if resp.Error == nil || resp.Error.Code != ErrUnsupportedVersion {
+		t.Fatalf("expected ErrUnsupportedVersion specifically (not some other failure mode), got: %+v", resp)
+	}
+	if resp.Error.Detail == "" {
+		t.Fatal("expected a non-empty detail message naming the version mismatch, for operator diagnosability")
+	}
+}
+
+// The sibling case the test above deliberately keeps minimal (an empty
+// OpStatusTrace payload) but a real old TS host would never send: a genuine
+// v1-shaped container.wake request, full mount.Session included, with no
+// networkAccess field at all (v1 predates it) — the actual wire shape a
+// pre-v2.4.0 host produces. Server.go's Dispatch checks env.Version before
+// ever touching env.Payload (confirmed directly, not assumed — see line
+// 104), so this should be rejected wholesale, with the payload never
+// reaching json.Unmarshal for the op-specific request type at all. The
+// fakeExecutor's own wakeCalls counter is the proof that isn't just an
+// inference from the response: if some future refactor ever let a
+// version-mismatched request fall through to a partial decode-and-execute
+// path, this call count would be the thing that catches it.
+func TestDispatch_OldV1HostAgainstNewKernel_RealisticWakePayload_NeverReachesExecutor(t *testing.T) {
+	exec := &fakeExecutor{}
+	k := New(testPolicy(), withExecutor(exec))
+
+	spec := validSession()
+	raw, err := json.Marshal(CapabilityRequestPayload{Capability: CapabilityContainerWake, Session: &spec})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	resp := k.Dispatch(context.Background(), Envelope{Version: "v1", Op: OpCapabilityRequest, RequestID: "r", Payload: raw})
+
+	if resp.OK {
+		t.Fatalf("expected an old v1 envelope to be rejected by the v2 kernel, got success: %+v", resp)
+	}
+	if resp.Error == nil || resp.Error.Code != ErrUnsupportedVersion {
+		t.Fatalf("expected ErrUnsupportedVersion specifically (not some other failure mode), got: %+v", resp)
+	}
+	if exec.wakeCalls != 0 {
+		t.Fatalf("expected the executor's Wake to never be called for a version-rejected request, got %d calls", exec.wakeCalls)
 	}
 }
 

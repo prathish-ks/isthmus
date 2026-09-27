@@ -30,9 +30,14 @@ import { registerTelegramPreStep } from './telegram-pre-step.js';
 /**
  * A channel's auto-provision pre-step. `agentName` is the operator's resolved
  * assistant name. Resolves to the skill inputs to pre-bind, or undefined for
- * the manual walkthrough.
+ * the manual walkthrough. `options.browserConsent` (v2.4.0 promotion,
+ * Workstream C11): a later perk offer already obtained consent for opening
+ * the browser, so the pre-step must not ask again.
  */
-export type ChannelPreStep = (agentName: string) => Promise<Record<string, string> | undefined>;
+export type ChannelPreStep = (
+  agentName: string,
+  options?: { browserConsent?: boolean },
+) => Promise<Record<string, string> | undefined>;
 
 const preSteps = new Map<string, ChannelPreStep>();
 const companionSkills = new Map<string, readonly string[]>();

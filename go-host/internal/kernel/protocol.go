@@ -4,7 +4,23 @@ import "encoding/json"
 
 // ProtocolVersion is the literal version stamped on every envelope. See the
 // package doc comment's "Versioning" section for what requires a bump.
-const ProtocolVersion = "v1"
+//
+// v1 -> v2 (v2.4.0 promotion, Workstream A2): mount.Session gained a new
+// required field, NetworkAccess (mount.NetworkAccessIntent) — a request/
+// response shape change, which the doc comment's own versioning policy
+// requires a bump for unconditionally. Mixed-version behavior is exactly
+// what server.go's existing exact-string version check already produces,
+// unchanged by this bump: an old ("v1") TS host talking to this kernel gets
+// a clean ErrUnsupportedVersion response (kernel speaks v2, got v1), and a
+// hypothetical newer TS host sending an unrecognized future version would
+// get the same rejection in the other direction. Neither side can be
+// half-upgraded against the other — this is a deliberate fail-closed
+// property of the existing exact-match gate, not something v2 changes or
+// needs a new tolerance mechanism for. No unknown-field tolerance is
+// attempted either: the version string itself is the compatibility
+// boundary, checked before any payload is ever parsed (see server.go's
+// dispatch, which checks env.Version before decoding Payload at all).
+const ProtocolVersion = "v2"
 
 // Op names one of the five primitives. There are no other operations —
 // dispatch (server.go) rejects anything else by construction, not by

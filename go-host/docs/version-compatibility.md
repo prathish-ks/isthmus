@@ -18,10 +18,10 @@ Go code depends on holding still are narrower than that whole inventory:
 
 | Consumed contract | Upstream source | This kernel's adapter |
 |---|---|---|
-| Mount/session admission shape (`SessionSpec`, `ContainerSpec`, `MountSpec`, `MountClass`, `MountPolicy`) and its validation rules | `src/drivers/types.ts`'s `validateSpec`/`mountAllowed`/`isSecretShaped`/`looksLikeCredential`/`classRequiredByPath` | `internal/mount` (`mount.Session`, `mount.ValidateSpec`, `mount.Policy`) |
-| Safe container defaults (RunAs, resource caps) | `src/drivers/docker-driver.ts`'s hardening posture (non-root, `--rm`, resource flags) | `internal/containerdefaults` |
+| Mount/session admission shape (`SessionSpec`, `ContainerSpec`, `MountSpec`, `MountClass`, `MountPolicy`) and its validation rules. **v2.4.0 promotion, Workstream A**: `MountClass` gained `gateway-trust` (ro-only, agent-role-allowed admission rule, `Policy.GatewayTrustRoot`, checked ahead of identity-material per TS's own ordering); `SessionSpec` gained an optional `networkAccess` (`NetworkAccessIntent`/`NetworkAccessTarget`, the gateway-trust/multi-container wire surface) | `src/drivers/types.ts`'s `validateSpec`/`mountAllowed`/`isSecretShaped`/`looksLikeCredential`/`classRequiredByPath` | `internal/mount` (`mount.Session`, `mount.ValidateSpec`, `mount.Policy`) |
+| Safe container defaults (RunAs, resource caps). **v2.4.0 promotion, Workstream A**: confirmed (A4) `--read-only` for auxiliary/gateway containers is the *only* role-based difference upstream's own new code makes in `containerCreateArgs` — every other hardening flag (resource caps, user args) already applies identically regardless of role, so this row's contract did not otherwise change | `src/drivers/docker-driver.ts`'s hardening posture (non-root, `--rm`, resource flags) | `internal/containerdefaults` |
 | Session/agent-group/mailbox identity shape | `src/mailbox/model.ts` record kinds, `src/mailbox/sqlite/paths.ts`-equivalent path joins | `internal/mailbox`, `internal/ownership` |
-| The one physical Docker chokepoint | `DockerSessionDriver.prepare(spec)` (first line: `validateSpec(...)`), `.stop()` | `internal/kernel`'s `Executor.Wake`/`Kill`/`BuildImage` (EC-02; note ADR-016's documented narrower scope — supervision/discovery/exec stay TypeScript) |
+| The one physical Docker chokepoint. **v2.4.0 promotion, Workstream A**: `Wake`/`Kill` extended to per-session `--internal` Docker networks plus auxiliary (gateway-proxy) containers — ordered start (auxiliaries before agent) with full allocate-all-or-roll-back-everything semantics on partial failure, `Kill` symmetric in reverse order. No upstream Go source exists for this (original implementation work mirroring `docker-driver.ts`'s TS logic, not translation). **Explicit, tracked scope gap**: upstream's paired auxiliary health-checking in `status()` (an agent reporting "running" also implies every auxiliary still is) has no Go-kernel equivalent yet | `DockerSessionDriver.prepare(spec)` (first line: `validateSpec(...)`), `.stop()` | `internal/kernel`'s `Executor.Wake`/`Kill`/`BuildImage` (EC-02; note ADR-016's documented narrower scope — supervision/discovery/exec stay TypeScript) |
 | CLI-restart guard decision logic | `src/cli/guard.ts`'s `commandDecide`, `src/cli/registry.ts`'s `CommandDef` | `internal/guardpolicy` (`DecideRestartLike`, `CommandSpec`) |
 | Self-mod guard decision logic | `src/modules/self-mod/guard.ts` | `internal/guardpolicy` (`DecideSelfMod`) |
 | `cli_scope`/`pending_approvals` row shapes | `container_configs`/`pending_approvals` tables (central DB) | `internal/guardpolicy`'s `SQLCLIScopeLookup`/`SQLApprovalLookup` (thin `*sql.DB` readers) |
@@ -32,6 +32,18 @@ comment already cites the exact upstream file/line range it ports (per this
 project's own established convention — see e.g. `internal/mount`'s package
 doc, `internal/lifecycle`'s package doc). This table is the index into those
 citations, not a replacement for them.
+
+**A note on staging, since this table now describes v2.4.0-shape contracts
+while §4's pin still reads `v2.3.0`**: this table tracks what the kernel's Go
+code on the current branch (`feat/gateway-provider-seam` /
+`feat/mount-gateway-trust-class`) actually consumes, which is ahead of the
+promoted, merged baseline while `docs/promotion-v2.4.0.md`'s own Workstream G
+(the pin move itself, gated on Workstream H's migration-continuity work) is
+still in flight. §3's "Promote" step governs moving `docs/upstream-pin.json`/
+`docs/baseline.md`'s Stable Baseline declaration specifically — that is a
+separate, later action from keeping this architectural table accurate to the
+code as it lands. Do not read the two rows above as implying the pin has
+already moved; check §4 and `docs/upstream-pin.json` for that.
 
 ## 2. The adapter boundary, precisely
 

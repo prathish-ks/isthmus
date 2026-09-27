@@ -170,7 +170,7 @@ jobs:
         id: approver
         if: steps.sig.outcome == 'success'
         continue-on-error: true
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.AGENT_IMAGE_APPROVER_APP_ID }}
           private-key: ${{ secrets.AGENT_IMAGE_APPROVER_PRIVATE_KEY }}
