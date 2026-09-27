@@ -2,17 +2,19 @@
 
 Status: living document, established 2026-09-03 (Phase 9, P9-09). Current as
 of the pinned baseline in `docs/upstream-pin.json` (nanocoai/nanoclaw
-`v2.3.0`) and `ADR-017-p9-07-upstream-overlap-review.md`'s review. Companion
-to `version-compatibility.md` (P9-08 — the adapter-boundary/deprecation
-mechanics this matrix is the current snapshot of).
+`v2.4.0`) and `ADR-035-v2.4.0-pin-promotion-closure.md`'s closing review
+(supersedes `ADR-017-p9-07-upstream-overlap-review.md`'s v2.3.0-era one).
+Companion to `version-compatibility.md` (P9-08 — the adapter-boundary/
+deprecation mechanics this matrix is the current snapshot of).
 
-**2026-09-26 update**: the "Gateway-trust / multi-container isolation" rows
-below reflect work already implemented and tested on
+**2026-09-27**: the pin moved to `v2.4.0`. The "Gateway-trust /
+multi-container isolation" rows below, implemented and tested on
 `feat/mount-gateway-trust-class`/`feat/gateway-provider-seam`
-(`docs/promotion-v2.4.0.md`'s Workstream A) — ahead of the pin itself, which
-has not yet moved to `v2.4.0` (Workstream G's job, gated on Workstream H).
-Per Workstream C5's accounting, this promotion produced zero open
-acceptance records, so no row here is held below its earned rating by that
+(`docs/promotion-v2.4.0.md`'s Workstream A, merged as
+[PR #51](https://github.com/prathish-ks/isthmus/pull/51)), now describe
+the code the pin itself covers, not work ahead of it. Per Workstream C5's
+accounting, this promotion produced zero open acceptance records, so no
+row here is held below its earned rating by that
 mechanism — every rating below reflects actual verification status, not a
 placeholder pending an accepted-risk review.
 

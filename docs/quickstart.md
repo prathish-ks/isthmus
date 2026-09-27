@@ -20,7 +20,7 @@ and handles the difference for you (see that step, and the "upgrade
 tripwire" note under Common failures below for what changes for a
 migration specifically). The one thing that must be true either way: your
 existing install needs to be on the pinned upstream baseline this release
-is built against (currently NanoClaw `v2.3.0` — see
+is built against (currently NanoClaw `v2.4.0` — see
 `docs/upstream-pin.json`) for the Go kernel's behavioral guarantees to
 hold. If you're on a materially different version, check
 `go-host/docs/version-compatibility.md` first.
