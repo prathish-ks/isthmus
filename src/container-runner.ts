@@ -743,6 +743,12 @@ export async function buildMounts(
   // The composed project document — one nested RO mount on top of the RW group
   // dir, holding the full text of every instruction source. `container/CLAUDE.md`
   // is read on the host at compose time, so nothing needs it inside the container.
+  // False positive: `fileName` is validated by `assertFileName` at contract
+  // registration time (provider-contracts/registry.ts) — it rejects '.', '..',
+  // and any '/' or '\\', so it can never escape `groupDir`. Same disposition as
+  // this project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const composedProjectDocument = path.join(groupDir, projectDocument?.fileName ?? DEFAULT_PROJECT_DOC.fileName);
   if ((projectDocument || defaultSurfaces) && fs.existsSync(composedProjectDocument)) {
     const mount: VolumeMount = {

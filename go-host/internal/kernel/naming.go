@@ -41,7 +41,7 @@ func ContainerName(key mount.SessionKey) string {
 	return fmt.Sprintf("ncl-%s-%s", raw[:39], hash)
 }
 
-// LabelsForKey: the four canonical adoption labels, plus any extra
+// LabelsForKey returns the four canonical adoption labels, plus any extra
 // (group-folder, and — since the v2.4.0 gateway-provider seam — a
 // gateway-composed auxiliary container's own realization-only Labels)
 // layered on top. The canonical four are applied LAST, deliberately

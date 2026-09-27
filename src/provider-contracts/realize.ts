@@ -50,12 +50,19 @@ import {
  */
 export function providerDocumentSourcePath(projectRoot: string, contract: ProviderHostContract): string | undefined {
   if (contract.projectDocument === undefined) return undefined;
+  // False positive: `BASE_INSTRUCTIONS_PATH` is a module-level literal
+  // (project-doc-compose.ts), never runtime/agent input; `projectRoot` is
+  // this process's own root, passed by callers, not derived from a request.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return path.resolve(projectRoot, BASE_INSTRUCTIONS_PATH);
 }
 
 // Core-owned: the canonical instruction template is protected unconditionally;
 // no provider contract switches this on or off.
 export function protectedProviderDocumentSourcePaths(projectRoot: string): string[] {
+  // False positive: same as providerDocumentSourcePath above — both operands
+  // are fixed, never agent/runtime input.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return [path.resolve(projectRoot, BASE_INSTRUCTIONS_PATH)];
 }
 
@@ -80,8 +87,18 @@ export function providerStateVolumePath(
 function providerStateVolumeRoot(volume: ProviderStateVolume, agentGroupId: string, sessionDirectory?: string): string {
   if (volume.scope === 'session') {
     if (!sessionDirectory) throw new Error(`Session directory required for provider state volume '${volume.id}'`);
+    // False positive: `sessionDirectory` is host-constructed (session-manager's
+    // own `data/v2-sessions/<group>/<session>` path), never raw request input.
+    // This function only builds the trusted ROOT other code resolves untrusted
+    // segments against via `resolveWithinRoot` below — it is the containment
+    // boundary itself, not something that needs one.
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
     return path.resolve(sessionDirectory);
   }
+  // False positive: same rationale — `DATA_DIR` is a fixed constant and
+  // `agentGroupId` is a host-generated id (`ag-<timestamp>-<random>`), not
+  // free-form external input; this is the root, not the untrusted segment.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return path.resolve(DATA_DIR, 'v2-sessions', agentGroupId);
 }
 

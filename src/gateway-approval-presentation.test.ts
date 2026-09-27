@@ -77,6 +77,36 @@ it('preserves all typed policy display fields and explicit list overflow', () =>
   expect(card.question.length).toBeGreaterThan(23000);
 });
 
+it('rejects malformed typed display fields instead of trusting them', () => {
+  const typed = (displayFields: unknown) => ({ ...request(), displayFields }) as GatewayApprovalRequest;
+  expect(() =>
+    gatewayApprovalPresentation(typed(Array.from({ length: 25 }, () => ({ label: 'X', type: 'text', value: 'v' })))),
+  ).toThrow('Invalid gateway display fields');
+  expect(() => gatewayApprovalPresentation(typed([{ label: '', type: 'text', value: 'v' }]))).toThrow(
+    'Invalid gateway display label',
+  );
+  expect(() => gatewayApprovalPresentation(typed([{ label: 'X', type: 'list', value: 'not-an-array' }]))).toThrow(
+    'Invalid gateway display list',
+  );
+  expect(() => gatewayApprovalPresentation(typed([{ label: 'X', type: 'list', value: ['a'], overflow: -1 }]))).toThrow(
+    'Invalid gateway display overflow',
+  );
+  expect(() => gatewayApprovalPresentation(typed([{ label: 'X', type: 'not-a-real-type', value: 'v' }]))).toThrow(
+    'Invalid gateway display value',
+  );
+  expect(() =>
+    gatewayApprovalPresentation(
+      typed(Array.from({ length: 24 }, () => ({ label: 'X', type: 'long_text', value: 'x'.repeat(12000) }))),
+    ),
+  ).toThrow('Gateway display too large');
+});
+
+it('rejects a malformed entry within an otherwise well-formed details array', () => {
+  expect(() =>
+    gatewayApprovalPresentation(request({ ...summary, details: [{ label: 'X', value: 123 as never }] })),
+  ).toThrow('Invalid gateway approval detail');
+});
+
 // Backslash escapes are decoded by channel Markdown renderers, preserving the value.
 it('preserves account names and resource punctuation in summaries and typed fields', () => {
   const value = 'john_doe+test@x.com';

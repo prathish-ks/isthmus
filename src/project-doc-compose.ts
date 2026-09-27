@@ -213,6 +213,12 @@ export async function composeGroupProjectDoc(
   // behavior change. A new contract that leaves baseDocPath unset gets the
   // canonical template path with its memory-note/native-skills substitution.
   const legacySpec = spec.baseDocPath !== undefined;
+  // False positive: `baseDocPath` is never runtime/DB/agent input — every spec
+  // that sets it (DEFAULT_PROJECT_DOC here, and its test-only variants) is a
+  // module-level literal in source. Same disposition as this project's other
+  // path-join-resolve-traversal false positives (see .github/workflows/
+  // ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const baseDoc = path.resolve(process.cwd(), spec.baseDocPath ?? BASE_INSTRUCTIONS_PATH);
   if (fs.existsSync(baseDoc)) {
     const template = fs.readFileSync(baseDoc, 'utf-8');

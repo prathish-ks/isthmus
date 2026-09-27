@@ -103,6 +103,11 @@ echo "stand-in gateway container started: $GATEWAY_NAME (alpine, sleep infinity)
 echo
 
 export NANOCLAW_EGRESS_LOCKDOWN=true
-export NANOCLAW_GATEWAY_PROVIDER="${NANOCLAW_GATEWAY_PROVIDER:-none}"
+# Default to "onecli", matching the stand-in gateway container started above
+# (GATEWAY_NAME defaults to $ONECLI_GATEWAY_CONTAINER, same as onecli.ts's own
+# default). "none" was a stale pre-ADR-033 default: it declares no
+# egressGateway(), so resolveEgressGatewayAccess correctly fails closed and
+# this smoke test never actually exercised lockdown.
+export NANOCLAW_GATEWAY_PROVIDER="${NANOCLAW_GATEWAY_PROVIDER:-onecli}"
 
 pnpm exec tsx scripts/ec08-egress-lockdown-live-smoke.ts

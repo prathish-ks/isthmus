@@ -211,3 +211,46 @@ describe('approverUserId is persisted to the approval row', () => {
     await resolveGatewayApproval(rows[0].approval_id, 'approve');
   });
 });
+
+describe('agent-group and delivery resolution edge cases', () => {
+  it('auto-denies when the named agent group no longer exists', async () => {
+    const decision = await decideFn!(baseRequest({ agentGroupId: 'ag-does-not-exist' }));
+    expect(decision).toBe('deny');
+    expect(await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).toHaveLength(0);
+  });
+
+  // `agentGroupId` is required on the wire type — '' is the sentinel for "no
+  // known scope" (see onecli.ts's own comment), not a missing property. This
+  // also drives resolveSessionProvider's independent sessionId/agentGroupId
+  // lookups down their "not set" paths (both fall back to undefined, and
+  // resolveProviderName then falls back to its own default).
+  it('resolves the session/config provider independently when scoped to no agent group', async () => {
+    const decision = await decideFn!(
+      baseRequest({
+        agentGroupId: '',
+        sessionId: 'session-does-not-exist',
+        trigger: 'default',
+        destination: { host: 'evil.example.com', method: 'GET' },
+      }),
+    );
+    // Falls through to the normal card flow: no agent group to scope to and
+    // no global approver seeded in this suite's beforeEach.
+    expect(decision).toBe('deny');
+  });
+
+  it('auto-denies when the gateway-named delivery messaging group does not resolve', async () => {
+    await upsertUser({ id: 'slack:owner-y', kind: 'slack', display_name: 'Owner', created_at: now() });
+    await grantRole({
+      user_id: 'slack:owner-y',
+      role: 'owner',
+      agent_group_id: null,
+      granted_by: null,
+      granted_at: now(),
+    });
+
+    const decision = await decideFn!(baseRequest({ delivery: { messagingGroupId: 'mg-does-not-exist' } }));
+
+    expect(decision).toBe('deny');
+    expect(await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).toHaveLength(0);
+  });
+});
