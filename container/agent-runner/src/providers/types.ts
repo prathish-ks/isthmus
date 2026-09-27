@@ -1,4 +1,5 @@
 import type { MemorySessionHookRegistration } from '../memory/session-hook.js';
+import type { ProviderRuntimeContract } from '../provider-contracts/registry.js';
 
 /**
  * A speed tier name. The vocabulary is provider-declared (the host validates
@@ -46,6 +47,15 @@ export interface AgentProvider {
   // (verifier-checked, so shape stays correct), just not yet consumed by
   // anything. See ADR-032's addendum for the full reasoning.
   readonly emitsMidTurnText?: boolean;
+
+  /**
+   * Resolved runtime contract for this provider instance, set by
+   * `createProvider` when the provider is contract-declaring. Lets
+   * call sites prefer `commands.formatting`/`textDelivery` over the
+   * legacy instance fields above when a contract exists, falling back
+   * to those fields for contractless providers.
+   */
+  contract?: ProviderRuntimeContract;
 
   /**
    * Register shared memory through the provider's native session-start

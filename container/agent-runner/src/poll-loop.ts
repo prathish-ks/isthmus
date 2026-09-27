@@ -217,7 +217,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
-    const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
+    const usesNativeSlashCommands = config.provider.contract
+      ? config.provider.contract.commands.formatting === 'native'
+      : config.provider.supportsNativeSlashCommands;
+    const prompt = formatMessagesWithCommands(keep, usesNativeSlashCommands);
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
@@ -252,7 +255,9 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         config.provider.onExchangeComplete?.bind(config.provider),
         prompt,
         continuation,
-        config.provider.emitsMidTurnText === true,
+        config.provider.contract
+          ? config.provider.contract.textDelivery === 'mid-turn-complete'
+          : config.provider.emitsMidTurnText === true,
       );
       if (result.continuation && result.continuation !== continuation) {
         continuation = result.continuation;
