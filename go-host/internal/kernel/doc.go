@@ -108,9 +108,12 @@
 //
 // # Versioning
 //
-// Every envelope carries a literal protocol version ("v1" today). A version
+// Every envelope carries a literal protocol version — ProtocolVersion in
+// protocol.go, "v2" as of the v2.4.0 promotion's Workstream A2 (mount.
+// Session gained a required NetworkAccess field; see that constant's own
+// doc comment for the mixed-version behavior this produces). A version
 // bump is required for any change to a request/response shape, a new
 // Capability value, or a new non-capability constraint being added or
-// relaxed — never a silent shape change on "v1". This is what P6-02's
-// done-when means by "small versioned API."
+// relaxed — never a silent shape change on the current version string.
+// This is what P6-02's done-when means by "small versioned API."
 package kernel

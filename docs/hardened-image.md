@@ -184,8 +184,9 @@ returns to the shared image.
 
 ## With a NanoClaw account
 
-The hosted registry is gated, so fetching *our* image needs a free account. This is the only
-part of NanoClaw that involves an account or reports anything identifiable.
+The hosted registry is gated, so fetching *our* image needs a free account. This is one of two
+parts of NanoClaw that involve an account or report anything identifiable — see also "With the
+community portal," below, for the other.
 
 ```bash
 bash setup/registry-login.sh          # opens your browser
@@ -211,6 +212,26 @@ acquired one.
 The credential lives at `~/.config/nanoclaw/`, mode `0600`, and can do exactly one thing: ask for
 a short-lived, pull-only credential for one repository. `--logout` revokes it server-side and
 removes the docker credential helper.
+
+## With the community portal
+
+Enabling the community portal — offered during setup for activating Slack app provisioning or
+this same hardened-image perk through a browser flow instead of a token — registers this machine
+at `portal.nanoclaw.dev` and involves its own account, separate from the registry sign-in above.
+
+**What is collected:** a self-generated device identity key (`~/.config/nanoclaw/device-key.json`,
+mode `0600`, never leaves the machine — only its public half is registered); at registration, a
+label combining this machine's hostname and the basename of the NanoClaw checkout directory (e.g.
+`my-laptop · isthmus`), so you can tell your devices apart in the portal's dashboard; and, on every
+request after sign-in, a bearer token plus a device-proof header, nothing else in the headers.
+
+**What is never collected:** the same list as the registry sign-in above — no groups, channels,
+messages, prompts, files, or API keys. Nothing about your agents' activity crosses this boundary
+either; the portal only ever sees setup-time device/perk state.
+
+If you would rather this machine's hostname and checkout directory name not leave it, decline the
+portal during setup and use a manager token or manual Slack app creation instead — see
+`setup/channels/slack-auto.ts`'s own doc comment for the fallback paths.
 
 Your account is keyed on your **verified email**. Signing in with a personal address and later a
 work one gives you two separate accounts — deliberate, since merging on anything weaker is how

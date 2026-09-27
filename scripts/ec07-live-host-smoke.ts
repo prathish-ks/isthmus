@@ -433,7 +433,13 @@ async function main(): Promise<void> {
   // wants the real gateway in the path exports NANOCLAW_GATEWAY_PROVIDER.
   registerGatewayProvider('none', () => ({
     kind: 'none',
-    contribute: async () => ({ env: {}, mounts: [] }),
+    agentSkills: [],
+    sessions: {
+      ensure: async () => ({
+        contribution: { env: {}, mounts: [], networkAccess: { endpoint: '', target: { kind: 'host' } } },
+      }),
+    },
+    approvals: { subscribe: async () => {} },
   }));
   process.env.NANOCLAW_GATEWAY_PROVIDER = process.env.NANOCLAW_GATEWAY_PROVIDER || 'none';
 

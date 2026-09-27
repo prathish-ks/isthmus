@@ -4,6 +4,14 @@ import os from 'os';
 import path from 'path';
 
 import { MEMORY_SESSION_HOOK } from '../memory/session-hook.js';
+// Workstream C15: writing the SessionStart hook into settings.json moved out
+// of ClaudeProvider into the contract's lifecycle.memorySessionHookRegistration
+// callback (provider-contracts/claude.ts) — only reached through
+// registerProviderMemorySessionHook, the same module-level function
+// index.ts calls in production. Calling provider.registerMemorySessionHook()
+// directly (the old path) no longer touches settings.json at all.
+import { claudeRuntimeContract } from '../provider-contracts/claude.js';
+import { registerProviderMemorySessionHook, resolveRuntimeConfiguration } from '../provider-contracts/realize.js';
 import { ClaudeProvider } from './claude.js';
 
 let configDir: string;
@@ -44,9 +52,9 @@ describe('Claude memory SessionStart registration', () => {
       }),
     );
 
-    const provider = new ClaudeProvider();
-    provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
-    provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
+    const provider = new ClaudeProvider({}, resolveRuntimeConfiguration(claudeRuntimeContract, {}));
+    registerProviderMemorySessionHook('claude', provider, MEMORY_SESSION_HOOK);
+    registerProviderMemorySessionHook('claude', provider, MEMORY_SESSION_HOOK);
 
     const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
     expect(settings.customValue).toBe('preserved');

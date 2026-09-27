@@ -6,6 +6,16 @@ of the pinned baseline in `docs/upstream-pin.json` (nanocoai/nanoclaw
 to `version-compatibility.md` (P9-08 — the adapter-boundary/deprecation
 mechanics this matrix is the current snapshot of).
 
+**2026-09-26 update**: the "Gateway-trust / multi-container isolation" rows
+below reflect work already implemented and tested on
+`feat/mount-gateway-trust-class`/`feat/gateway-provider-seam`
+(`docs/promotion-v2.4.0.md`'s Workstream A) — ahead of the pin itself, which
+has not yet moved to `v2.4.0` (Workstream G's job, gated on Workstream H).
+Per Workstream C5's accounting, this promotion produced zero open
+acceptance records, so no row here is held below its earned rating by that
+mechanism — every rating below reflects actual verification status, not a
+placeholder pending an accepted-risk review.
+
 Three ratings, matching this task's own "Done when" wording:
 
 - **Stable** — this exact contract is independently enforced (or, for a
@@ -34,6 +44,9 @@ Three ratings, matching this task's own "Done when" wording:
 | Duplicate-wake idempotency for one session id | **Unsupported (documented, not hardened)** | `handleWake` has no guard against a second wake for an already-registered session id — `TestWake_DuplicateSessionID_OverwritesRegistryEntry` (P9-03) pins the orphaning consequence. TS-side pre-wake container-name prediction is understood to prevent this from being reached in the normal request path; this kernel does not independently enforce it. A real hardening candidate for a future phase, not silently assumed safe. |
 | Capability scoping (`internal/capability`) / scoped credential brokering (`internal/credentialbroker`) | **Preview / Pending** | Prototyped and unit-tested in isolation (P8-02/P8-04), NOT adopted into any live request path — ADR-014's own v1.1-candidate framing. `credentialbroker`'s expiry semantics now have direct `Validate`-path coverage too (P9-04), on top of the existing `Resolve`-path test. |
 | Egress/network controls | **Stable (Linux)** | Real enforcement shipped, not evaluation-only (P8-05, ADR-013): `internal/egress` installs and independently verifies a `DOCKER-USER` iptables rule blocking `169.254.0.0/16` (cloud-metadata/link-local) on every container — called from `nanogo serve` startup by default, checkable via `nanogo doctor`. Covered by `egress_test.go`'s fakeRunner suite and `live_docker_test.go`'s real-Docker tests (`NANOCLAW_EGRESS_LIVE_DOCKER=1`, run in CI). Linux only by design: Docker Desktop for Mac's `--network host` is a proxy/forwarding emulation, not real namespace sharing, so `Ensure`/`Check` report a disclosed `LevelWarn` gap rather than a false pass on any other `GOOS` — see ADR-013's "Scope: Linux only" section. The platform qualifier is part of the rating, not a footnote. |
+| `container.wake` gateway-trust mount admission (`MountClass: gateway-trust`, `Policy.GatewayTrustRoot`, ro-only + agent-role-allowed, checked ahead of identity-material) | **Stable (new, 2026-09-26)** | `internal/mount`, v2.4.0 promotion Workstream A1/A6. Table-driven admission suite including a two-container test proving gateway-trust works on a non-agent (auxiliary proxy) role. A real bug (`underRoot(path, "")` matching every absolute path, silently misclassifying every mount when `GatewayTrustRoot` was unset) was found and fixed via an explicit empty-root fail-closed guard, verified by negative control. Full `go-host` suite green including `-race`. |
+| Multi-container session wake/kill with per-session private network isolation (`--internal` Docker network, `--read-only` auxiliary containers, ordered start/teardown, allocate-all-or-roll-back-everything on partial failure) | **Stable (new, 2026-09-26), verified against a real Docker daemon** | `internal/kernel`'s `Executor.Wake`/`Kill`, v2.4.0 promotion Workstream A3/A5. No upstream Go source to port from (original implementation mirroring `docker-driver.ts`'s TS logic). Live-Docker evidence, not just a fake-CLI unit suite: `TestLive_Wake_MultiContainerSession_PrivateNetworkIsolatesAgentAndReachesProxy` (private network is `Internal:true` with exactly 2 members; agent reaches the auxiliary by alias but not the outside internet) and `TestLive_Wake_MultiContainerSession_AuxiliaryIsReadOnly` (the auxiliary's real read-only rootfs confirmed from inside it), both run against a real daemon (`NANOCLAW_EC05_LIVE_DOCKER=1`), 2026-09-25. `go-multi-container-live-docker` is wired REQUIRED into `ci.yml` (Workstream G1); the actual GitHub Actions run of that job is still the formal gate this local evidence stands in for. |
+| Auxiliary-container health reflected in agent `status()` (an agent reporting "running" also implying every auxiliary still is) | **Unsupported (documented gap, not silently dropped)** | No Go-kernel equivalent exists yet — A3's own row names this explicitly as the one piece of upstream's paired change not ported this pass, flagged for a later task rather than assumed covered by the Wake/Kill row above. |
 
 ## Compatibility / format surface (what the kernel reads or must stay byte-compatible with)
 

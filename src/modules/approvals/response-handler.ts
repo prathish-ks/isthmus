@@ -9,8 +9,8 @@
  *      "Reject with reason…" we hold the row and capture the admin's next DM as
  *      a one-line reason (see reason-capture.ts). Reject finalization is shared
  *      via finalizeReject.
- *   2. OneCLI credential approvals (`action = 'onecli_credential'`). Resolved
- *      via an in-memory Promise — see onecli-approvals.ts.
+ *   2. Gateway credential approvals (`action = GATEWAY_APPROVAL_ACTION`).
+ *      Resolved via an in-memory Promise — see gateway-approval-coordinator.ts.
  *
  * The response handler is registered via core's `registerResponseHandler`;
  * core iterates handlers and the first one to return `true` claims the response.
@@ -28,7 +28,7 @@ import { writeSessionMessage } from '../../session-manager.js';
 import type { PendingApproval } from '../../types.js';
 import { hasAdminPrivilege, isGlobalAdmin, isOwner } from '../permissions/db/user-roles.js';
 import { finalizeReject } from './finalize.js';
-import { ONECLI_ACTION, resolveOneCLIApproval } from './onecli-approvals.js';
+import { GATEWAY_APPROVAL_ACTION, resolveGatewayApproval } from '../../gateway-approval-coordinator.js';
 import { getApprovalHandler, notifyApprovalResolved, REJECT_WITH_REASON_VALUE } from './primitive.js';
 import { armReasonCapture } from './reason-capture.js';
 
@@ -46,8 +46,8 @@ export async function handleApprovalsResponse(payload: ResponsePayload): Promise
     return true;
   }
 
-  if (approval.action === ONECLI_ACTION) {
-    if (await resolveOneCLIApproval(payload.questionId, payload.value)) {
+  if (approval.action === GATEWAY_APPROVAL_ACTION) {
+    if (await resolveGatewayApproval(payload.questionId, payload.value)) {
       return true;
     }
     // Row exists but the in-memory resolver is gone (timer fired or the process

@@ -20,6 +20,7 @@ export const FIXTURE_POLICY: MountPolicy = {
   dataRoot: '/install/data',
   surfaceRoots: ['/install/container/agent-runner/src', '/install/container/skills', '/install/container/CLAUDE.md'],
   materialsRoot: '/install/data/session-materials',
+  gatewayTrustRoot: '/install/data/gateway-trust',
 };
 
 export function fixtureSpec(overrides: Partial<SessionSpec> = {}): SessionSpec {
