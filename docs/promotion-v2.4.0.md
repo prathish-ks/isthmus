@@ -1,11 +1,13 @@
 # nanocoai/nanoclaw v2.4.0 Promotion — Living Plan
 
-Status: **implementation complete; ready for the final pin-move PR
-(G4)**. Started 2026-09-25 (plan phase); both implementation PRs
+Status: **promotion complete — pin moved to v2.4.0, 2026-09-27**.
+Started 2026-09-25 (plan phase); both implementation PRs
 ([#51](https://github.com/prathish-ks/isthmus/pull/51),
-[#52](https://github.com/prathish-ks/isthmus/pull/52)) merged 2026-09-27
-with real, verified CI evidence. Every Promotion-gate box below is
-checked except the pin move itself. Update this document's status
+[#52](https://github.com/prathish-ks/isthmus/pull/52)) merged with real,
+verified CI evidence; the final pin-move PR (G4) updated `docs/
+upstream-pin.json`/`docs/baseline.md` and closed with
+[ADR-035](../go-host/docs/ADR-035-v2.4.0-pin-promotion-closure.md). Every
+Promotion-gate box below is checked. Update this document's status
 markers and changelog as each workstream moves — this is the source of
 truth for where the promotion actually stands, not the chat history that
 produced it.
@@ -770,7 +772,7 @@ resolves.
 - [x] Workstream G: CI coverage added and REQUIRED for every new privileged surface this promotion introduces (G1–G3), no report-only substitutions — G1 (`go-multi-container-live-docker`, commit `1c9b6903`, now confirmed `success` on real CI per Workstream A's row above), G2 (verified against the real `ci.yml`, no new job needed), G3 (confirmed N/A — see G3's row for the full re-verification)
 - [x] Workstream H: H2 and H3 acceptance tests both pass, each with its recorded rollback artifact, H4 confirms matching outcomes — [`docs/promotion-v2.4.0-rollback-v2.3.0.md`](promotion-v2.4.0-rollback-v2.3.0.md), [`docs/promotion-v2.4.0-rollback-v2.4.0.md`](promotion-v2.4.0-rollback-v2.4.0.md), H4 comparison table in the latter. This workstream's evidence is command-log transcripts, not CI — already real and reviewable now
 - [x] **Tag/commit immutability re-check**: re-run immediately before promoting (2026-09-27), per this row's own design. `v2.4.0` still resolves to `143db6c907c652773a536c7c9e96269fdad0a4a4` — verified directly against the live tag (`GET /repos/nanocoai/nanoclaw/git/refs/tags/v2.4.0` → tag object → `GET .../git/tags/<sha>` → target commit), matching the SHA captured at Step 0 exactly. No drift since planning began; Workstream B/C/D's classification stands unchanged against the live tag
-- [ ] `docs/upstream-pin.json` + `docs/baseline.md` updated together with the closing ADR (G4) — in the final pin-move PR only, per "PR boundaries" above — by design, this is G4 itself, the last step, tracked separately (not this PR)
+- [x] `docs/upstream-pin.json` + `docs/baseline.md` updated together with the closing ADR (G4) — **done, this PR.** `docs/upstream-pin.json` and `docs/baseline.md`'s Stable Baseline section both now read `v2.4.0` (commit `143db6c907c652773a536c7c9e96269fdad0a4a4`); closing ADR is [ADR-035](../go-host/docs/ADR-035-v2.4.0-pin-promotion-closure.md), superseding ADR-017. Every box in this checklist is now checked — the promotion is complete
 
 ## Resolved questions and remaining risks (living list)
 
@@ -1754,3 +1756,20 @@ questions, which is no longer true for three of the four items below.
   left open — see that row's update. Every Promotion-gate box is now
   checked except the pin move itself (G4), which is by design the final,
   separate pin-move PR's own job, not this plan document's.
+- 2026-09-27 — **G4: the pin moved.** `docs/upstream-pin.json` and
+  `docs/baseline.md`'s Stable Baseline section updated together to
+  `v2.4.0` (commit `143db6c907c652773a536c7c9e96269fdad0a4a4`), in the
+  same commit as the closing review,
+  [ADR-035](../go-host/docs/ADR-035-v2.4.0-pin-promotion-closure.md) —
+  superseding `ADR-017-p9-07-upstream-overlap-review.md` as the current
+  closing review, per F6's own row. `go-host/docs/compatibility-matrix.md`
+  and `go-host/docs/version-compatibility.md` updated in the same PR to
+  describe `v2.4.0` as the current pin rather than code ahead of it, and
+  the repo-wide sweep for other "pinned against v2.3.0" statements
+  (`README.md`, `go-host/README.md`, `docs/quickstart.md`) landed
+  alongside. Every box in the Promotion gate checklist above is now
+  checked. Two real follow-ups carry forward, neither a promotion
+  blocker: lease continuity across a host restart (an adopted session's
+  in-memory gateway lease from the *previous* host process is not
+  re-established), and `poll-loop.ts`'s deferred multi-turn reply-routing
+  rewrite. This closes the v2.4.0 promotion.
