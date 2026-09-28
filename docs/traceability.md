@@ -218,13 +218,24 @@ claims — all three fixed and closed the same day, not merely disclosed:
   capability rejection, `driver.prepare` failure), and subscribes
   `lease.onUnavailable(...)` to drive that session's teardown. See
   `docs/promotion-v2.4.0.md`'s C8/C1 rows for the full history of how the
-  gap was found and closed. **Deliberately left open, not this closure's
+  gap was found and closed. ~~**Deliberately left open, not this closure's
   job**: lease continuity across a host restart — a graceful shutdown
   doesn't kill running containers, so `adoptRunningSessions` re-tracks them
   without ever re-calling `sessions.ensure()`, meaning an adopted session's
-  in-memory lease from the *previous* process is simply gone. A separate,
-  larger question, tracked as a real follow-up.
-- **`poll-loop.ts`'s multi-turn reply-routing rewrite remains genuinely
+  in-memory lease from the *previous* process is simply gone.~~ **Closed
+  2026-09-28, PR [#55](https://github.com/prathish-ks/isthmus/pull/55).**
+  A shared `ensureGatewaySession` helper is now reused by both
+  `spawnContainer` (`disposition: 'create'`) and `adoptRunningSessions`
+  (`disposition: 'adopt'`), and a shutdown-time `releaseAllGatewaySessions`
+  (`kind: 'host-detached'`) lets the successor process's
+  `adoptRunningSessions` re-admit every surviving container. Also closed
+  in the same PR: Iron Proxy's lease now distinguishes `'host-detached'`
+  (never revokes identity) from `'session-ended'` (the only case that
+  does), matching `docs/gateway-seam.md`'s own `release(event)` contract —
+  found via an independent review after the PR's first draft claimed
+  continuity while `close()` still revoked identity unconditionally on
+  every abort. See ADR-035's addendum for the full history.
+- ~~**`poll-loop.ts`'s multi-turn reply-routing rewrite remains genuinely
   deferred, not silently dropped.** Bundled with the container-side
   provider-contract migration C15 otherwise ported, and deliberately
   excluded from C15's scope for the same "don't let a substantial,
@@ -233,7 +244,22 @@ claims — all three fixed and closed the same day, not merely disclosed:
   item, this one has no provider yet that needs it (Iron Proxy doesn't
   touch `poll-loop.ts`), so there's no forcing function pulling it forward;
   recommended as its own follow-on effort, gated on its own ADR, whenever
-  one appears.
+  one appears.~~ **Closed 2026-09-28**, `fix/poll-loop-turn-destination-isolation`.
+  Investigation found upstream's own bundled rewrite was not itself worth
+  porting — Isthmus's `poll-loop.ts` is independently more mature (2,400+
+  lines of pinned test coverage, a concurrent-poller architecture upstream's
+  diff doesn't have, and a real file-naming collision with upstream's
+  `db/session-routing.ts`/`db/session-state.ts`) — but extracted the one
+  real, still-missing value narrowly: `query.push()` queues a genuinely
+  separate turn (confirmed against both the real `MessageStream` in
+  `providers/claude.ts` and `MockProvider` — neither injects a push into
+  an in-flight generation), so a follow-up from a different destination
+  arriving while the query stayed open got its own result (a non-retryable
+  error notice, the a2a in-reply-to stamp) handled with the *previous*
+  turn's stale routing. A small FIFO (`pendingTurns`) now tracks each
+  outstanding turn's own routing, adopted at the start of its own `result`
+  event — no change to *when* messages get pushed, so none of the
+  behavioral risk a queue-shaped rewrite would have carried.
 - ~~**This table itself is not yet enforced.**~~ **Closed 2026-09-24.** The
   seam-coverage and boundary tables' entries are now mirrored in
   `docs/wiring-registry.json` and re-checked on every PR by the required

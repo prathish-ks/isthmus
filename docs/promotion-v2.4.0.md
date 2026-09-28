@@ -1773,3 +1773,14 @@ questions, which is no longer true for three of the four items below.
   in-memory gateway lease from the *previous* host process is not
   re-established), and `poll-loop.ts`'s deferred multi-turn reply-routing
   rewrite. This closes the v2.4.0 promotion.
+
+  **Update (2026-09-28)**: both follow-ups are now closed — see
+  [ADR-035's addendum](../go-host/docs/ADR-035-v2.4.0-pin-promotion-closure.md#addendum-2026-09-28-both-named-follow-ups-closed).
+  Lease continuity across a host restart via
+  [PR #55](https://github.com/prathish-ks/isthmus/pull/55). The
+  `poll-loop.ts` reply-routing rewrite was not ported as upstream's
+  bundled `queuedTurns`/`adoptTurn`/`pushRetry` rewrite — Isthmus's own
+  architecture there is independently more mature — but the real
+  remaining value (per-turn routing correctness for a follow-up from a
+  different destination arriving while the query stays open) was
+  extracted narrowly in `fix/poll-loop-turn-destination-isolation`.
