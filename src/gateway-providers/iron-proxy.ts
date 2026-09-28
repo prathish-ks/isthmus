@@ -20,6 +20,7 @@ import {
   type GatewayProviderDefinition,
   type GatewaySessionInput,
   type GatewaySessionLease,
+  type GatewaySessionRelease,
 } from './gateway-provider-registry.js';
 
 const SETTINGS = [
@@ -367,9 +368,54 @@ function ironProxyEgressGateway(settings: IronProxySettings): NetworkAccessInten
   return { endpoint: PROXY_HOST, target: { kind: 'runtime', identity: settings.containerName } };
 }
 
-interface LiveLease extends IronApprovalIdentity {
+export interface LiveLease extends IronApprovalIdentity {
   unavailable?: string;
   notify?: (reason: string) => void;
+}
+
+/** The one piece of `IronProxyApprovalBridge` `attachLeaseLifecycle` needs — narrowed so tests can pass a plain fake instead of a live bridge. */
+export interface IdentityRevoker {
+  cancelIdentity(runtimeIdentity: string): void;
+}
+
+/**
+ * Per-lease detach/release lifecycle, factored out of `ensure()` so it's
+ * directly testable without `ensure()`'s own admission checks (approval
+ * bridge readiness, central container liveness).
+ *
+ * `signal`'s abort only detaches THIS host's own local observation of the
+ * lease — removes it from `leases`, stops the availability monitor once
+ * nothing is left to watch — and must never by itself revoke the identity.
+ * `releaseGatewaySession` (gateway-session-lifecycle.ts) always aborts the
+ * signal before awaiting `release(event)`, so if abort itself revoked the
+ * identity, `event.kind` would never get a say: a `'host-detached'` abort
+ * (this host's own graceful shutdown, expected to hand the still-running
+ * container to a successor host's `adoptRunningSessions`) would revoke the
+ * identity exactly like a real `'session-ended'` would — the gap the
+ * gateway-seam contract's own `release(event)` distinction exists to
+ * prevent (`docs/gateway-seam.md`: "`host-detached` stops observation but
+ * preserves resources for a successor... Identity/credentials are revoked
+ * only on true session termination"). Revocation is therefore `release`'s
+ * job alone, gated on `event.kind`.
+ */
+export function attachLeaseLifecycle(
+  leases: Map<string, LiveLease>,
+  lease: LiveLease,
+  runtimeIdentity: string,
+  signal: AbortSignal,
+  revoker: IdentityRevoker,
+  stopMonitorIfEmpty: () => void,
+): NonNullable<GatewaySessionLease['release']> {
+  const detach = () => {
+    if (leases.get(runtimeIdentity) !== lease) return;
+    leases.delete(runtimeIdentity);
+    stopMonitorIfEmpty();
+  };
+  if (signal.aborted) detach();
+  else signal.addEventListener('abort', detach, { once: true });
+  return async (event: GatewaySessionRelease) => {
+    if (event.kind === 'session-ended') revoker.cancelIdentity(runtimeIdentity);
+  };
 }
 
 export function defineIronProxyProvider(initialSettings?: IronProxySettings): GatewayProviderDefinition {
@@ -448,7 +494,8 @@ export function defineIronProxyProvider(initialSettings?: IronProxySettings): Ga
 
   const ensure = async (input: GatewaySessionInput, signal: AbortSignal): Promise<GatewaySessionLease> => {
     const configured = currentSettings();
-    await currentBridge().ready();
+    const bridge = currentBridge();
+    await bridge.ready();
     await assertReady(configured);
     const lease: LiveLease = {
       runtimeIdentity: input.runtimeIdentity,
@@ -458,23 +505,19 @@ export function defineIronProxyProvider(initialSettings?: IronProxySettings): Ga
     };
     leases.set(input.runtimeIdentity, lease);
     startMonitor();
-    const close = () => {
-      if (leases.get(input.runtimeIdentity) !== lease) return;
-      leases.delete(input.runtimeIdentity);
-      currentBridge().cancelIdentity(input.runtimeIdentity);
+    const release = attachLeaseLifecycle(leases, lease, input.runtimeIdentity, signal, bridge, () => {
       if (leases.size === 0 && monitor) {
         clearInterval(monitor);
         monitor = null;
       }
-    };
-    if (signal.aborted) close();
-    else signal.addEventListener('abort', close, { once: true });
+    });
     return {
       contribution: ironProxyContribution(configured, input),
       onUnavailable(report) {
         lease.notify = report;
         if (lease.unavailable) report(lease.unavailable);
       },
+      release,
     };
   };
 

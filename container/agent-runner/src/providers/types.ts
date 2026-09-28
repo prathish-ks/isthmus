@@ -213,11 +213,13 @@ export type ProviderEvent =
    * (e.g. a billing/quota notice), kept separate from model scratchpad and
    * raw diagnostics. Failures without `error` receive a generic notice.
    *
-   * v2.4.0 promotion, Workstream C15: `error` is new. `poll-loop.ts` is not
-   * reconciled in this pass (see the `emitsMidTurnText` comment above), so
-   * this field is populated by `providers/claude.ts` but not yet consumed —
-   * declared-but-unconsumed, the same staging pattern this promotion has
-   * used elsewhere (host-side `inference` before its own consumer landed).
+   * v2.4.0 promotion, Workstream C15: `error` is new, and — unlike
+   * `commands.formatting`/`textDelivery` (see the `emitsMidTurnText`
+   * comment above) — has no contract-field counterpart to be wired up
+   * later. This field is populated by `providers/claude.ts` but not yet
+   * consumed — declared-but-unconsumed, the same staging pattern this
+   * promotion has used elsewhere (host-side `inference` before its own
+   * consumer landed).
    */
   | { type: 'result'; text: string | null; isError?: boolean; error?: string }
   /**
