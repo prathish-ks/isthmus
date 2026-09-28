@@ -2,9 +2,13 @@
  * v2.4.0 promotion, Workstream C15. Ported from upstream's rewrite, with two
  * deliberate divergences documented at their own point of use below:
  *  - `readonly supportsNativeSlashCommands`/`emitsMidTurnText` stay instance
- *    fields (see `providers/types.ts`'s own comment on why) — `poll-loop.ts`
- *    is not reconciled in this pass, so this provider keeps declaring them
- *    the way it always has.
+ *    fields (see `providers/types.ts`'s own comment on why); this provider
+ *    keeps declaring them. A later follow-up wired `poll-loop.ts` to prefer
+ *    Claude's runtime contract's `commands.formatting`/`textDelivery`
+ *    fields (declared in `provider-contracts/claude.ts`, which already
+ *    agrees with these instance fields) over these when a contract is
+ *    present — the full multi-turn reply-routing reconciliation these
+ *    fields were originally deferred for is still out of scope.
  *  - `TOOL_ALLOWLIST` keeps `'TaskOutput'` (see `claude-config.ts`).
  * Everything else (transcript archiving/rotation extraction into
  * `claude-history.ts`, execution-policy/inference/mcpServers/memory

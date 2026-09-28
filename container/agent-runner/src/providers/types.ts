@@ -34,18 +34,20 @@ export interface AgentProvider {
    * result-door delivery path: text events are delivery-inert and blocks in
    * the final result text are delivered from there.
    */
-  // v2.4.0 promotion, Workstream C15: deliberately NOT migrated to the
-  // runtime contract's `commands.formatting`/`textDelivery` fields, unlike
-  // upstream. That migration also requires reconciling `poll-loop.ts` to
-  // read from the contract instead of these instance fields — and
-  // poll-loop.ts's own v2.3.0->v2.4.0 diff bundles that migration together
-  // with a substantial, unrelated multi-turn reply-routing rewrite
-  // (`queuedTurns`/`adoptTurn`/`pushRetry`, `db/session-routing.ts`,
-  // `db/session-state.ts`) that is not part of this port. Keeping these
-  // fields here means poll-loop.ts needs zero changes for this promotion —
-  // the contract still declares `commands.formatting`/`textDelivery`
-  // (verifier-checked, so shape stays correct), just not yet consumed by
-  // anything. See ADR-032's addendum for the full reasoning.
+  // v2.4.0 promotion, Workstream C15: at the time this field was added,
+  // deliberately NOT migrated to the runtime contract's
+  // `commands.formatting`/`textDelivery` fields, unlike upstream — that
+  // full migration also requires reconciling `poll-loop.ts`'s v2.3.0-
+  // >v2.4.0 diff, which bundles it with a substantial, unrelated multi-turn
+  // reply-routing rewrite (`queuedTurns`/`adoptTurn`/`pushRetry`,
+  // `db/session-routing.ts`, `db/session-state.ts`) that is still out of
+  // scope (see ADR-032's addendum). A later, narrower follow-up DID wire
+  // the two contract fields themselves: `poll-loop.ts` now reads
+  // `provider.contract.commands.formatting`/`textDelivery` when a contract
+  // is present, falling back to this field only for a contractless
+  // provider (or one whose contract predates this wiring). This field stays
+  // the source of truth for those providers, and for `provider.contract`
+  // itself, until/unless the deferred multi-turn rewrite lands.
   readonly emitsMidTurnText?: boolean;
 
   /**

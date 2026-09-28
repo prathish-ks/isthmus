@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './mailbox/sqlite/connection.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { runPollLoop } from './poll-loop.js';
+import { waitFor } from './test-helpers.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, QueryInput } from './providers/types.js';
 import type { ProviderRuntimeContract } from './provider-contracts/registry.js';
 
@@ -35,14 +36,6 @@ function insertMessage(id: string, content: object): void {
        VALUES (?, 'chat', datetime('now'), 'pending', 'chan-1', 'discord', NULL, ?)`,
     )
     .run(id, JSON.stringify(content));
-}
-
-async function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (!condition()) {
-    if (Date.now() - start > timeoutMs) throw new Error('waitFor timeout');
-    await new Promise((r) => setTimeout(r, 20));
-  }
 }
 
 const MID_TURN_CONTRACT: ProviderRuntimeContract = {

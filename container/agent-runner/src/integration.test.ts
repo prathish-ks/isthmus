@@ -8,6 +8,7 @@ import { getSessionRouting } from './db/session-routing.js';
 import { MockProvider } from './providers/mock.js';
 import type { ProviderExchange } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
+import { waitFor } from './test-helpers.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -320,14 +321,6 @@ async function runPollLoopWithTimeout(provider: MockProvider, signal: AbortSigna
     }),
     new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
   ]);
-}
-
-async function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (!condition()) {
-    if (Date.now() - start > timeoutMs) throw new Error('waitFor timeout');
-    await sleep(50);
-  }
 }
 
 function sleep(ms: number): Promise<void> {
