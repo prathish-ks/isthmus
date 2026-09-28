@@ -1,4 +1,5 @@
 import type { MemorySessionHookRegistration } from '../memory/session-hook.js';
+import type { ProviderRuntimeContract } from '../provider-contracts/registry.js';
 
 /**
  * A speed tier name. The vocabulary is provider-declared (the host validates
@@ -33,19 +34,30 @@ export interface AgentProvider {
    * result-door delivery path: text events are delivery-inert and blocks in
    * the final result text are delivered from there.
    */
-  // v2.4.0 promotion, Workstream C15: deliberately NOT migrated to the
-  // runtime contract's `commands.formatting`/`textDelivery` fields, unlike
-  // upstream. That migration also requires reconciling `poll-loop.ts` to
-  // read from the contract instead of these instance fields — and
-  // poll-loop.ts's own v2.3.0->v2.4.0 diff bundles that migration together
-  // with a substantial, unrelated multi-turn reply-routing rewrite
-  // (`queuedTurns`/`adoptTurn`/`pushRetry`, `db/session-routing.ts`,
-  // `db/session-state.ts`) that is not part of this port. Keeping these
-  // fields here means poll-loop.ts needs zero changes for this promotion —
-  // the contract still declares `commands.formatting`/`textDelivery`
-  // (verifier-checked, so shape stays correct), just not yet consumed by
-  // anything. See ADR-032's addendum for the full reasoning.
+  // v2.4.0 promotion, Workstream C15: at the time this field was added,
+  // deliberately NOT migrated to the runtime contract's
+  // `commands.formatting`/`textDelivery` fields, unlike upstream — that
+  // full migration also requires reconciling `poll-loop.ts`'s v2.3.0-
+  // >v2.4.0 diff, which bundles it with a substantial, unrelated multi-turn
+  // reply-routing rewrite (`queuedTurns`/`adoptTurn`/`pushRetry`,
+  // `db/session-routing.ts`, `db/session-state.ts`) that is still out of
+  // scope (see ADR-032's addendum). A later, narrower follow-up DID wire
+  // the two contract fields themselves: `poll-loop.ts` now reads
+  // `provider.contract.commands.formatting`/`textDelivery` when a contract
+  // is present, falling back to this field only for a contractless
+  // provider (or one whose contract predates this wiring). This field stays
+  // the source of truth for those providers, and for `provider.contract`
+  // itself, until/unless the deferred multi-turn rewrite lands.
   readonly emitsMidTurnText?: boolean;
+
+  /**
+   * Resolved runtime contract for this provider instance, set by
+   * `createProvider` when the provider is contract-declaring. Lets
+   * call sites prefer `commands.formatting`/`textDelivery` over the
+   * legacy instance fields above when a contract exists, falling back
+   * to those fields for contractless providers.
+   */
+  contract?: ProviderRuntimeContract;
 
   /**
    * Register shared memory through the provider's native session-start
@@ -201,11 +213,13 @@ export type ProviderEvent =
    * (e.g. a billing/quota notice), kept separate from model scratchpad and
    * raw diagnostics. Failures without `error` receive a generic notice.
    *
-   * v2.4.0 promotion, Workstream C15: `error` is new. `poll-loop.ts` is not
-   * reconciled in this pass (see the `emitsMidTurnText` comment above), so
-   * this field is populated by `providers/claude.ts` but not yet consumed —
-   * declared-but-unconsumed, the same staging pattern this promotion has
-   * used elsewhere (host-side `inference` before its own consumer landed).
+   * v2.4.0 promotion, Workstream C15: `error` is new, and — unlike
+   * `commands.formatting`/`textDelivery` (see the `emitsMidTurnText`
+   * comment above) — has no contract-field counterpart to be wired up
+   * later. This field is populated by `providers/claude.ts` but not yet
+   * consumed — declared-but-unconsumed, the same staging pattern this
+   * promotion has used elsewhere (host-side `inference` before its own
+   * consumer landed).
    */
   | { type: 'result'; text: string | null; isError?: boolean; error?: string }
   /**

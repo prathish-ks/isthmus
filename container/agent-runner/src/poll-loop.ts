@@ -217,7 +217,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
-    const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
+    const prompt = formatMessagesWithCommands(keep, usesNativeSlashCommands(config.provider));
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
@@ -252,7 +252,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         config.provider.onExchangeComplete?.bind(config.provider),
         prompt,
         continuation,
-        config.provider.emitsMidTurnText === true,
+        usesMidTurnTextDelivery(config.provider),
       );
       if (result.continuation && result.continuation !== continuation) {
         continuation = result.continuation;
@@ -295,6 +295,23 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     markCompleted(processingIds);
     log(`Completed ${ids.length} message(s)`);
   }
+}
+
+/**
+ * Whether `provider` should get raw (native) slash-command formatting.
+ * Prefers the resolved runtime contract's `commands.formatting` when the
+ * provider has one; falls back to the legacy `supportsNativeSlashCommands`
+ * instance field for a contractless provider. One source of truth for both
+ * read sites below, so a future contract field (or a fix to this
+ * precedence rule) can't be applied to only one of them.
+ */
+function usesNativeSlashCommands(provider: AgentProvider): boolean {
+  return provider.contract ? provider.contract.commands.formatting === 'native' : provider.supportsNativeSlashCommands;
+}
+
+/** Same precedence rule as `usesNativeSlashCommands`, for mid-turn text delivery. */
+function usesMidTurnTextDelivery(provider: AgentProvider): boolean {
+  return provider.contract ? provider.contract.textDelivery === 'mid-turn-complete' : provider.emitsMidTurnText === true;
 }
 
 /**

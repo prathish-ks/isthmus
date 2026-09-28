@@ -7,6 +7,7 @@ import { parse as parseYaml } from 'yaml';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { GatewaySessionInput } from './gateway-provider-registry.js';
+import { IronProxyApprovalBridge } from './iron-proxy-approval.js';
 
 vi.mock('../env.js', () => ({ readEnvFile: () => ({}) }));
 vi.mock('node:child_process', () => ({
@@ -68,6 +69,36 @@ const input: GatewaySessionInput = {
     imageBuild: true,
   },
 };
+
+/** Real material files on disk, `docker inspect` faked healthy by the module mock above. */
+function createLiveSettings(project: string): IronProxySettings {
+  const liveSettings: IronProxySettings = {
+    ...settings,
+    materialRoot: path.join(project, 'materials'),
+    caCert: path.join(project, 'materials/iron-proxy/shared/ca.crt'),
+    caKey: path.join(project, 'materials/iron-proxy/shared/ca.key'),
+    secretFile: path.join(project, 'materials/iron-proxy/shared/upstream-secret'),
+    configFile: path.join(project, 'materials/iron-proxy/shared/config.yaml'),
+    identityKey: path.join(project, 'materials/iron-proxy/shared/workload-identity.key'),
+    containerName: 'nanoclaw-iron-proxy-live',
+    approvalDir: path.join(project, 'materials/iron-proxy/approval'),
+    approvalSocket: path.join(project, 'materials/iron-proxy/approval/approval.sock'),
+    allowedHostsFile: path.join(project, 'materials/iron-proxy/shared/allowed-hosts.json'),
+    agentCaCert: path.join(project, 'data/gateway-trust/iron-proxy/ca.crt'),
+  };
+  for (const file of [
+    liveSettings.caCert,
+    liveSettings.caKey,
+    liveSettings.secretFile,
+    liveSettings.configFile,
+    liveSettings.identityKey,
+    liveSettings.agentCaCert,
+  ]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, file === liveSettings.identityKey ? Buffer.alloc(32, 9) : 'test');
+  }
+  return liveSettings;
+}
 
 describe('Iron Proxy provider', () => {
   it('creates only synthetic Codex login data for either auth mode', () => {
@@ -234,31 +265,7 @@ describe('Iron Proxy provider', () => {
 
   it('uses one idempotent ensure and releases per-session state on abort', async () => {
     const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ip-'));
-    const liveSettings: IronProxySettings = {
-      ...settings,
-      materialRoot: path.join(project, 'materials'),
-      caCert: path.join(project, 'materials/iron-proxy/shared/ca.crt'),
-      caKey: path.join(project, 'materials/iron-proxy/shared/ca.key'),
-      secretFile: path.join(project, 'materials/iron-proxy/shared/upstream-secret'),
-      configFile: path.join(project, 'materials/iron-proxy/shared/config.yaml'),
-      identityKey: path.join(project, 'materials/iron-proxy/shared/workload-identity.key'),
-      containerName: 'nanoclaw-iron-proxy-live',
-      approvalDir: path.join(project, 'materials/iron-proxy/approval'),
-      approvalSocket: path.join(project, 'materials/iron-proxy/approval/approval.sock'),
-      allowedHostsFile: path.join(project, 'materials/iron-proxy/shared/allowed-hosts.json'),
-      agentCaCert: path.join(project, 'data/gateway-trust/iron-proxy/ca.crt'),
-    };
-    for (const file of [
-      liveSettings.caCert,
-      liveSettings.caKey,
-      liveSettings.secretFile,
-      liveSettings.configFile,
-      liveSettings.identityKey,
-      liveSettings.agentCaCert,
-    ]) {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, file === liveSettings.identityKey ? Buffer.alloc(32, 9) : 'test');
-    }
+    const liveSettings = createLiveSettings(project);
 
     const provider = defineIronProxyProvider(liveSettings);
     const approvalController = new AbortController();
@@ -278,6 +285,51 @@ describe('Iron Proxy provider', () => {
 
     approvalController.abort();
     await subscription;
+    fs.rmSync(project, { recursive: true, force: true });
+  });
+
+  // Gateway-lease-continuity follow-up: `docs/gateway-seam.md`'s own contract
+  // says "host-detached stops observation but preserves resources for a
+  // successor... Identity/credentials are revoked only on true session
+  // termination, not on host restart." Iron Proxy's lease used to have no
+  // `release()` at all — cleanup was entirely abort-driven, and abort always
+  // fires before `release(event)` (see `releaseGatewaySession`), so a
+  // `'host-detached'` abort revoked the identity exactly like a real
+  // `'session-ended'` would. This pins the fix: only `'session-ended'`
+  // actually revokes; `'host-detached'` leaves the identity usable for a
+  // successor host's `adoptRunningSessions` to re-ensure.
+  it('host-detached release preserves identity for a successor to re-ensure; session-ended actually revokes it', async () => {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ip-'));
+    const liveSettings = createLiveSettings(project);
+    const cancelIdentity = vi.spyOn(IronProxyApprovalBridge.prototype, 'cancelIdentity');
+
+    const provider = defineIronProxyProvider(liveSettings);
+    const approvalController = new AbortController();
+    const subscription = provider.approvals.subscribe(async () => 'deny', approvalController.signal);
+
+    // A running session's gateway lease survives this host's own graceful
+    // detach (e.g. shutdown for a restart) — its identity must stay valid.
+    const firstController = new AbortController();
+    const first = await provider.sessions.ensure(input, firstController.signal);
+    firstController.abort();
+    await first.release?.({ kind: 'host-detached', reason: 'host-shutdown' });
+    expect(cancelIdentity).not.toHaveBeenCalled();
+
+    // The successor host's adoptRunningSessions re-ensures a lease for the
+    // same still-running container — this must succeed, proving the prior
+    // detach didn't leave the identity (or the bridge) in some poisoned state.
+    const secondController = new AbortController();
+    const second = await provider.sessions.ensure(input, secondController.signal);
+    secondController.abort();
+
+    // Only when the runtime genuinely ends does the identity actually get
+    // revoked.
+    await second.release?.({ kind: 'session-ended', reason: 'session ended' });
+    expect(cancelIdentity).toHaveBeenCalledWith(input.runtimeIdentity);
+
+    approvalController.abort();
+    await subscription;
+    cancelIdentity.mockRestore();
     fs.rmSync(project, { recursive: true, force: true });
   });
 });

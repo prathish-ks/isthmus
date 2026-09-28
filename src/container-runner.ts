@@ -41,11 +41,16 @@ import { getDb, hasTable } from './db/connection.js';
 import { getSession } from './db/sessions.js';
 import { getHostInstanceId } from './host-instance.js';
 import { getSessionDriver, isSessionEventsDriver } from './drivers/index.js';
-import type { SupervisedHandle, SupervisedSnapshot } from './drivers/session-events.js';
+import type { SessionEventsDriver, SupervisedHandle, SupervisedSnapshot } from './drivers/session-events.js';
 import { GROUP_FOLDER_LABEL, labelValueLegal, specInvalid } from './drivers/types.js';
 import type { ContainerSpec, GuardContext, MountSpec, SessionFailure, SessionSpec } from './drivers/types.js';
 import { KernelClient, type KernelClientLike } from './kernel/client.js';
-import { gatewayRuntimeIdentity, getGatewayProvider, type GatewayContribution } from './gateway-providers/index.js';
+import {
+  gatewayRuntimeIdentity,
+  getGatewayProvider,
+  type GatewayContribution,
+  type GatewaySessionInput,
+} from './gateway-providers/index.js';
 import { releaseGatewaySession, type GatewaySessionControl } from './gateway-session-lifecycle.js';
 import { initGroupFilesystem } from './group-init.js';
 import { getAgentMailbox } from './mailbox/index.js';
@@ -123,9 +128,12 @@ interface ActiveSessionRuntime {
   claimIncarnation?: number;
   /**
    * The gateway's per-session lease and the real `AbortController` whose
-   * signal was handed to `sessions.ensure()` — undefined for a session
-   * adopted from a previous host process (no `ensure()` call was made in
-   * this process; see `adoptRunningSessions`). Released via
+   * signal was handed to `sessions.ensure()`. Set for every session this
+   * process holds a lease for — both freshly spawned (`disposition:
+   * 'create'`) and, since the v2.4.0 gateway-lease-continuity follow-up,
+   * adopted from a previous host process (`disposition: 'adopt'`; see
+   * `adoptRunningSessions`, which re-`ensure()`s a lease for each adopted
+   * session before registering its runtime). Released via
    * `releaseGatewaySession` from every terminal path in `finish()`, and
    * eagerly from any failure path between `ensure()` and this field being
    * set (see `spawnContainer`) so a lease from an aborted spawn never
@@ -190,6 +198,73 @@ async function releaseClaimQuietly(sessionId: string, incarnation: number): Prom
       instanceId: claimantId(),
       incarnation,
       now: new Date().toISOString(),
+    }),
+  );
+}
+
+/**
+ * Acquire a gateway session lease for `sessionId`, wired with a real,
+ * tracked `AbortController` (not a throwaway one) and `onUnavailable`
+ * subscribed to that exact session's teardown — shared by both
+ * `spawnContainer` (`disposition: 'create'`) and `adoptRunningSessions`
+ * (`disposition: 'adopt'`), so a host-restart-adopted session gets the
+ * same real lease lifecycle a freshly-spawned one does, not none at all.
+ *
+ * Deliberately narrower than upstream's own `ensureGatewaySession`: no
+ * module-level admission-generation/unavailability circuit breaker here
+ * — that's Workstream C9's own already-scoped, separate multi-host
+ * coordination mechanism (`GatewayProviderDefinition.availability`, see
+ * ADR-030), not a lease-continuity gap. `killContainer` is a no-op if
+ * called before the caller has registered a runtime yet (nothing to look
+ * up), which is fine — every caller's own catch block releases the lease
+ * directly for failures in that window.
+ */
+async function ensureGatewaySession(sessionId: string, input: GatewaySessionInput): Promise<GatewaySessionControl> {
+  const controller = new AbortController();
+  try {
+    const lease = await getGatewayProvider().sessions.ensure(input, controller.signal);
+    const session: GatewaySessionControl = { lease, controller };
+    lease.onUnavailable?.((reason) => {
+      killContainer(sessionId, `gateway unavailable: ${reason}`);
+    });
+    return session;
+  } catch (err) {
+    controller.abort('ensure-failed');
+    throw err;
+  }
+}
+
+/**
+ * Release every currently-active session's gateway lease without killing
+ * any container — mirrors upstream's `abortGatewaySessionObservers`.
+ * Called from `index.ts`'s graceful `shutdown()`: a restart leaves
+ * containers running for `adoptRunningSessions` to pick back up in the
+ * successor process, so this only detaches this process's own
+ * observation of the lease (`kind: 'host-detached'`), the same
+ * distinction `GatewaySessionRelease.kind` exists to make from an actual
+ * session end. A runtime with no lease at all (`gatewaySession` unset —
+ * e.g. `ensure()` was never attempted for it) has nothing to release and
+ * is skipped; adopted sessions have a lease like any other and are
+ * released the same way.
+ *
+ * Known, named gap, not fixed here: Iron Proxy declares no `release()`
+ * method at all (cleanup is entirely abort-signal-driven), so a
+ * `'host-detached'` release has the same effect on it as
+ * `'session-ended'` today — it revokes the session's live identity via
+ * `cancelIdentity()` immediately, rather than preserving it for a
+ * successor host. Closing that fully needs a real, provider-specific
+ * `release()` on Iron Proxy that treats the two kinds differently —
+ * genuinely security-sensitive work, out of scope here.
+ */
+export async function releaseAllGatewaySessions(reason = 'host-shutdown'): Promise<void> {
+  await Promise.all(
+    [...activeContainers.values()].map(async (runtime) => {
+      if (!runtime.gatewaySession) return;
+      try {
+        await releaseGatewaySession(runtime.gatewaySession, { kind: 'host-detached', reason });
+      } catch (err) {
+        log.error('Gateway session detachment failed', { containerName: runtime.containerName, err });
+      }
     }),
   );
 }
@@ -295,38 +370,17 @@ async function spawnContainer(session: Session): Promise<void> {
   // aborts the spawn, the inbound row stays pending, and the sweep retries.
   // Driver-topology selection is NOT here — that stays driver-private (see
   // `drivers/index.ts`); `networkAccess` is an intent the driver realizes or
-  // rejects, never a topology itself.
-  //
-  // A real, tracked controller — not a throwaway one — so the lease can be
-  // released deterministically: stored on `gatewaySession` below, aborted by
-  // `releaseGatewaySession` on every terminal path in `finish()`, and by the
-  // catch blocks between here and `registerRuntime` for a spawn that never
-  // reaches a tracked runtime at all (claim loss, spec/capability rejection,
-  // `driver.prepare` failure). Iron Proxy (Workstream C8) is the first
-  // gateway whose lease actually uses `release`/`onUnavailable`; OneCLI's own
-  // lease still declares neither, so this changes nothing for it.
-  const gatewayController = new AbortController();
-  const lease = await getGatewayProvider().sessions.ensure(
-    {
-      key: sessionKey,
-      disposition: 'create',
-      runtimeIdentity: gatewayRuntimeIdentity(sessionKey),
-      groupName: agentGroup.name,
-      containerName,
-      capabilities: driver.capabilities(),
-    },
-    gatewayController.signal,
-  );
-  const gatewaySession: GatewaySessionControl = { lease, controller: gatewayController };
-  // Drives this exact session's teardown, exactly once, the same way an
-  // operator-initiated kill does — `killContainer` is a no-op if called
-  // before `registerRuntime` below (nothing to look up yet), which is fine:
-  // the catch blocks between here and there release the lease directly for
-  // every failure that can happen in that window.
-  lease.onUnavailable?.((reason) => {
-    killContainer(session.id, `gateway unavailable: ${reason}`);
+  // rejects, never a topology itself. `ensureGatewaySession` also wires
+  // `onUnavailable`/the tracked `AbortController` — see its own doc comment.
+  const gatewaySession = await ensureGatewaySession(session.id, {
+    key: sessionKey,
+    disposition: 'create',
+    runtimeIdentity: gatewayRuntimeIdentity(sessionKey),
+    groupName: agentGroup.name,
+    containerName,
+    capabilities: driver.capabilities(),
   });
-  const gateway = lease.contribution;
+  const gateway = gatewaySession.lease.contribution;
   if (gateway.containers?.length && !driver.capabilities().auxiliaryContainers) {
     // Named at composition, where the error can say which side to change —
     // not left for the driver's refusal backstop to discover.
@@ -484,13 +538,14 @@ async function finish(sessionId: string, runtime: ActiveSessionRuntime, failure?
   } catch (err) {
     log.error('Failed to stop typing refresh', { sessionId, containerName, err });
   }
-  // Undefined for a session adopted from a previous host process — nothing
-  // to release here since no `ensure()` call was made in this process (see
-  // `adoptRunningSessions` and `ActiveSessionRuntime.gatewaySession`'s own
-  // comment). `finish()` is the single terminal path (normal exit, failure,
-  // and an operator/self kill via `killContainer` all funnel through
+  // Set for both a freshly spawned session and one adopted from a previous
+  // host process (see `ActiveSessionRuntime.gatewaySession`'s own comment) —
+  // `finish()` is the single terminal path (normal exit, failure, and an
+  // operator/self kill via `killContainer` all funnel through
   // `finishAndResolve`), so this is the one place a lease attached to a
-  // registered runtime needs releasing.
+  // registered runtime needs releasing. Only actually unset if `ensure()`
+  // was never attempted at all (a gateway with no lease-yielding provider,
+  // or a runtime registered outside `spawnContainer`/`adoptRunningSessions`).
   if (runtime.gatewaySession) {
     try {
       await releaseGatewaySession(runtime.gatewaySession, {
@@ -580,45 +635,13 @@ export async function adoptRunningSessions(): Promise<{ adopted: number; stopped
     return { adopted: 0, stopped: 0 };
   }
 
-  let adopted = 0;
-  let stopped = 0;
-  for (const { handle, phase } of snapshots) {
-    const session = handle.key.sessionId ? await getSession(handle.key.sessionId) : undefined;
-    // The snapshot's phase is the listing's own truth: a corpse arrives as
-    // 'terminal' (or not at all), so telling adoptable sessions apart needs
-    // no per-handle status() round trip. `stop()` on a corpse is still full
-    // teardown — a self-exited runtime needs its residue cleaned up.
-    if (!session || session.status !== 'active' || phase !== 'running') {
-      await handle.stop('orphan-at-startup').catch(() => {});
-      stopped += 1;
-      continue;
-    }
-    // Claim-fence adoption too — a session a live peer host is already
-    // running must not also be tracked here (v2.4.0 promotion, Workstream C9
-    // — ADR-030). Neither adopted nor stopped: the container is left exactly
-    // as found, since it is either genuinely owned by a live peer (calling
-    // stop() would kill a session that host is legitimately supervising) or
-    // the claim store was unreachable (safer to leave a possibly-live
-    // container untracked than to risk two hosts supervising the same one).
-    let claimIncarnation: number | null;
-    try {
-      claimIncarnation = await claimSessionRun(session.id, handle.name);
-    } catch (err) {
-      log.warn('Failed to claim session at adoption — leaving it unadopted', { sessionId: session.id, err });
-      claimIncarnation = null;
-    }
-    if (claimIncarnation === null) {
-      continue;
-    }
-    const runtime = registerRuntime(session.id, handle, handle.name, true);
-    runtime.claimIncarnation = claimIncarnation;
-    runtime.stopReason = undefined;
-    handle.onTerminal((failure) => {
-      void finishAndResolve(session.id, failure);
-    });
-    await markContainerRunning(session.id);
-    adopted += 1;
-  }
+  // Each snapshot is an independent session with no shared mutable state
+  // between iterations, so adoption (including each one's gateway-lease
+  // round trip) runs in parallel rather than serializing behind however
+  // many sessions a restart needs to reconcile.
+  const outcomes = await Promise.all(snapshots.map((snapshot) => adoptOneSession(driver, snapshot)));
+  const adopted = outcomes.filter((outcome) => outcome === 'adopted').length;
+  const stopped = outcomes.filter((outcome) => outcome === 'stopped').length;
 
   await driver.reapResidue?.(INSTALL_SLUG).catch?.(() => {});
   // Reconcile terminals the watch stream missed while no host was listening —
@@ -630,6 +653,79 @@ export async function adoptRunningSessions(): Promise<{ adopted: number; stopped
     log.info('Reconciled sessions at startup', { adopted, stopped });
   }
   return { adopted, stopped };
+}
+
+type AdoptionOutcome = 'adopted' | 'stopped' | 'left-untracked';
+
+/** One snapshot's worth of `adoptRunningSessions`' reconciliation. */
+async function adoptOneSession(
+  driver: SessionEventsDriver,
+  { handle, phase }: SupervisedSnapshot,
+): Promise<AdoptionOutcome> {
+  const session = handle.key.sessionId ? await getSession(handle.key.sessionId) : undefined;
+  // The snapshot's phase is the listing's own truth: a corpse arrives as
+  // 'terminal' (or not at all), so telling adoptable sessions apart needs
+  // no per-handle status() round trip. `stop()` on a corpse is still full
+  // teardown — a self-exited runtime needs its residue cleaned up.
+  if (!session || session.status !== 'active' || phase !== 'running') {
+    await handle.stop('orphan-at-startup').catch(() => {});
+    return 'stopped';
+  }
+  // Claim-fence adoption too — a session a live peer host is already
+  // running must not also be tracked here (v2.4.0 promotion, Workstream C9
+  // — ADR-030). Neither adopted nor stopped: the container is left exactly
+  // as found, since it is either genuinely owned by a live peer (calling
+  // stop() would kill a session that host is legitimately supervising) or
+  // the claim store was unreachable (safer to leave a possibly-live
+  // container untracked than to risk two hosts supervising the same one).
+  let claimIncarnation: number | null;
+  try {
+    claimIncarnation = await claimSessionRun(session.id, handle.name);
+  } catch (err) {
+    log.warn('Failed to claim session at adoption — leaving it unadopted', { sessionId: session.id, err });
+    claimIncarnation = null;
+  }
+  if (claimIncarnation === null) {
+    return 'left-untracked';
+  }
+  // Re-establish this process's own gateway lease for the session — the
+  // previous host process's lease (if any) died with that process; this
+  // one has ensured nothing about the session yet. `disposition: 'adopt'`
+  // tells the provider this is re-admitting an already-running runtime,
+  // not provisioning a fresh identity for it. A gateway that refuses to
+  // adopt (revoked/expired grant, unreachable) — including the agent-group
+  // lookup its identity is composed from failing or coming back empty —
+  // means this container can't be legitimately supervised here: stop it
+  // and release the claim so a takeover-able retry isn't blocked by a claim
+  // nothing is running under, mirroring `spawnContainer`'s own
+  // pre-registration failure handling.
+  let gatewaySession: GatewaySessionControl;
+  try {
+    const agentGroup = await getAgentGroup(session.agent_group_id);
+    if (!agentGroup) throw new Error(`agent group ${session.agent_group_id} not found`);
+    gatewaySession = await ensureGatewaySession(session.id, {
+      key: handle.key,
+      disposition: 'adopt',
+      runtimeIdentity: gatewayRuntimeIdentity(handle.key),
+      groupName: agentGroup.name,
+      containerName: handle.name,
+      capabilities: driver.capabilities(),
+    });
+  } catch (err) {
+    log.error('Gateway could not adopt running session; stopping it', { sessionId: session.id, err });
+    await handle.stop('gateway-adoption-failed').catch(() => {});
+    await releaseClaimQuietly(session.id, claimIncarnation);
+    return 'stopped';
+  }
+  const runtime = registerRuntime(session.id, handle, handle.name, true);
+  runtime.claimIncarnation = claimIncarnation;
+  runtime.stopReason = undefined;
+  runtime.gatewaySession = gatewaySession;
+  handle.onTerminal((failure) => {
+    void finishAndResolve(session.id, failure);
+  });
+  await markContainerRunning(session.id);
+  return 'adopted';
 }
 
 /**

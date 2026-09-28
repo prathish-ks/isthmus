@@ -20,4 +20,15 @@ describe('createProvider', () => {
   it('throws for unknown name', () => {
     expect(() => createProvider('bogus' as ProviderName)).toThrow(/Unknown provider/);
   });
+
+  it('sets provider.contract for a contract-declaring provider', () => {
+    const provider = createProvider('claude');
+    expect(provider.contract).toBeDefined();
+    expect(provider.contract?.textDelivery).toBe('mid-turn-complete');
+    expect(provider.contract?.commands.formatting).toBe('native');
+  });
+
+  it('leaves provider.contract unset for a contractless provider', () => {
+    expect(createProvider('mock').contract).toBeUndefined();
+  });
 });

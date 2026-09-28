@@ -29,10 +29,12 @@ vi.mock('./config.js', async () => {
 });
 
 import {
+  adoptRunningSessions,
   getActiveContainerCount,
   getContainerStartedAtMs,
   isContainerRunning,
   killContainer,
+  releaseAllGatewaySessions,
   wakeContainer,
 } from './container-runner.js';
 import { ensureContainerConfig } from './db/container-configs.js';
@@ -43,6 +45,7 @@ import { setUpSeamRealDriver, tearDownSeamRealDriver } from './drivers/seam-real
 import {
   resetGatewayProvider,
   type GatewayProviderDefinition,
+  type GatewaySessionInput,
   type GatewaySessionRelease,
 } from './gateway-providers/index.js';
 import { getHostInstanceId, startHostInstanceLease, stopHostInstanceLease } from './host-instance.js';
@@ -78,17 +81,24 @@ let kernel: RecordingKernel;
 let releaseCalls: GatewaySessionRelease[];
 let onUnavailableReport: ((reason: string) => void) | undefined;
 let abortedReasons: unknown[];
+let ensureCalls: GatewaySessionInput[];
+/** Set to make the next matching `ensure()` call reject — negative-control seam. */
+let ensureShouldFail: ((input: GatewaySessionInput) => boolean) | undefined;
 
 /** Same shape Iron Proxy's real lease declares: `release` and `onUnavailable`. */
 function installLeaseCapableGateway(): void {
   releaseCalls = [];
   onUnavailableReport = undefined;
   abortedReasons = [];
+  ensureCalls = [];
+  ensureShouldFail = undefined;
   const gateway: GatewayProviderDefinition = {
     kind: 'lease-capable-stub',
     agentSkills: [],
     sessions: {
-      ensure: async (_input, signal) => {
+      ensure: async (input, signal) => {
+        ensureCalls.push(input);
+        if (ensureShouldFail?.(input)) throw new Error('gateway refused to admit this session');
         signal.addEventListener('abort', () => abortedReasons.push(signal.reason));
         return {
           contribution: { env: {}, mounts: [], networkAccess: { endpoint: '', target: { kind: 'host' } } },
@@ -104,6 +114,15 @@ function installLeaseCapableGateway(): void {
     approvals: { subscribe: async () => {} },
   };
   resetGatewayProvider(gateway);
+}
+
+/** Scripts `listSessions()`'s real `docker ps -a --filter ... --format ...` call so
+ *  `adoptRunningSessions()` sees `containerName` as an already-running session. */
+function scriptAdoptableSession(containerName: string, agentGroupId: string, sessionId: string): void {
+  fakeCli.responses.push({
+    match: /^ps -a --filter/,
+    output: `${containerName}|running|${agentGroupId}|${sessionId}\n`,
+  });
 }
 
 beforeEach(async () => {
@@ -224,6 +243,57 @@ describe('failure before the runtime is registered', () => {
     expect(releaseCalls).toHaveLength(1);
     const claim = await getSessionClaim(SESSION_ID);
     expect(claim?.claimed_by).toBeNull();
+  });
+});
+
+describe('host-restart adoption', () => {
+  it('re-ensures a real gateway lease for an already-running session, disposition: adopt', async () => {
+    scriptAdoptableSession('adopted-container-name', AGENT_GROUP_ID, SESSION_ID);
+
+    const result = await adoptRunningSessions();
+
+    expect(result).toEqual({ adopted: 1, stopped: 0 });
+    expect(isContainerRunning(SESSION_ID)).toBe(true);
+    expect(ensureCalls).toHaveLength(1);
+    expect(ensureCalls[0]).toMatchObject({ disposition: 'adopt', containerName: 'adopted-container-name' });
+    // Same lease-release path a normal spawn uses — proves the adopted
+    // runtime's `gatewaySession` was actually attached, not left unset.
+    killContainer(SESSION_ID, 'test-teardown');
+    await vi.waitFor(() => expect(isContainerRunning(SESSION_ID)).toBe(false));
+    expect(releaseCalls).toHaveLength(1);
+    expect(releaseCalls[0]).toMatchObject({ kind: 'session-ended' });
+  });
+
+  it('stops the container and releases the claim when the gateway refuses to adopt it', async () => {
+    scriptAdoptableSession('refused-container-name', AGENT_GROUP_ID, SESSION_ID);
+    ensureShouldFail = (input) => input.disposition === 'adopt';
+
+    const result = await adoptRunningSessions();
+
+    expect(result).toEqual({ adopted: 0, stopped: 1 });
+    expect(isContainerRunning(SESSION_ID)).toBe(false);
+    expect(releaseCalls).toHaveLength(0); // ensure() itself rejected — no lease was ever returned to release
+    const claim = await getSessionClaim(SESSION_ID);
+    expect(claim?.claimed_by).toBeNull();
+  });
+});
+
+describe('shutdown releases every active lease without killing containers', () => {
+  it('detaches, does not kill, and is idempotent-safe per session', async () => {
+    expect(await wakeContainer(testSession())).toBe(true);
+    expect(releaseCalls).toHaveLength(0);
+
+    await releaseAllGatewaySessions('host-shutdown');
+
+    expect(releaseCalls).toHaveLength(1);
+    expect(releaseCalls[0]).toMatchObject({ kind: 'host-detached', reason: 'host-shutdown' });
+    expect(isContainerRunning(SESSION_ID)).toBe(true);
+    expect(abortedReasons).toHaveLength(1);
+  });
+
+  it('is a no-op when no session has a gateway lease (e.g. only adopted sessions with no lease attached)', async () => {
+    await expect(releaseAllGatewaySessions('host-shutdown')).resolves.toBeUndefined();
+    expect(releaseCalls).toHaveLength(0);
   });
 });
 

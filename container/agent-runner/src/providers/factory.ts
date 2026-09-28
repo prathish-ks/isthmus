@@ -28,6 +28,7 @@ export function createProvider(name: ProviderName, options: ProviderOptions = {}
   const configuration = contract ? resolveRuntimeConfiguration(contract, inputs) : undefined;
   const provider = getProviderFactory(name)(options, configuration);
   if (contract) {
+    provider.contract = contract;
     bindProviderRuntimeInputs(provider, inputs);
 
     if (contract.lifecycle?.beforeQuery) {
