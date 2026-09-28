@@ -412,6 +412,22 @@ export async function processQuery(
   // the same prompt again. Unused (and unmaintained) when the provider
   // doesn't implement `onExchangeComplete`.
   const archivePrompts: string[] = [initialPrompt];
+  // FIFO of one entry per turn fed to `query` but not yet resolved, seeded
+  // with the initial turn's own routing. `query.push()` queues a genuinely
+  // separate turn — the underlying MessageStream (providers/claude.ts) and
+  // MockProvider are both strict FIFOs; a push never injects into an
+  // in-flight generation, so results arrive in exactly push order. Each
+  // entry is either a follow-up's own `RoutingContext` (a real turn —
+  // adopt it before handling its result: `routing`/`setCurrentInReplyTo`
+  // update and the per-turn nudge flags reset) or `null` for a same-turn
+  // retry (wrap-nudge / task-block nudge) pushed in response to a result —
+  // its own result answers the SAME turn again, so nothing about the
+  // turn's identity changes. Shifted at the START of every 'result' event,
+  // before that event's content is processed, so a follow-up queued while
+  // the PREVIOUS turn was already idle (no result pending to trigger
+  // anything) is still adopted correctly the moment ITS OWN result arrives
+  // — not one turn too late.
+  const pendingTurns: Array<RoutingContext | null> = [routing];
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -499,8 +515,14 @@ export async function processQuery(
         const keptIds = keep.map((m) => m.id);
         const prompt = formatMessages(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
-        unwrappedNudged = false;
-        taskBlockNudged = false;
+        // Recorded so THIS follow-up's own result — once the FIFO-ordered
+        // stream reaches it — is handled with its own destination, not
+        // whatever routing happens to be active right now (see pendingTurns'
+        // own comment). unwrappedNudged/taskBlockNudged reset only when this
+        // turn is actually adopted (at its own result event), not here —
+        // resetting eagerly at push time raced whichever turn's result
+        // hadn't landed yet.
+        pendingTurns.push(extractRouting(keep));
         query.push(prompt);
         archivePrompts.push(prompt);
         markCompleted(keptIds);
@@ -571,6 +593,19 @@ export async function processQuery(
         // (send_message) mid-turn, or the message may not need a response
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
+        // Adopt whichever turn this result belongs to — see pendingTurns'
+        // own comment. Must happen BEFORE this result's content is
+        // processed below, so deliverErrorResult/setCurrentInReplyTo/the
+        // nudge decision all see the CORRECT turn's routing and per-turn
+        // nudge state, not whatever was active for a still-in-flight
+        // earlier turn.
+        const adopted = pendingTurns.shift();
+        if (adopted) {
+          routing = adopted;
+          setCurrentInReplyTo(routing.inReplyTo);
+          unwrappedNudged = false;
+          taskBlockNudged = false;
+        }
         if (event.text) {
           const { hasUnwrapped, taskBlocks, resultBlocks } = await dispatchResultText(event.text, routing, {
             midTurnSent,
@@ -625,6 +660,7 @@ export async function processQuery(
               unwrappedNudged = true;
               const destinations = getAllDestinations();
               const names = destinations.map((d) => d.name).join(', ');
+              pendingTurns.push(null);
               query.push(
                 `<system>Your response was not delivered — it was not wrapped in <message to="name">...</message> blocks. ` +
                   `All output must be wrapped: use <message to="name"> for content to send, or <internal> for scratchpad. ` +
@@ -637,6 +673,7 @@ export async function processQuery(
               const names = getAllDestinations()
                 .map((d) => d.name)
                 .join(', ');
+              pendingTurns.push(null);
               query.push(buildTaskBlockNudge(taskBlocks, names));
             }
             // A retry result (wrapping or task-block nudge) answers the SAME
