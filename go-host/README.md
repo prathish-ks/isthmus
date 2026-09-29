@@ -28,14 +28,24 @@ security control needs low-friction UX), and
 [`docs/host-decomposition.md`](../docs/host-decomposition.md) for the full
 inventory of what stays TypeScript versus what this repo ports.
 
-This directory's own scope is that trust-kernel specifically. The
-repository as a whole also deliberately hardens security-relevant seams
-that stay in TypeScript by design and are out of scope for a Go port —
-the credential-gateway integration (a swappable contract, a second real
-gateway option installed and verified end-to-end), gateway-session
-lease lifecycle across a host restart, and multi-host session
-coordination. See the [top-level README](../README.md#what-isthmus-adds)
-for that work; it isn't duplicated here.
+Building and operating this kernel surfaced real security work beyond
+the initial port. An audit trace of the kernel-mediated wake path found
+that egress-lockdown — the cloud-metadata/link-local SSRF block — had
+been silently disabled by an earlier wiring change
+([ADR-024](docs/ADR-024-egress-lockdown-network-wiring-gap.md)); the
+response didn't stop at patching that bug: the kernel now refuses to
+start at all if it cannot actually enforce egress lockdown
+([ADR-025](docs/ADR-025-kernel-side-egress-lockdown-enforcement.md)), a
+required CI job re-proves that exact enforcement against a live Docker
+daemon on every pull request
+([ADR-026](docs/ADR-026-egress-lockdown-live-ci-gate.md)), and a
+general, machine-checked wiring-and-boundary registry now exists to
+catch this whole class of bug elsewhere in the codebase
+([ADR-028](docs/ADR-028-wiring-boundary-registry.md)). See the
+[top-level README](../README.md#what-isthmus-adds) for the rest —
+CI-gate strength, fuzzing, the differential-fixture harness, and other
+hardening work, some of it deliberately out of this directory's own
+Go-kernel scope.
 
 ## Status
 
@@ -123,9 +133,9 @@ go test -mod=vendor ./internal/mount/ -fuzz=FuzzValidateSpec -fuzztime=60s
 
 ## Further reading
 
-- [`../README.md`](../README.md) — the top-level project README, including
-  the TypeScript-side security hardening (gateway-provider seam,
-  multi-host coordination) that's out of this directory's own scope.
+- [`../README.md`](../README.md) — the top-level project README: overall
+  CI-gate strength, the differential-fixture harness, operator tooling,
+  and other hardening work.
 - [`../docs/design-laws.md`](../docs/design-laws.md) — the nine design laws.
 - [`../docs/host-decomposition.md`](../docs/host-decomposition.md) — what
   stays TypeScript vs. what this repo ports, function by function.
