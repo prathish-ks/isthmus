@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><em>A small, independently auditable Go trust-kernel for a NanoClaw-based personal agent host.</em></p>
+<p align="center"><em>A hardened NanoClaw distribution: a small, independently auditable Go trust-kernel, plus real security hardening across the TypeScript host and gateway seam.</em></p>
 
 <p align="center">
   <a href="https://github.com/prathish-ks/isthmus/actions/workflows/ci.yml"><img src="https://github.com/prathish-ks/isthmus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -13,7 +13,7 @@
 
 > **Independent, unofficial companion project.** Isthmus is not affiliated with, endorsed by, or an official artifact of NanoClaw or its maintainers ([nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw), [nanoclaw.dev](https://nanoclaw.dev)). It is a derivative work, built and published under its own name per NanoClaw's own MIT license, which preserves NanoClaw's entire ecosystem (channels, skills, customization model) untouched and re-implements a small set of security- and liveness-critical host decisions in Go. See [License](#license) for attribution.
 
-**Status:** The Go trust-kernel (guard decisions, mount security, egress verification, and a handful of liveness/lifecycle decisions) is implemented, fuzzed, and race-detector-clean — behaviorally pinned against NanoClaw `v2.4.0` — alongside NanoClaw's untouched TypeScript ecosystem. A full solo dry run (install stock NanoClaw → pair a real Telegram bot → upgrade to Isthmus in place → round trip → roll back to stock → round trip again, same data directory throughout, zero data loss) is done and documented in [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — that's one operator, one machine, one channel so far. Looking for outside testers across more channels and machines next; see [Current status](#current-status-and-whats-not-changed) below for exactly what's verified and what isn't yet.
+**Status:** The Go trust-kernel (guard decisions, mount security, egress verification, and a handful of liveness/lifecycle decisions) is implemented, fuzzed, and race-detector-clean — behaviorally pinned against NanoClaw `v2.4.0`. This is no longer just a kernel wrapped around an unexamined host: since the `v2.3.0` baseline, the TypeScript layer itself has been deliberately hardened at the seam — the credential-gateway integration was restructured from a hardcoded path into a swappable, contract-based seam; a second real gateway option (a self-hosted MITM proxy with its own admin console) was installed and verified end-to-end; egress-lockdown's TypeScript-side bypass path was closed; and multi-host session coordination was added for safe multi-replica operation. See [What Isthmus adds](#what-isthmus-adds) below for the specifics. A full solo dry run (install stock NanoClaw → pair a real Telegram bot → upgrade to Isthmus in place → round trip → roll back to stock → round trip again, same data directory throughout, zero data loss) is done and documented in [`docs/rollback-runbook.md`](docs/rollback-runbook.md) — that's one operator, one machine, one channel so far. Looking for outside testers across more channels and machines next; see [Current status](#current-status-and-whats-not-changed) below for exactly what's verified and what isn't yet.
 
 ## Why
 
@@ -23,8 +23,9 @@ Full background — the product reasoning that led here, the language-comparison
 
 ## What Isthmus adds
 
-Beyond a smaller trusted surface, building this produced concrete, verifiable side effects:
+Beyond a smaller trusted surface, this project also deliberately hardened the TypeScript host itself — not just wrapped it:
 
+- **The credential-gateway seam was restructured and hardened, not left as-is.** `OneCLI`, previously a hardcoded integration, now sits behind a swappable `GatewayProviderDefinition` contract. A second real gateway option — Iron Proxy, a self-hosted MITM proxy plus its own admin console — was installed and verified end-to-end against real running infrastructure, not just cataloged. Gateway-session leases now survive a host restart cleanly (create vs. adopt disposition, a real release-on-shutdown path, and a provider-level distinction between "this host detached" and "the session actually ended" that a prior pass had left unmade). Multi-host session-claim/lease coordination (`session_claims`/`host_instances`, a DB-backed compare-and-swap lease) was ported for safe multi-replica operation. None of this is Go — it's real security and correctness work in the TypeScript layer, done because the seam right above the Go boundary is exactly where a "small auditable kernel around an unexamined host" claim would otherwise ring hollow.
 - **A regression/compatibility harness NanoClaw's own TypeScript codebase didn't have.** A differential-fixture suite characterizes real TypeScript guard/routing/delivery behavior byte-for-byte (60+ contracts across the guard catalog alone) *before* anything is ported, so every Go decision function is checked against NanoClaw's actual behavior, not a guessed spec.
 - **Real bugs found and fixed as a byproduct of building that harness:** a mount-validation bypass in `validateSpec`'s handling of `allowlisted-extra` mounts (the same failure class as OpenClaw's real `CVE-2026-27002`, a Docker-socket exposure), found and fixed in this repo; and a macOS-specific symlink path-mismatch bug in the update-transaction machinery, also root-caused and fixed here.
 - **Operator tooling NanoClaw doesn't have at all**: `nanogo status` (host/session/kernel-socket health), `doctor` (seven independent pass/warn/fail checks — container runtime, container runtime class (whether a hardened class like gVisor/Kata/Sysbox is in use, [ADR-021](go-host/docs/ADR-021-hardened-runtime-class-check.md)), agent image, DB/mailboxes, credential provider, kernel boundary, and the ADR-013 cloud-metadata/link-local egress block — each with concrete remediation, never auto-fixing anything), `trace <id>` (structural, content-free request tracing across routing/session/capability/delivery decisions), and `security-check` (read-only invariant checks: privilege, dangerous mounts, Docker-socket exposure, credential-exposure indicators, runtime restrictions). Real, tested code: 60+ test cases across these alone.
@@ -47,6 +48,7 @@ The honest summary: the risk this addresses is real and has a documented real-wo
 ```
 TypeScript NanoClaw layer
   Channels • orchestration • hooks • workflows • permissions UX • domain/customization
+  Gateway-provider seam — credential brokering, egress, multi-host coordination — hardened here
               │
 Explicit compatibility boundary
   Mailbox / DB / session / routing / guard contracts • versioned wire models • regression fixtures
@@ -61,7 +63,7 @@ Agent/container side
   NanoClaw agent runtime and existing container philosophy, unchanged
 ```
 
-Everything above the compatibility boundary — channels, skills, templates, customization, the entire NanoClaw ecosystem you'd install skills for — is untouched and continues to track NanoClaw upstream normally.
+Most of the TypeScript layer — channels, skills, templates, customization, orchestration — is untouched and continues to track NanoClaw upstream normally. The deliberate exception is the security-relevant seam directly above the Go boundary: gateway/credential-provider selection, egress enforcement at the TypeScript layer, and multi-host session coordination have been hardened here too, not left as a passthrough to the Go kernel alone — see [What Isthmus adds](#what-isthmus-adds) above for specifics.
 
 ## Current status and what's *not* changed
 
