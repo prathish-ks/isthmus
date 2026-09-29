@@ -256,10 +256,20 @@ claims — all three fixed and closed the same day, not merely disclosed:
   an in-flight generation), so a follow-up from a different destination
   arriving while the query stayed open got its own result (a non-retryable
   error notice, the a2a in-reply-to stamp) handled with the *previous*
-  turn's stale routing. A small FIFO (`pendingTurns`) now tracks each
-  outstanding turn's own routing, adopted at the start of its own `result`
-  event — no change to *when* messages get pushed, so none of the
-  behavioral risk a queue-shaped rewrite would have carried.
+  turn's stale routing. An `answering` flag plus a small FIFO
+  (`pendingTurns`) now track each outstanding turn's own routing: a
+  follow-up pushed while the query is idle between turns adopts its
+  routing immediately; one pushed while another turn is still answering
+  is queued and adopted at that turn's own close — *before* the loop
+  advances to its events, not at its own `result` — no change to *when*
+  messages get pushed, so none of the behavioral risk a queue-shaped
+  rewrite would have carried. (An external review of the first version
+  of this fix caught exactly the naive version of this timing — adopting
+  at the start of the newly-queued turn's own `result` event, one
+  turn-boundary too late for `deliverMidTurnBlocks`, the door a
+  `textDelivery: 'mid-turn-complete'` provider actually uses — fixed in
+  `cf74f0f6`, with a regression test using a task/chat routing asymmetry
+  to make a stale `routing.taskRun` an unambiguous, hard failure.)
 - ~~**This table itself is not yet enforced.**~~ **Closed 2026-09-24.** The
   seam-coverage and boundary tables' entries are now mirrored in
   `docs/wiring-registry.json` and re-checked on every PR by the required
