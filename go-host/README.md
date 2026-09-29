@@ -28,6 +28,15 @@ security control needs low-friction UX), and
 [`docs/host-decomposition.md`](../docs/host-decomposition.md) for the full
 inventory of what stays TypeScript versus what this repo ports.
 
+This directory's own scope is that trust-kernel specifically. The
+repository as a whole also deliberately hardens security-relevant seams
+that stay in TypeScript by design and are out of scope for a Go port —
+the credential-gateway integration (a swappable contract, a second real
+gateway option installed and verified end-to-end), gateway-session
+lease lifecycle across a host restart, and multi-host session
+coordination. See the [top-level README](../README.md#what-isthmus-adds)
+for that work; it isn't duplicated here.
+
 ## Status
 
 **Not production. Not an official NanoClaw project.** Currently mid Phase
@@ -114,6 +123,9 @@ go test -mod=vendor ./internal/mount/ -fuzz=FuzzValidateSpec -fuzztime=60s
 
 ## Further reading
 
+- [`../README.md`](../README.md) — the top-level project README, including
+  the TypeScript-side security hardening (gateway-provider seam,
+  multi-host coordination) that's out of this directory's own scope.
 - [`../docs/design-laws.md`](../docs/design-laws.md) — the nine design laws.
 - [`../docs/host-decomposition.md`](../docs/host-decomposition.md) — what
   stays TypeScript vs. what this repo ports, function by function.
