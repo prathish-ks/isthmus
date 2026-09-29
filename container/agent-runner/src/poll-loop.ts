@@ -412,22 +412,30 @@ export async function processQuery(
   // the same prompt again. Unused (and unmaintained) when the provider
   // doesn't implement `onExchangeComplete`.
   const archivePrompts: string[] = [initialPrompt];
-  // FIFO of one entry per turn fed to `query` but not yet resolved, seeded
-  // with the initial turn's own routing. `query.push()` queues a genuinely
-  // separate turn — the underlying MessageStream (providers/claude.ts) and
-  // MockProvider are both strict FIFOs; a push never injects into an
-  // in-flight generation, so results arrive in exactly push order. Each
-  // entry is either a follow-up's own `RoutingContext` (a real turn —
-  // adopt it before handling its result: `routing`/`setCurrentInReplyTo`
-  // update and the per-turn nudge flags reset) or `null` for a same-turn
-  // retry (wrap-nudge / task-block nudge) pushed in response to a result —
-  // its own result answers the SAME turn again, so nothing about the
-  // turn's identity changes. Shifted at the START of every 'result' event,
-  // before that event's content is processed, so a follow-up queued while
-  // the PREVIOUS turn was already idle (no result pending to trigger
-  // anything) is still adopted correctly the moment ITS OWN result arrives
-  // — not one turn too late.
-  const pendingTurns: Array<RoutingContext | null> = [routing];
+  // True whenever some turn is actively fed and not yet fully closed
+  // (from the moment it's pushed — or, for the very first turn, from the
+  // start of this call — until its own 'result' closes without a further
+  // retry). `query.push()` queues a genuinely separate turn — the
+  // underlying MessageStream (providers/claude.ts) and MockProvider are
+  // both strict FIFOs; a push never injects into an in-flight generation,
+  // so results (and any mid-turn 'text' events) arrive in exactly push
+  // order. Together with `pendingTurns` below, this is what lets a
+  // follow-up's routing get adopted at the RIGHT moment: immediately, if
+  // pushed while the query is idle between turns (nothing else ahead of
+  // it), or only once whatever turn is CURRENTLY answering actually
+  // closes (so that turn's own remaining 'text'/'result' events keep
+  // seeing ITS routing, not the follow-up's).
+  let answering = true;
+  // FIFO of routing contexts for turns queued behind the one currently
+  // answering — i.e. pushed while `answering` was already true. Adopted
+  // one at a time at the turn boundary (after the CURRENTLY answering
+  // turn's own result is fully handled), BEFORE the loop advances to that
+  // newly-adopted turn's own events — so its mid-turn 'text' deliveries
+  // (deliverMidTurnBlocks, for a textDelivery: 'mid-turn-complete'
+  // provider) already see the correct routing, not one turn-boundary too
+  // late. A follow-up pushed while idle bypasses this queue entirely and
+  // adopts its routing immediately at push time (see the poller below).
+  const pendingTurns: RoutingContext[] = [];
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -515,14 +523,23 @@ export async function processQuery(
         const keptIds = keep.map((m) => m.id);
         const prompt = formatMessages(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
-        // Recorded so THIS follow-up's own result — once the FIFO-ordered
-        // stream reaches it — is handled with its own destination, not
-        // whatever routing happens to be active right now (see pendingTurns'
-        // own comment). unwrappedNudged/taskBlockNudged reset only when this
-        // turn is actually adopted (at its own result event), not here —
-        // resetting eagerly at push time raced whichever turn's result
-        // hadn't landed yet.
-        pendingTurns.push(extractRouting(keep));
+        const followUpRouting = extractRouting(keep);
+        if (answering) {
+          // A turn is still actively answering — this follow-up must wait
+          // its turn (see pendingTurns' own comment), so the CURRENTLY
+          // answering turn's own remaining text/result events keep seeing
+          // ITS routing.
+          pendingTurns.push(followUpRouting);
+        } else {
+          // The query is idle between turns — nothing is "ahead" of this
+          // one, so adopt its routing right now rather than waiting for a
+          // result event that has nothing to do with it.
+          routing = followUpRouting;
+          setCurrentInReplyTo(routing.inReplyTo);
+          unwrappedNudged = false;
+          taskBlockNudged = false;
+          answering = true;
+        }
         query.push(prompt);
         archivePrompts.push(prompt);
         markCompleted(keptIds);
@@ -593,19 +610,11 @@ export async function processQuery(
         // (send_message) mid-turn, or the message may not need a response
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
-        // Adopt whichever turn this result belongs to — see pendingTurns'
-        // own comment. Must happen BEFORE this result's content is
-        // processed below, so deliverErrorResult/setCurrentInReplyTo/the
-        // nudge decision all see the CORRECT turn's routing and per-turn
-        // nudge state, not whatever was active for a still-in-flight
-        // earlier turn.
-        const adopted = pendingTurns.shift();
-        if (adopted) {
-          routing = adopted;
-          setCurrentInReplyTo(routing.inReplyTo);
-          unwrappedNudged = false;
-          taskBlockNudged = false;
-        }
+        // Whether THIS result triggers a same-turn retry (wrap-nudge or
+        // task-block nudge) below — a retry answers the SAME turn again
+        // (same routing, same nudge state), so the turn-boundary block
+        // must not advance past it.
+        let turnRetried = false;
         if (event.text) {
           const { hasUnwrapped, taskBlocks, resultBlocks } = await dispatchResultText(event.text, routing, {
             midTurnSent,
@@ -658,9 +667,9 @@ export async function processQuery(
             });
             if (willRetryWrapping) {
               unwrappedNudged = true;
+              turnRetried = true;
               const destinations = getAllDestinations();
               const names = destinations.map((d) => d.name).join(', ');
-              pendingTurns.push(null);
               query.push(
                 `<system>Your response was not delivered — it was not wrapped in <message to="name">...</message> blocks. ` +
                   `All output must be wrapped: use <message to="name"> for content to send, or <internal> for scratchpad. ` +
@@ -670,10 +679,10 @@ export async function processQuery(
             }
             if (willRetryTaskBlocks) {
               taskBlockNudged = true;
+              turnRetried = true;
               const names = getAllDestinations()
                 .map((d) => d.name)
                 .join(', ');
-              pendingTurns.push(null);
               query.push(buildTaskBlockNudge(taskBlocks, names));
             }
             // A retry result (wrapping or task-block nudge) answers the SAME
@@ -694,6 +703,24 @@ export async function processQuery(
         midTurnSent = 0;
         turnStartSeq = maxOutboundSeq();
         midTurnTail = '';
+        // Advance to whatever turn is next, BEFORE the loop moves on to its
+        // events — so that turn's own mid-turn 'text' deliveries already
+        // see its routing, not one turn-boundary too late (a retry answers
+        // the SAME turn again, so it must not advance past it). A follow-up
+        // pushed while idle already adopted itself at push time (see the
+        // poller above) and never reaches pendingTurns at all; this only
+        // handles a follow-up that arrived while this turn was still
+        // answering.
+        if (!turnRetried) {
+          if (pendingTurns.length > 0) {
+            routing = pendingTurns.shift()!;
+            setCurrentInReplyTo(routing.inReplyTo);
+            unwrappedNudged = false;
+            taskBlockNudged = false;
+          } else {
+            answering = false;
+          }
+        }
       }
     }
   } catch (err) {
