@@ -33,7 +33,7 @@ jobs:
       pull-requests: write # open the bump PR
       id-token: write # OIDC for the read-only ECR role
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Assume the read-only role
         id: aws

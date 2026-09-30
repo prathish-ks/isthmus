@@ -18,7 +18,7 @@ jobs:
       channels: ${{ steps.refs.outputs.channels }}
       providers: ${{ steps.refs.outputs.providers }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:
@@ -44,7 +44,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v7
         with:

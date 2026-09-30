@@ -49,7 +49,7 @@ jobs:
       id-token: write # OIDC for the pull-only ECR role
       pull-requests: write # only ever used to enable auto-merge
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
