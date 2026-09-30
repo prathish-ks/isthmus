@@ -28,6 +28,26 @@ security control needs low-friction UX), and
 [`docs/host-decomposition.md`](../docs/host-decomposition.md) for the full
 inventory of what stays TypeScript versus what this repo ports.
 
+This kernel also carries egress lockdown, a feature upstream NanoClaw
+doesn't have: agent containers are blocked from reaching the
+cloud-metadata and link-local address ranges, closing a well-known
+credential-theft path. Getting it enforced correctly took several
+passes: a wiring gap that silently dropped the arguments enforcing it
+was found and closed
+([ADR-024](docs/ADR-024-egress-lockdown-network-wiring-gap.md)), the
+kernel now refuses to start if it can't actually enforce the block
+([ADR-025](docs/ADR-025-kernel-side-egress-lockdown-enforcement.md)), a
+required CI job re-proves that enforcement against a live Docker daemon
+on every pull request
+([ADR-026](docs/ADR-026-egress-lockdown-live-ci-gate.md)), and a
+general wiring-and-boundary registry now checks the rest of the codebase
+for the same class of gap
+([ADR-028](docs/ADR-028-wiring-boundary-registry.md)). See the
+[top-level README](../README.md#what-isthmus-adds) for the rest — the
+test-suite uplift, CI-gate strength, the differential-fixture harness,
+and other hardening work, some of it deliberately out of this
+directory's own Go-kernel scope.
+
 ## Status
 
 **Not production. Not an official NanoClaw project.** Currently mid Phase
@@ -114,6 +134,9 @@ go test -mod=vendor ./internal/mount/ -fuzz=FuzzValidateSpec -fuzztime=60s
 
 ## Further reading
 
+- [`../README.md`](../README.md) — the top-level project README: overall
+  CI-gate strength, the differential-fixture harness, operator tooling,
+  and other hardening work.
 - [`../docs/design-laws.md`](../docs/design-laws.md) — the nine design laws.
 - [`../docs/host-decomposition.md`](../docs/host-decomposition.md) — what
   stays TypeScript vs. what this repo ports, function by function.
