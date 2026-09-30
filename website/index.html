@@ -328,7 +328,7 @@
       <div class="reveal">
         <p class="eyebrow">An independent, unofficial NanoClaw distribution</p>
         <h1>One narrow, guarded passage between your agents and everything they can touch.</h1>
-        <p class="lede">Isthmus is NanoClaw — the same host, channels, and skills you already run — with an independently-enforced Go trust-kernel standing behind it. Every privileged Docker, filesystem, and network decision is forced through that one kernel, in a separate process a compromised TypeScript caller can't talk its way around.</p>
+        <p class="lede">Isthmus is NanoClaw — the same host, channels, and skills you already run on your own laptop or server — with an independently-enforced Go trust-kernel standing behind it. Nanogo ring-fences what your agent can touch: guard, mount, and egress decisions are enforced from a separate process, so a compromised or buggy agent can't just talk its way past them.</p>
         <div class="ctas">
           <a class="btn btn-primary" href="https://github.com/prathish-ks/isthmus" target="_blank" rel="noopener">View on GitHub</a>
           <a class="btn btn-ghost" href="#compare">See what's different →</a>
@@ -341,7 +341,7 @@
         </div>
       </div>
       <div class="hero-art" aria-hidden="true">
-        <svg viewBox="0 0 380 472" role="img" aria-label="A message reaches the host, crosses the nanogo kernel where guard, mount, and egress checks run, then reaches the agent.">
+        <svg viewBox="0 0 380 494" role="img" aria-label="A message reaches your laptop or server. Inside it, nanogo draws a ring fence around the agent, enforcing guard, mount, and egress at that boundary.">
           <defs>
             <marker id="heroFlowArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -349,59 +349,51 @@
           </defs>
 
           <!-- inbound message -->
-          <circle cx="190" cy="40" r="24" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".6"/>
-          <circle cx="180" cy="40" r="3" fill="currentColor" opacity=".7"/>
-          <circle cx="190" cy="40" r="3" fill="currentColor" opacity=".7"/>
-          <circle cx="200" cy="40" r="3" fill="currentColor" opacity=".7"/>
-          <text x="190" y="80" text-anchor="middle" font-family="IBM Plex Mono" font-size="11" fill="currentColor" opacity=".65">your message</text>
+          <circle cx="190" cy="36" r="22" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".6"/>
+          <circle cx="181" cy="36" r="3" fill="currentColor" opacity=".7"/>
+          <circle cx="190" cy="36" r="3" fill="currentColor" opacity=".7"/>
+          <circle cx="199" cy="36" r="3" fill="currentColor" opacity=".7"/>
+          <text x="190" y="74" text-anchor="middle" font-family="IBM Plex Mono" font-size="11" fill="currentColor" opacity=".65">your message</text>
 
-          <line x1="190" y1="90" x2="190" y2="118" stroke="currentColor" stroke-width="1.5" marker-end="url(#heroFlowArrow)" opacity=".75"/>
-          <text x="206" y="107" font-family="IBM Plex Mono" font-size="9.5" fill="currentColor" opacity=".55">any channel</text>
+          <line x1="190" y1="84" x2="190" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#heroFlowArrow)" opacity=".75"/>
+          <text x="206" y="101" font-family="IBM Plex Mono" font-size="9.5" fill="currentColor" opacity=".55">any channel</text>
 
-          <!-- host -->
-          <rect x="70" y="118" width="240" height="60" rx="14" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".6"/>
-          <text x="190" y="145" text-anchor="middle" font-family="IBM Plex Mono" font-size="13" font-weight="600" fill="currentColor">host</text>
-          <text x="190" y="164" text-anchor="middle" font-family="IBM Plex Sans" font-size="10" fill="currentColor" opacity=".55">NanoClaw, unchanged</text>
+          <!-- host: your laptop or server -->
+          <rect x="34" y="112" width="312" height="358" rx="22" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".55"/>
+          <text x="58" y="140" font-family="IBM Plex Mono" font-size="13" font-weight="600" fill="currentColor">host</text>
+          <text x="58" y="157" font-family="IBM Plex Sans" font-size="10" fill="currentColor" opacity=".55">your laptop or server</text>
 
-          <line x1="190" y1="178" x2="190" y2="206" stroke="currentColor" stroke-width="1.5" marker-end="url(#heroFlowArrow)" opacity=".75"/>
-          <text x="206" y="195" font-family="IBM Plex Mono" font-size="9.5" fill="currentColor" opacity=".55">privileged action</text>
+          <!-- ring fence -->
+          <circle cx="190" cy="296" r="90" fill="var(--accent)" fill-opacity=".07"/>
+          <circle cx="190" cy="296" r="90" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="3 7"/>
+          <text x="190" y="182" text-anchor="middle" font-family="IBM Plex Mono" font-size="13.5" font-weight="600" fill="var(--accent)">nanogo</text>
+          <text x="190" y="198" text-anchor="middle" font-family="IBM Plex Sans" font-size="9.5" fill="var(--accent)" opacity=".8">ring-fences the agent</text>
 
-          <!-- nanogo kernel -->
-          <rect x="55" y="206" width="270" height="150" rx="18" fill="var(--accent)" fill-opacity=".12"/>
-          <rect x="55" y="206" width="270" height="150" rx="18" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
-          <text x="190" y="234" text-anchor="middle" font-family="IBM Plex Mono" font-size="14.5" font-weight="600" fill="var(--accent)">nanogo</text>
-          <text x="190" y="252" text-anchor="middle" font-family="IBM Plex Sans" font-size="10.5" fill="var(--accent)" opacity=".85">a separate Go kernel decides</text>
+          <text x="190" y="292" text-anchor="middle" font-family="IBM Plex Mono" font-size="13" font-weight="600" fill="currentColor">agent</text>
+          <text x="190" y="310" text-anchor="middle" font-family="IBM Plex Sans" font-size="10" fill="currentColor" opacity=".55">does the work, fenced in</text>
 
-          <!-- badge: guard -->
+          <!-- badges: what the fence enforces -->
+          <line x1="150" y1="358" x2="104" y2="392" stroke="var(--accent)" stroke-width="1.2" opacity=".55"/>
+          <line x1="190" y1="368" x2="190" y2="392" stroke="var(--accent)" stroke-width="1.2" opacity=".55"/>
+          <line x1="230" y1="358" x2="276" y2="392" stroke="var(--accent)" stroke-width="1.2" opacity=".55"/>
+
           <g>
-            <rect x="65" y="266" width="78" height="34" rx="9" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".3" stroke-width="1.1"/>
-            <path d="M83,275 L88,277.2 L88,282 Q88,286.4 83,288.4 Q78,286.4 78,282 L78,277.2 Z" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round"/>
-            <text x="97" y="287" font-family="IBM Plex Mono" font-size="10.5" fill="currentColor" opacity=".85">guard</text>
+            <rect x="65" y="392" width="78" height="34" rx="9" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".3" stroke-width="1.1"/>
+            <path d="M83,401 L88,403.2 L88,408 Q88,412.4 83,414.4 Q78,412.4 78,408 L78,403.2 Z" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round"/>
+            <text x="97" y="413" font-family="IBM Plex Mono" font-size="10.5" fill="currentColor" opacity=".85">guard</text>
           </g>
-
-          <!-- badge: mount -->
           <g>
-            <rect x="151" y="266" width="78" height="34" rx="9" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".3" stroke-width="1.1"/>
-            <rect x="169" y="277" width="6" height="3" rx="1" fill="none" stroke="var(--accent)" stroke-width="1.3"/>
-            <rect x="169" y="279.5" width="12" height="9" rx="1.5" fill="none" stroke="var(--accent)" stroke-width="1.3"/>
-            <text x="188" y="287" font-family="IBM Plex Mono" font-size="10.5" fill="currentColor" opacity=".85">mount</text>
+            <rect x="151" y="392" width="78" height="34" rx="9" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".3" stroke-width="1.1"/>
+            <rect x="169" y="403" width="6" height="3" rx="1" fill="none" stroke="var(--accent)" stroke-width="1.3"/>
+            <rect x="169" y="405.5" width="12" height="9" rx="1.5" fill="none" stroke="var(--accent)" stroke-width="1.3"/>
+            <text x="188" y="413" font-family="IBM Plex Mono" font-size="10.5" fill="currentColor" opacity=".85">mount</text>
           </g>
-
-          <!-- badge: egress -->
           <g>
-            <rect x="237" y="266" width="78" height="34" rx="9" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".3" stroke-width="1.1"/>
-            <circle cx="255" cy="283" r="7.2" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
-            <line x1="250.4" y1="278.4" x2="259.6" y2="287.6" stroke="var(--accent)" stroke-width="1.4"/>
-            <text x="270" y="287" font-family="IBM Plex Mono" font-size="10.5" fill="currentColor" opacity=".85">egress</text>
+            <rect x="237" y="392" width="78" height="34" rx="9" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-opacity=".3" stroke-width="1.1"/>
+            <circle cx="255" cy="409" r="7.2" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+            <line x1="250.4" y1="404.4" x2="259.6" y2="413.6" stroke="var(--accent)" stroke-width="1.4"/>
+            <text x="270" y="413" font-family="IBM Plex Mono" font-size="10.5" fill="currentColor" opacity=".85">egress</text>
           </g>
-
-          <line x1="190" y1="356" x2="190" y2="384" stroke="currentColor" stroke-width="1.5" marker-end="url(#heroFlowArrow)" opacity=".75"/>
-          <text x="206" y="373" font-family="IBM Plex Mono" font-size="9.5" fill="currentColor" opacity=".55">cleared</text>
-
-          <!-- agent -->
-          <rect x="70" y="384" width="240" height="60" rx="14" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".75"/>
-          <text x="190" y="411" text-anchor="middle" font-family="IBM Plex Mono" font-size="13" font-weight="600" fill="currentColor">agent</text>
-          <text x="190" y="430" text-anchor="middle" font-family="IBM Plex Sans" font-size="10" fill="currentColor" opacity=".55">does the work</text>
         </svg>
       </div>
     </div>
