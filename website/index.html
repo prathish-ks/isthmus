@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isthmus</title>
+<meta name="description" content="A hardened NanoClaw distribution: an independently-enforced Go trust-kernel, egress lockdown, and CI that runs against live infrastructure — the same NanoClaw experience, secured underneath.">
+<meta name="theme-color" content="#0f1620">
+<link rel="icon" href="favicon.ico">
+<meta property="og:title" content="Isthmus — a hardened NanoClaw distribution">
+<meta property="og:description" content="An independently-enforced Go trust-kernel, egress lockdown, and CI that runs against live infrastructure — the same NanoClaw experience, secured underneath.">
+<meta property="og:image" content="https://isthmus.dev/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,440;0,9..144,560;0,9..144,680;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper:#f3f6f7;
+    --paper-raised:#ffffff;
+    --ink:#1b2430;
+    --ink-soft:#54606c;
+    --ink-faint:#8b96a1;
+    --line:#dde3e7;
+    --line-soft:#e8ecef;
+    --accent:#0d8f81;
+    --accent-strong:#0b7268;
+    --accent-tint:#dff5f1;
+    --accent-on-dark:#2dd4bf;
+    --shadow: 0 1px 2px rgba(27,36,48,.04), 0 10px 30px -12px rgba(27,36,48,.12);
+    --maxw: 1080px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#0f1620;
+      --paper-raised:#161f2b;
+      --ink:#eef2f6;
+      --ink-soft:#a7b2bd;
+      --ink-faint:#69747f;
+      --line:#28323e;
+      --line-soft:#1c2632;
+      --accent:#2dd4bf;
+      --accent-strong:#5eead4;
+      --accent-tint:#122e2b;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 14px 40px -14px rgba(0,0,0,.55);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0f1620;
+    --paper-raised:#161f2b;
+    --ink:#eef2f6;
+    --ink-soft:#a7b2bd;
+    --ink-faint:#69747f;
+    --line:#28323e;
+    --line-soft:#1c2632;
+    --accent:#2dd4bf;
+    --accent-strong:#5eead4;
+    --accent-tint:#122e2b;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 14px 40px -14px rgba(0,0,0,.55);
+  }
+
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{
+    font-family:"Fraunces", ui-serif, Georgia, serif;
+    font-weight:680;
+    line-height:1.08;
+    letter-spacing:-.01em;
+    text-wrap:balance;
+    margin:0;
+    color:var(--ink);
+  }
+  em.accent-word{ font-style:italic; font-weight:500; color:var(--accent); }
+  p{ margin:0; }
+  a{ color:inherit; }
+  .mono{
+    font-family:"IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  }
+  .eyebrow{
+    font-family:"IBM Plex Mono", ui-monospace, monospace;
+    font-size:12.5px;
+    font-weight:500;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--accent);
+  }
+  .wrap{
+    max-width:var(--maxw);
+    margin:0 auto;
+    padding:0 28px;
+  }
+  section{ padding:96px 0; border-bottom:1px solid var(--line-soft); }
+  section:last-of-type{ border-bottom:none; }
+  @media (max-width:720px){ section{ padding:64px 0; } }
+
+  /* ---------- nav ---------- */
+  header.site{
+    position:sticky; top:0; z-index:40;
+    background:color-mix(in srgb, var(--paper) 82%, transparent);
+    backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .navrow{
+    display:flex; align-items:center; justify-content:space-between;
+    height:64px; gap:24px;
+  }
+  .brand{ display:flex; align-items:center; gap:10px; text-decoration:none; color:var(--ink); }
+  .brand svg{ width:26px; height:auto; color:var(--ink); }
+  .brand span{ font-family:"Fraunces",serif; font-weight:680; font-size:19px; letter-spacing:-.01em; }
+  nav.links{ display:flex; align-items:center; gap:28px; }
+  nav.links a{
+    text-decoration:none; color:var(--ink-soft); font-size:14.5px; font-weight:500;
+    transition:color .15s ease;
+  }
+  nav.links a:hover{ color:var(--ink); }
+  @media (max-width:760px){ nav.links a.hide-narrow{ display:none; } }
+
+  .navcta{ display:flex; align-items:center; gap:10px; }
+  button.iconbtn{
+    width:36px; height:36px; border-radius:9px; border:1px solid var(--line);
+    background:var(--paper-raised); color:var(--ink-soft); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:border-color .15s ease, color .15s ease;
+  }
+  button.iconbtn:hover{ border-color:var(--accent); color:var(--accent); }
+  button.iconbtn svg{ width:17px; height:17px; }
+  button.iconbtn .moon{ display:none; }
+  :root[data-theme="dark"] button.iconbtn .sun{ display:none; }
+  :root[data-theme="dark"] button.iconbtn .moon{ display:block; }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) button.iconbtn .sun{ display:none; }
+    :root:not([data-theme="light"]) button.iconbtn .moon{ display:block; }
+  }
+
+  .btn{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:11px 20px; border-radius:10px; font-size:14.5px; font-weight:600;
+    text-decoration:none; border:1px solid transparent; cursor:pointer;
+    transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease, background .15s ease;
+    font-family:"IBM Plex Sans",sans-serif;
+  }
+  .btn-primary{ background:var(--ink); color:var(--paper); }
+  :root[data-theme="dark"] .btn-primary, @media (prefers-color-scheme:dark){ }
+  .btn-primary:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
+  .btn-ghost{ background:transparent; color:var(--ink); border-color:var(--line); }
+  .btn-ghost:hover{ border-color:var(--accent); color:var(--accent); }
+  .btn-sm{ padding:9px 15px; font-size:13.5px; }
+
+  /* ---------- hero ---------- */
+  .hero{ position:relative; padding:88px 0 72px; overflow:hidden; border-bottom:1px solid var(--line-soft); }
+  .hero-grid{
+    display:grid; grid-template-columns:1.15fr .85fr; gap:56px; align-items:center;
+    position:relative; z-index:1;
+  }
+  @media (max-width:900px){ .hero-grid{ grid-template-columns:1fr; } }
+  .hero h1{ font-size:clamp(34px,4.6vw,54px); }
+  .hero .lede{
+    margin-top:22px; max-width:52ch; color:var(--ink-soft); font-size:18px; line-height:1.65;
+  }
+  .hero .ctas{ margin-top:32px; display:flex; gap:12px; flex-wrap:wrap; }
+  .stat-strip{
+    margin-top:44px; display:flex; flex-wrap:wrap; gap:28px 36px;
+    padding-top:24px; border-top:1px solid var(--line-soft);
+  }
+  .stat{ min-width:120px; }
+  .stat b{
+    display:block; font-family:"IBM Plex Mono",monospace; font-size:24px; font-weight:600; color:var(--ink);
+  }
+  .stat span{ font-size:12.5px; color:var(--ink-faint); }
+
+  .hero-art{ position:relative; }
+  .hero-art svg{ width:100%; height:auto; display:block; color:var(--ink); }
+
+  /* ---------- section headers ---------- */
+  .sechead{ max-width:640px; margin-bottom:48px; }
+  .sechead h2{ font-size:clamp(26px,3.2vw,36px); margin-top:10px; }
+  .sechead p{ margin-top:16px; color:var(--ink-soft); font-size:16.5px; }
+
+  /* ---------- compare table ---------- */
+  .tablewrap{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; background:var(--paper-raised); box-shadow:var(--shadow); }
+  table.compare{ width:100%; border-collapse:collapse; min-width:680px; font-size:14.5px; }
+  table.compare thead th{
+    text-align:left; padding:16px 20px; font-family:"IBM Plex Mono",monospace;
+    font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint);
+    border-bottom:1px solid var(--line); font-weight:500;
+  }
+  table.compare thead th.col-isthmus{ color:var(--accent); }
+  table.compare tbody tr.group td{
+    padding:20px 20px 8px; font-family:"IBM Plex Mono",monospace; font-size:11.5px;
+    letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint);
+    border-bottom:none;
+  }
+  table.compare tbody tr.row td{
+    padding:14px 20px; border-bottom:1px solid var(--line-soft); vertical-align:top;
+  }
+  table.compare tbody tr.row:last-child td{ border-bottom:none; }
+  td.dim{ color:var(--ink); font-weight:500; width:27%; }
+  td.nc{ color:var(--ink-soft); width:34%; }
+  td.ist{ width:39%; background:color-mix(in srgb, var(--accent-tint) 100%, transparent); color:var(--ink); font-weight:500; position:relative; }
+  td.ist::before{
+    content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent);
+  }
+  .mark-yes{ color:var(--accent); font-weight:700; margin-right:6px; }
+  .mark-no{ color:var(--ink-faint); margin-right:6px; }
+  .compare-note{ margin-top:18px; font-size:13.5px; color:var(--ink-faint); }
+  .compare-note a{ color:var(--accent); text-decoration:none; border-bottom:1px solid currentColor; }
+
+  /* ---------- architecture ---------- */
+  .arch-figure{ margin:0; }
+  .arch-figure svg{ width:100%; height:auto; display:block; }
+  .arch-figure figcaption{
+    margin-top:18px; font-size:13.5px; color:var(--ink-faint); max-width:60ch;
+  }
+  .arch-note{ margin-top:28px; max-width:64ch; color:var(--ink-soft); font-size:15.5px; }
+
+  /* ---------- hardening grid ---------- */
+  .grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  @media (max-width:860px){ .grid{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:600px){ .grid{ grid-template-columns:1fr; } }
+  .card{
+    background:var(--paper-raised); padding:28px 26px; display:flex; flex-direction:column; gap:12px;
+    transition:background .15s ease;
+  }
+  .card:hover{ background:color-mix(in srgb, var(--accent-tint) 55%, var(--paper-raised)); }
+  .card .tag{
+    font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--accent);
+  }
+  .card h3{ font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:17px; letter-spacing:0; }
+  .card p{ color:var(--ink-soft); font-size:14.5px; line-height:1.6; }
+  .card .refs{ margin-top:auto; padding-top:6px; font-size:12px; font-family:"IBM Plex Mono",monospace; color:var(--ink-faint); }
+
+  /* ---------- who it's for ---------- */
+  .whofor{ display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  @media (max-width:760px){ .whofor{ grid-template-columns:1fr; } }
+  .whofor > div{ background:var(--paper-raised); padding:32px; }
+  .whofor h3{ font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.08em; text-transform:uppercase; font-weight:500; color:var(--ink-faint); }
+  .whofor .higher h3{ color:var(--accent); }
+  .whofor ul{ margin:18px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:12px; }
+  .whofor li{ padding-left:20px; position:relative; color:var(--ink-soft); font-size:14.5px; line-height:1.55; }
+  .whofor li::before{ content:"—"; position:absolute; left:0; color:var(--ink-faint); }
+  .whofor .higher li::before{ content:"✓"; color:var(--accent); }
+  .whofor-close{ margin-top:22px; color:var(--ink-soft); font-size:14.5px; max-width:70ch; }
+
+  /* ---------- get started ---------- */
+  .start-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+  @media (max-width:820px){ .start-grid{ grid-template-columns:1fr; } }
+  .startcard{
+    border:1px solid var(--line); border-radius:14px; padding:24px; background:var(--paper-raised);
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .startcard .num{ font-family:"IBM Plex Mono",monospace; color:var(--accent); font-size:12.5px; letter-spacing:.06em; }
+  .startcard h3{ font-family:"IBM Plex Sans",sans-serif; font-size:16px; font-weight:600; }
+  .startcard p{ color:var(--ink-soft); font-size:14px; line-height:1.55; }
+  .startcard code{
+    font-family:"IBM Plex Mono",monospace; font-size:12.5px; background:var(--paper); border:1px solid var(--line);
+    padding:8px 10px; border-radius:8px; display:block; overflow-x:auto; color:var(--ink); margin-top:4px;
+  }
+  .cta-final{
+    margin-top:48px; border-radius:16px; padding:44px 40px; background:var(--ink); color:var(--paper);
+    display:flex; align-items:center; justify-content:space-between; gap:24px; flex-wrap:wrap;
+  }
+  :root[data-theme="dark"] .cta-final, @media (prefers-color-scheme:dark){ }
+  .cta-final h3{ font-family:"Fraunces",serif; font-size:24px; color:var(--paper); font-weight:680; }
+  .cta-final p{ color:color-mix(in srgb, var(--paper) 70%, transparent); margin-top:8px; font-size:14.5px; }
+  .cta-final .btn-primary{ background:var(--accent); color:#08201c; }
+
+  /* ---------- footer ---------- */
+  footer{ padding:48px 0 64px; }
+  .footgrid{ display:flex; justify-content:space-between; align-items:flex-start; gap:32px; flex-wrap:wrap; }
+  .footbrand{ display:flex; align-items:center; gap:10px; }
+  .footbrand svg{ width:22px; height:auto; color:var(--ink-faint); }
+  .footbrand span{ font-family:"Fraunces",serif; font-weight:680; font-size:16px; color:var(--ink-soft); }
+  .footlinks{ display:flex; gap:28px; flex-wrap:wrap; }
+  .footlinks a{ text-decoration:none; color:var(--ink-soft); font-size:14px; }
+  .footlinks a:hover{ color:var(--accent); }
+  .footnote{
+    margin-top:28px; padding-top:24px; border-top:1px solid var(--line-soft);
+    font-size:12.5px; color:var(--ink-faint); line-height:1.7; max-width:900px;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:.001ms !important; transition-duration:.001ms !important; }
+  }
+  .reveal{ animation:rise .6s ease both; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap navrow">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 200 140" role="img" aria-label="Isthmus mark"><rect x="8" y="15" width="70" height="110" rx="35" fill="currentColor"/><rect x="122" y="15" width="70" height="110" rx="35" fill="currentColor"/><rect x="60" y="55" width="80" height="30" rx="6" fill="currentColor"/><rect x="90" y="60" width="20" height="20" rx="4" fill="#14b8a6"/></svg>
+      <span>Isthmus</span>
+    </a>
+    <nav class="links">
+      <a class="hide-narrow" href="#compare">Compare</a>
+      <a class="hide-narrow" href="#architecture">Architecture</a>
+      <a class="hide-narrow" href="#hardening">Hardening</a>
+      <a href="#start">Get started</a>
+    </nav>
+    <div class="navcta">
+      <button class="iconbtn" id="themeToggle" aria-label="Toggle color theme" type="button">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7" stroke-linecap="round"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z" stroke-linejoin="round"/></svg>
+      </button>
+      <a class="btn btn-ghost btn-sm" href="https://github.com/prathish-ks/isthmus" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="reveal">
+        <p class="eyebrow">An independent, unofficial NanoClaw distribution</p>
+        <h1>One narrow, guarded passage between your agents and everything they can touch.</h1>
+        <p class="lede">Isthmus is NanoClaw — the same host, channels, and skills you already run — with an independently-enforced Go trust-kernel standing behind it. Every privileged Docker, filesystem, and network decision is forced through that one kernel, in a separate process a compromised TypeScript caller can't talk its way around.</p>
+        <div class="ctas">
+          <a class="btn btn-primary" href="https://github.com/prathish-ks/isthmus" target="_blank" rel="noopener">View on GitHub</a>
+          <a class="btn btn-ghost" href="#compare">See what's different →</a>
+        </div>
+        <div class="stat-strip mono">
+          <div class="stat"><b>18</b><span>CI jobs, several required</span></div>
+          <div class="stat"><b>5</b><span>run against a live Docker daemon</span></div>
+          <div class="stat"><b>60+</b><span>behavior contracts pinned before any port</span></div>
+          <div class="stat"><b>MIT</b><span>same license as upstream</span></div>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <svg viewBox="0 0 420 420" role="img" aria-label="">
+          <defs>
+            <marker id="hArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+          <circle cx="210" cy="210" r="196" fill="none" stroke="var(--line)" stroke-width="1"/>
+          <rect x="18" y="150" width="130" height="120" rx="18" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".55"/>
+          <text x="83" y="215" text-anchor="middle" font-family="IBM Plex Mono" font-size="12" fill="currentColor" opacity=".7">host</text>
+          <rect x="272" y="150" width="130" height="120" rx="18" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".55"/>
+          <text x="337" y="215" text-anchor="middle" font-family="IBM Plex Mono" font-size="12" fill="currentColor" opacity=".7">agent</text>
+          <rect x="148" y="176" width="124" height="68" rx="14" fill="#14b8a6" opacity=".14"/>
+          <rect x="148" y="176" width="124" height="68" rx="14" fill="none" stroke="#14b8a6" stroke-width="2"/>
+          <text x="210" y="205" text-anchor="middle" font-family="IBM Plex Mono" font-size="11.5" fill="#0d8f81" font-weight="600">nanogo</text>
+          <text x="210" y="222" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#0d8f81">guard · mount · egress</text>
+          <line x1="148" y1="210" x2="90" y2="210" stroke="currentColor" stroke-width="1.6" marker-end="url(#hArrow)" opacity=".8"/>
+          <line x1="330" y1="210" x2="272" y2="210" stroke="currentColor" stroke-width="1.6" marker-end="url(#hArrow)" opacity=".8"/>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <section id="compare">
+    <div class="wrap">
+      <div class="sechead">
+        <p class="eyebrow">What changes</p>
+        <h2>Same day-to-day experience. A different trust boundary underneath it.</h2>
+        <p>Isthmus doesn't touch NanoClaw's channels, skills, templates, or agent runtime — installing and using it looks identical day to day. What's different sits below that: a second, independently-enforced layer standing behind the TypeScript host.</p>
+      </div>
+
+      <div class="tablewrap">
+        <table class="compare">
+          <thead>
+            <tr>
+              <th>Dimension</th>
+              <th>Upstream NanoClaw</th>
+              <th class="col-isthmus">+ Isthmus</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="group"><td colspan="3">Enforcement</td></tr>
+            <tr class="row">
+              <td class="dim">Privileged-decision boundary</td>
+              <td class="nc"><span class="mark-no">–</span>Enforced by the TypeScript host itself</td>
+              <td class="ist"><span class="mark-yes">+</span>Independently-enforced Go kernel (<span class="mono">nanogo</span>) mediates every Docker / filesystem / network call, in a separate process</td>
+            </tr>
+            <tr class="row">
+              <td class="dim">Egress lockdown</td>
+              <td class="nc"><span class="mark-no">–</span>Not present</td>
+              <td class="ist"><span class="mark-yes">+</span>Blocks agent-container access to cloud-metadata &amp; link-local ranges, a known credential-theft path (Linux)</td>
+            </tr>
+            <tr class="row">
+              <td class="dim">Multi-turn reply routing</td>
+              <td class="nc"><span class="mark-no">–</span>Fixed via a turn-queue rewrite bundled with a provider-contract migration</td>
+              <td class="ist"><span class="mark-yes">+</span>Same bug, fixed independently with a narrower mechanism — no shared code</td>
+            </tr>
+
+            <tr class="group"><td colspan="3">Testing &amp; CI</td></tr>
+            <tr class="row">
+              <td class="dim">Behavior-fixture harness</td>
+              <td class="nc"><span class="mark-no">–</span>—</td>
+              <td class="ist"><span class="mark-yes">+</span>60+ contracts pin real TypeScript guard/routing/delivery behavior byte-for-byte before any Go port</td>
+            </tr>
+            <tr class="row">
+              <td class="dim">CI against live infrastructure</td>
+              <td class="nc"><span class="mark-no">–</span>—</td>
+              <td class="ist"><span class="mark-yes">+</span>5 of 18 CI jobs run the kernel against a real Docker daemon, not a mock</td>
+            </tr>
+            <tr class="row">
+              <td class="dim">Fuzzing &amp; coverage floors</td>
+              <td class="nc"><span class="mark-no">–</span>—</td>
+              <td class="ist"><span class="mark-yes">+</span>Coverage-guided fuzz targets, plus coverage and performance gates</td>
+            </tr>
+            <tr class="row">
+              <td class="dim">Supply-chain scanning</td>
+              <td class="nc"><span class="mark-no">–</span>Base tooling</td>
+              <td class="ist"><span class="mark-yes">+</span><span class="mono">pnpm-audit</span> + <span class="mono">bun-audit</span> (baseline-gated) + <span class="mono">go-vulncheck</span> + <span class="mono">semgrep</span> + Dependabot across 4 ecosystems</td>
+            </tr>
+
+            <tr class="group"><td colspan="3">Operations</td></tr>
+            <tr class="row">
+              <td class="dim">Diagnostics</td>
+              <td class="nc"><span class="mark-no">–</span>—</td>
+              <td class="ist"><span class="mark-yes">+</span><span class="mono">nanogo status / doctor / trace / security-check</span> — health, remediation, and content-free request tracing</td>
+            </tr>
+            <tr class="row">
+              <td class="dim">Ecosystem — channels, skills, templates</td>
+              <td class="nc">Full ecosystem</td>
+              <td class="ist"><span class="mark-yes">=</span>Unchanged. Same install, same day-to-day behavior</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="compare-note">Sourced from Isthmus's own ADR series and CI configuration — see the <a href="https://github.com/prathish-ks/isthmus#what-isthmus-adds" target="_blank" rel="noopener">README</a> for citations on every row.</p>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="wrap">
+      <div class="sechead">
+        <p class="eyebrow">Architecture</p>
+        <h2>The kernel sits <em class="accent-word">behind</em> the host, not wrapped around it.</h2>
+        <p>Everything above the compatibility boundary is untouched NanoClaw. Everything below it — the point where a Docker, filesystem, or network call actually happens — is forced through one Go process before it can execute.</p>
+      </div>
+
+      <figure class="arch-figure">
+        <svg viewBox="0 0 920 660" role="img" aria-label="Layered architecture diagram: the TypeScript NanoClaw host sits above an explicit compatibility boundary; every privileged request crosses the Go trust-kernel, which mediates access to privileged host capabilities before they reach the agent container. A dashed line marks the direct path from host to privileged capabilities that does not exist.">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+            <marker id="arrowAccent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#14b8a6"/>
+            </marker>
+          </defs>
+
+          <!-- Layer 1: TypeScript host -->
+          <rect x="60" y="34" width="620" height="92" rx="14" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <text x="86" y="68" font-family="IBM Plex Mono" font-size="13" font-weight="600" fill="currentColor">TypeScript NanoClaw host</text>
+          <text x="86" y="92" font-family="IBM Plex Sans" font-size="12.5" fill="currentColor" opacity=".68">channels · orchestration · hooks · workflows · permissions UX</text>
+
+          <line x1="370" y1="126" x2="370" y2="160" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+          <text x="392" y="148" font-family="IBM Plex Mono" font-size="11" fill="currentColor" opacity=".68">every privileged request</text>
+
+          <!-- Boundary strip -->
+          <rect x="60" y="160" width="620" height="46" rx="10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 4" opacity=".7"/>
+          <text x="86" y="188" font-family="IBM Plex Mono" font-size="11.5" fill="currentColor" opacity=".68">compatibility boundary — versioned contracts, regression fixtures</text>
+
+          <line x1="370" y1="206" x2="370" y2="240" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+          <text x="392" y="228" font-family="IBM Plex Mono" font-size="11" fill="currentColor" opacity=".68">Unix socket, NDJSON</text>
+
+          <!-- Layer 3: Go kernel (emphasized) -->
+          <rect x="60" y="240" width="620" height="108" rx="14" fill="#14b8a6" opacity=".12"/>
+          <rect x="60" y="240" width="620" height="108" rx="14" fill="none" stroke="#14b8a6" stroke-width="2.4"/>
+          <text x="86" y="278" font-family="IBM Plex Mono" font-size="13.5" font-weight="600" fill="#0d8f81">Go trust-kernel — nanogo (Isthmus)</text>
+          <text x="86" y="302" font-family="IBM Plex Sans" font-size="12.5" fill="#0d8f81" opacity=".85">guard() · mount security · egress verification · liveness decisions</text>
+          <text x="86" y="324" font-family="IBM Plex Sans" font-size="11.5" fill="#0d8f81" opacity=".65" font-style="italic">runs as its own process — separately tested, separately reasoned about</text>
+
+          <line x1="370" y1="348" x2="370" y2="382" stroke="#14b8a6" stroke-width="2" marker-end="url(#arrowAccent)"/>
+          <text x="392" y="370" font-family="IBM Plex Mono" font-size="11" fill="#0d8f81">mediates — enforced in Go, not by convention</text>
+
+          <!-- Layer 4: privileged capabilities -->
+          <rect x="60" y="382" width="620" height="92" rx="14" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <text x="86" y="416" font-family="IBM Plex Mono" font-size="13" font-weight="600" fill="currentColor">Privileged host capabilities</text>
+          <text x="86" y="440" font-family="IBM Plex Sans" font-size="12.5" fill="currentColor" opacity=".68">container runtime · mount operations · network controls · credential-sensitive actions</text>
+
+          <line x1="370" y1="474" x2="370" y2="508" stroke="currentColor" stroke-width="1.6" marker-end="url(#arrow)"/>
+          <text x="392" y="496" font-family="IBM Plex Mono" font-size="11" fill="currentColor" opacity=".68">spawns / controls</text>
+
+          <!-- Layer 5: agent -->
+          <rect x="60" y="508" width="620" height="78" rx="14" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".8"/>
+          <text x="86" y="540" font-family="IBM Plex Mono" font-size="13" font-weight="600" fill="currentColor" opacity=".85">Agent / container</text>
+          <text x="86" y="562" font-family="IBM Plex Sans" font-size="12.5" fill="currentColor" opacity=".6">NanoClaw's existing container runtime and philosophy — unchanged</text>
+
+          <!-- blocked direct path -->
+          <path d="M 700 80 C 800 80, 800 428, 700 428" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="3 5" opacity=".55"/>
+          <line x1="695" y1="80" x2="705" y2="80" stroke="currentColor" stroke-width="1.3" opacity=".55"/>
+          <line x1="695" y1="428" x2="705" y2="428" stroke="currentColor" stroke-width="1.3" opacity=".55"/>
+          <circle cx="792" cy="254" r="10" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".6"/>
+          <line x1="786" y1="248" x2="798" y2="260" stroke="currentColor" stroke-width="1.4" opacity=".6"/>
+          <line x1="798" y1="248" x2="786" y2="260" stroke="currentColor" stroke-width="1.4" opacity=".6"/>
+          <text x="810" y="240" font-family="IBM Plex Mono" font-size="10.5" fill="currentColor" opacity=".62">no direct</text>
+          <text x="810" y="253" font-family="IBM Plex Mono" font-size="10.5" fill="currentColor" opacity=".62">path exists</text>
+        </svg>
+        <figcaption>Every privileged operation crosses the Go kernel — there is no direct route from the TypeScript host to container, filesystem, or network capabilities that skips it.</figcaption>
+      </figure>
+
+      <p class="arch-note">A compromised or buggy TypeScript caller can't bypass this by asking nicely — the validators run inside a separate Go process regardless of what the caller asserts. Everything above the boundary — the entire NanoClaw ecosystem you'd install skills for — is untouched and keeps tracking upstream normally.</p>
+    </div>
+  </section>
+
+  <section id="hardening">
+    <div class="wrap">
+      <div class="sechead">
+        <p class="eyebrow">Hardening</p>
+        <h2>What building and operating this kernel actually surfaced.</h2>
+        <p>Not a feature list — a record of what real, adversarial scrutiny of this codebase turned up, and what was built in response.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <span class="tag">Kernel</span>
+          <h3>No upstream equivalent</h3>
+          <p>Guard decisions, mount security, egress verification, and a handful of liveness decisions run inside a separately-tested Go binary the host reaches over a local Unix socket — not trusted to the TypeScript process itself.</p>
+        </div>
+        <div class="card">
+          <span class="tag">Egress lockdown</span>
+          <h3>Closing a known SSRF path</h3>
+          <p>Blocks outbound access to cloud-metadata and link-local ranges. Getting it enforced correctly took several passes: a wiring gap that silently dropped it was found and closed, and the kernel now refuses to start if it can't actually enforce the block.</p>
+          <span class="refs">ADR-024 · ADR-025 · ADR-026 · ADR-028</span>
+        </div>
+        <div class="card">
+          <span class="tag">Turn routing</span>
+          <h3>Built independently, not ported</h3>
+          <p>Upstream fixes stale multi-turn reply routing with a turn-queue rewrite. Isthmus solves the same bug with a narrower, independently-designed mechanism — no shared data structures or timing changes.</p>
+        </div>
+        <div class="card">
+          <span class="tag">Test harness</span>
+          <h3>60+ behavior contracts</h3>
+          <p>A differential-fixture suite pins real TypeScript guard/routing/delivery behavior byte-for-byte before anything is ported — so every Go decision function is checked against NanoClaw's actual behavior, not a guessed spec. It's already found and fixed two real bugs.</p>
+        </div>
+        <div class="card">
+          <span class="tag">CI</span>
+          <h3>Sized for a trust boundary</h3>
+          <p>18 distinct jobs, several required. Five run the kernel against a real Docker daemon. Independent supply-chain scanning on both JS runtimes, Go vulnerability checks, static analysis, coverage and performance floors, coverage-guided fuzzing.</p>
+        </div>
+        <div class="card">
+          <span class="tag">Operator tooling</span>
+          <h3>Tools NanoClaw doesn't ship</h3>
+          <p><span class="mono">status</span>, <span class="mono">doctor</span> (seven independent checks, concrete remediation), <span class="mono">trace</span> (content-free request tracing), and <span class="mono">security-check</span> — 60+ test cases across these alone.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="whofor">
+    <div class="wrap">
+      <div class="sechead">
+        <p class="eyebrow">Who this is for</p>
+        <h2>A genuine, narrow improvement — not a blanket upgrade.</h2>
+        <p>Its value scales with what your installation is actually exposed to.</p>
+      </div>
+      <div class="whofor">
+        <div class="higher">
+          <h3>Stronger candidate if…</h3>
+          <ul>
+            <li>Real credentials or production/financial-system access are reachable from an agent's container or mounts</li>
+            <li>Skills or MCP tools have outbound network access alongside sensitive local data</li>
+            <li>More than one agent or messaging identity shares a host</li>
+            <li>A 24/7 assistant ingests untrusted inbound content — DMs, email, scraped pages</li>
+          </ul>
+        </div>
+        <div class="lower">
+          <h3>Lower need if…</h3>
+          <ul>
+            <li>Low-stakes personal use — a reminders bot, a weather query agent</li>
+            <li>No credentials or production access reachable from the agent</li>
+            <li>Inbound messages only from people you already trust</li>
+            <li>NanoClaw's existing container isolation already matches your real risk</li>
+          </ul>
+        </div>
+      </div>
+      <p class="whofor-close">The risk this addresses is real, with documented precedent — CVE-2026-27002-class mount bypasses, real supply-chain compromises — and it scales with what's actually reachable from your agents.</p>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="wrap">
+      <div class="sechead">
+        <p class="eyebrow">Try it</p>
+        <h2>Check your exposure before you install anything.</h2>
+      </div>
+      <div class="start-grid">
+        <div class="startcard">
+          <span class="num">01</span>
+          <h3>Scan your current install</h3>
+          <p>Free, read-only, no install required. Works against plain NanoClaw too.</p>
+          <code>npx isthmus-scan</code>
+        </div>
+        <div class="startcard">
+          <span class="num">02</span>
+          <h3>Install the kernel</h3>
+          <p>Get <span class="mono">nanogo</span> running and start the host.</p>
+          <code>See docs/quickstart.md</code>
+        </div>
+        <div class="startcard">
+          <span class="num">03</span>
+          <h3>Read before you install</h3>
+          <p>The rollback runbook — what to expect, how to go back.</p>
+          <code>docs/rollback-runbook.md</code>
+        </div>
+      </div>
+
+      <div class="cta-final">
+        <div>
+          <h3>macOS and Linux, MIT-licensed.</h3>
+          <p>Windows users run under WSL2 — same as plain NanoClaw requires.</p>
+        </div>
+        <a class="btn btn-primary" href="https://github.com/prathish-ks/isthmus" target="_blank" rel="noopener">View the repository ↗</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="footgrid">
+      <div class="footbrand">
+        <svg viewBox="0 0 200 140" role="img" aria-label="Isthmus mark"><rect x="8" y="15" width="70" height="110" rx="35" fill="currentColor"/><rect x="122" y="15" width="70" height="110" rx="35" fill="currentColor"/><rect x="60" y="55" width="80" height="30" rx="6" fill="currentColor"/><rect x="90" y="60" width="20" height="20" rx="4" fill="#14b8a6"/></svg>
+        <span>Isthmus</span>
+      </div>
+      <div class="footlinks">
+        <a href="https://github.com/prathish-ks/isthmus" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/prathish-ks/isthmus/blob/main/README.md" target="_blank" rel="noopener">README</a>
+        <a href="https://github.com/prathish-ks/isthmus/blob/main/SECURITY.md" target="_blank" rel="noopener">Security</a>
+        <a href="https://github.com/nanocoai/nanoclaw" target="_blank" rel="noopener">NanoClaw ↗</a>
+      </div>
+    </div>
+    <p class="footnote">Independent, unofficial companion project. Isthmus is not affiliated with, endorsed by, or an official artifact of NanoClaw or its maintainers. It is a derivative work, built and published under its own name per NanoClaw's MIT license. Branding (name, logo) is not shared with NanoClaw's own branding.</p>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var root = document.documentElement;
+    var btn = document.getElementById('themeToggle');
+    var stored = null;
+    try { stored = localStorage.getItem('isthmus-theme'); } catch(e){}
+    if (stored === 'light' || stored === 'dark') root.setAttribute('data-theme', stored);
+    btn.addEventListener('click', function(){
+      var current = root.getAttribute('data-theme');
+      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var effectiveDark = current ? current === 'dark' : prefersDark;
+      var next = effectiveDark ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('isthmus-theme', next); } catch(e){}
+    });
+  })();
+</script>
+</body>
+</html>
