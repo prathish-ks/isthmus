@@ -46,7 +46,7 @@ jobs:
             goarch: arm64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go-host/go.mod
@@ -78,7 +78,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # One SBOM for the module as built, not per-platform-binary — the Go
       # dependency graph a release actually ships is the same across every
       # GOOS/GOARCH combination (CGO_ENABLED=0, no per-platform deps), so a
