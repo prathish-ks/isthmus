@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'bun:test';
 
+// Registers Claude's runtime contract — createProvider('claude') throws
+// without it (Workstream C15: the provider now requires its resolved
+// configuration, which only exists once a contract is attached).
+import '../provider-contracts/claude.js';
 import { createProvider, type ProviderName } from './factory.js';
 import { ClaudeProvider } from './claude.js';
 import { MockProvider } from './mock.js';
@@ -15,5 +19,16 @@ describe('createProvider', () => {
 
   it('throws for unknown name', () => {
     expect(() => createProvider('bogus' as ProviderName)).toThrow(/Unknown provider/);
+  });
+
+  it('sets provider.contract for a contract-declaring provider', () => {
+    const provider = createProvider('claude');
+    expect(provider.contract).toBeDefined();
+    expect(provider.contract?.textDelivery).toBe('mid-turn-complete');
+    expect(provider.contract?.commands.formatting).toBe('native');
+  });
+
+  it('leaves provider.contract unset for a contractless provider', () => {
+    expect(createProvider('mock').contract).toBeUndefined();
   });
 });

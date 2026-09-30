@@ -7,6 +7,7 @@ import type { MessageInRow } from './db/messages-in.js';
 import { MockProvider } from './providers/mock.js';
 import { runPollLoop } from './poll-loop.js';
 import { isUploadTraceCommand } from './upload-trace.js';
+import { waitFor } from './test-helpers.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -75,10 +76,3 @@ async function runPollLoopWithTimeout(provider: MockProvider, signal: AbortSigna
   ]);
 }
 
-async function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
-  const start = Date.now();
-  while (!condition()) {
-    if (Date.now() - start > timeoutMs) throw new Error('waitFor timeout');
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}

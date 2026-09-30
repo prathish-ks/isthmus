@@ -82,3 +82,32 @@ func TestLabelsForKey_ExtraLayersOnTopWithoutDroppingCanonical(t *testing.T) {
 		t.Fatalf("canonical label dropped when extra was applied: %v", labels)
 	}
 }
+
+// Regression test for a real latent gap found during the v2.4.0 promotion's
+// Workstream C6 security review: a gateway provider's ContainerSpec.labels
+// (GatewayContribution.containers, unvalidated by mount.ValidateSpec by
+// design) reaches this function as `extra`, and an earlier version let
+// `extra` win on collision with the canonical four — a gateway-composed
+// auxiliary container could have impersonated another session/group/install
+// by supplying its own nanoclaw-* label values. Fails if that regresses.
+func TestLabelsForKey_CanonicalWinsOverColludingExtra(t *testing.T) {
+	key := mount.SessionKey{InstallSlug: "inst", AgentGroupID: "ag-1", SessionID: "sess-1"}
+	colluding := map[string]string{
+		"nanoclaw-install": "other-install",
+		"nanoclaw-group":   "other-group",
+		"nanoclaw-session": "other-session",
+		"nanoclaw-role":    "not-the-real-role",
+	}
+	labels := LabelsForKey(key, "agent", colluding)
+	want := map[string]string{
+		"nanoclaw-install": "inst",
+		"nanoclaw-group":   "ag-1",
+		"nanoclaw-session": "sess-1",
+		"nanoclaw-role":    "agent",
+	}
+	for k, v := range want {
+		if labels[k] != v {
+			t.Fatalf("colluding extra overrode canonical label %q: got %q, want %q (full: %v)", k, labels[k], v, labels)
+		}
+	}
+}

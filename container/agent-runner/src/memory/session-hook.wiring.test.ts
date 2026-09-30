@@ -11,8 +11,13 @@ describe('Claude memory hook wiring', () => {
   );
 
   it('passes the shared hook to Claude without a second SDK hook path', () => {
-    expect(runnerSource).toMatch(/provider\.registerMemorySessionHook\(MEMORY_SESSION_HOOK\)/);
-    expect(providerSource).toMatch(/registerMemorySessionHook\(hook: MemorySessionHookRegistration\)/);
+    // Workstream C15: index.ts no longer calls provider.registerMemorySessionHook
+    // directly — it goes through the module-level registerProviderMemorySessionHook
+    // (provider-contracts/realize.ts), which resolves the contract's memory
+    // capability and calls the provider's own method internally. Still exactly
+    // one path from the shared hook to the provider, just one level removed.
+    expect(runnerSource).toMatch(/registerProviderMemorySessionHook\(providerName, provider, MEMORY_SESSION_HOOK\)/);
+    expect(providerSource).toMatch(/registerMemorySessionHook\(hook: MemorySessionHookRegistration, memory\?: unknown\)/);
     expect(providerSource).not.toContain('memorySessionStartHook');
     expect(providerSource).not.toContain('providesMemorySessionHook');
     expect(groupInitSource).not.toContain('MEMORY_SESSION_START_MATCHER');

@@ -297,9 +297,27 @@ async function main(): Promise<void> {
   // throws without a real vault, which every CI runner lacks. This proof is
   // about network topology, not credential injection — a no-op gateway
   // provider doesn't change what network the container lands on.
+  //
+  // `egressGateway` IS real, not a no-op: `kernel-supervisor/index.ts`
+  // refuses to start lockdown at all when the configured provider declares
+  // none (ADR-033's fail-closed rule), so this stub still has to answer
+  // "where is the gateway" — it just never has to prove who's allowed
+  // through it. Points at the same stand-in container the wrapper script
+  // creates (`ONECLI_GATEWAY_CONTAINER`, default "onecli"), mirroring the
+  // real onecli provider's own `onecliEgressGateway()` exactly.
   registerGatewayProvider('none', () => ({
     kind: 'none',
-    contribute: async () => ({ env: {}, mounts: [] }),
+    agentSkills: [],
+    sessions: {
+      ensure: async () => ({
+        contribution: { env: {}, mounts: [], networkAccess: { endpoint: '', target: { kind: 'host' } } },
+      }),
+    },
+    approvals: { subscribe: async () => {} },
+    egressGateway: () => ({
+      endpoint: 'host.docker.internal',
+      target: { kind: 'runtime', identity: ONECLI_GATEWAY_CONTAINER },
+    }),
   }));
   process.env.NANOCLAW_GATEWAY_PROVIDER = process.env.NANOCLAW_GATEWAY_PROVIDER || 'none';
 

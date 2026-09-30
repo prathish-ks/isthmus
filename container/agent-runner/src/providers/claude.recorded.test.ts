@@ -33,6 +33,11 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
 
 const { ClaudeProvider } = await import('./claude.js');
 const { MEMORY_SESSION_HOOK } = await import('../memory/session-hook.js');
+// Workstream C15: ClaudeProvider now requires the contract's resolved
+// configuration as its second constructor argument.
+const { claudeRuntimeContract } = await import('../provider-contracts/claude.js');
+const { resolveRuntimeConfiguration } = await import('../provider-contracts/realize.js');
+const TEST_CONFIGURATION = resolveRuntimeConfiguration(claudeRuntimeContract, {});
 
 type Fixture = { gist: string; messages: unknown[] };
 const FIXTURES = recordings as Record<string, Fixture>;
@@ -80,7 +85,7 @@ function load(id: string): void {
 
 async function providerEvents(id: string): Promise<Array<{ type: string; text?: string | null }>> {
   load(id);
-  const provider = new ClaudeProvider({});
+  const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
   provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
   const q = provider.query({ prompt: 'hi', cwd: tmp });
   const events: Array<{ type: string; text?: string | null }> = [];
@@ -90,7 +95,7 @@ async function providerEvents(id: string): Promise<Array<{ type: string; text?: 
 
 async function runThroughPollLoop(id: string): Promise<{ delivered: string[]; pushes: string[] }> {
   load(id);
-  const provider = new ClaudeProvider({});
+  const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
   provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
   const query = provider.query({ prompt: 'hi', cwd: tmp });
   const pushes: string[] = [];

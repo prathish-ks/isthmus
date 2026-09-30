@@ -8,7 +8,20 @@
  */
 import Database from 'better-sqlite3';
 import fs from 'fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// `sweep()`'s own reason-sweep hook dynamically imports `modules/approvals/
+// index.js`, which pulls in the gateway-provider registry and, since the
+// v2.4.0 promotion's Workstream C8, a real gateway provider that loads
+// `@grpc/grpc-js`/`@grpc/proto-loader` — a real, one-time module-load cost.
+// Paid here, before any test's own `vi.waitFor` window starts (see
+// host-sweep-incarnation-gate.test.ts's identical fix for the full
+// explanation) — otherwise the first sweep() call absorbs it, its own
+// reschedule lands late, and the delayed callback shows up as a spurious
+// extra `sweepCallbacks` push in whichever test runs next.
+beforeAll(async () => {
+  await import('./modules/approvals/index.js');
+});
 
 vi.mock('./config.js', async () => {
   const actual = await vi.importActual('./config.js');

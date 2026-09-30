@@ -395,30 +395,40 @@ func TestWake_AgentGroupImpersonation_NotIndependentlyVerified_DocumentedLimit(t
 
 // ---------- 5. malformed spec / role smuggling ----------
 
-// TestWake_AuxiliaryContainerRole_Denied attempts to smuggle a second,
-// non-agent-role container into the spec. mount.ValidateSpec does NOT reject
-// this shape by itself — its agentCount check only requires exactly one
-// Role=="agent" container to be present, and imposes no rule at all against
-// an EXTRA, differently-roled sibling. The actual refusal is findAgentContainer
-// (exec.go), which walks every container and rejects any Role other than
-// "agent" outright, so this spec never even reaches the point of picking
-// which container to realize.
+// TestWake_AuxiliaryContainerRole_WithoutNetworkAccessTarget_Denied attempts
+// to smuggle a second, non-agent-role container into the spec, with no
+// matching networkAccess target naming it. mount.ValidateSpec does NOT
+// reject this shape by itself — its agentCount check only requires exactly
+// one Role=="agent" container to be present, and imposes no rule at all
+// against an EXTRA, differently-roled sibling. Before the v2.4.0 promotion's
+// Workstream A3, the refusal was findAgentContainer (exec.go), which
+// rejected ANY non-agent role outright, unconditionally. That blanket
+// refusal is gone — auxiliary containers are a real, supported capability
+// now (see internal/kernel/exec_test.go's
+// TestDockerExecutor_Wake_AuxiliaryContainer_CreatesNetworkAndBothContainers
+// for the accepted case) — but a spec that carries an auxiliary container
+// without correctly specifying spec.NetworkAccess.Target still fails, now
+// via splitContainers/validateNetworkAccessTarget's specific rule instead.
 //
 // This is why this test deliberately uses the REAL dockerExecutor
 // (newDockerExecutor), not this file's other tests' fakeExecutor: fakeExecutor
-// ignores container roles entirely and would report a false ALLOW here,
-// since nothing upstream of exec.go actually inspects them.
-// findAgentContainer runs and returns its error before dockerExecutor.Wake
-// ever calls d.runner (see exec.go: the error return happens before the
-// first `docker create` argv is even built), so this proves the real refusal
-// path with no live Docker daemon required. The denial is attributed to
-// exec.go's own error code (ErrExecFailed, since findAgentContainer's error
-// surfaces through Wake) rather than assumed identical to a mount.ValidateSpec
-// denial (ErrDenied/ErrSpecInvalid).
-func TestWake_AuxiliaryContainerRole_Denied(t *testing.T) {
+// ignores container roles/networkAccess entirely and would report a false
+// ALLOW here, since nothing upstream of exec.go actually inspects them.
+// validateNetworkAccessTarget runs and returns its error before
+// dockerExecutor.Wake ever calls d.runner (see exec.go: the error return
+// happens before the first `docker create` argv is even built), so this
+// proves the real refusal path with no live Docker daemon required. The
+// denial is attributed to exec.go's own error code (ErrExecFailed, since
+// validateNetworkAccessTarget's error surfaces through Wake) rather than
+// assumed identical to a mount.ValidateSpec denial (ErrDenied/ErrSpecInvalid).
+func TestWake_AuxiliaryContainerRole_WithoutNetworkAccessTarget_Denied(t *testing.T) {
 	k := New(testPolicy(), withExecutor(newDockerExecutor("")))
 	spec := validSession()
 	spec.Containers = append(spec.Containers, mount.Container{Role: "sidecar", Env: map[string]string{}})
+	// spec.NetworkAccess left at its zero value — Target.Kind == "", not
+	// "session-container" — so validateNetworkAccessTarget's first rule
+	// fires, the same as before this promotion's change, just for a
+	// specific, named reason now rather than a blanket one.
 
 	resp := dispatch(t, k, OpCapabilityRequest, CapabilityRequestPayload{
 		Capability: CapabilityContainerWake,
@@ -426,10 +436,10 @@ func TestWake_AuxiliaryContainerRole_Denied(t *testing.T) {
 	})
 
 	if resp.OK {
-		t.Fatalf("expected a spec naming a non-agent container role to be denied, got %+v", resp)
+		t.Fatalf("expected a spec naming an auxiliary container role with no matching networkAccess target to be denied, got %+v", resp)
 	}
 	if resp.Error.Code != ErrExecFailed {
-		t.Fatalf("expected the denial to surface as ErrExecFailed (findAgentContainer's error, via dockerExecutor.Wake), got code %q: %s", resp.Error.Code, resp.Error.Detail)
+		t.Fatalf("expected the denial to surface as ErrExecFailed (validateNetworkAccessTarget's error, via dockerExecutor.Wake), got code %q: %s", resp.Error.Code, resp.Error.Detail)
 	}
 }
 

@@ -20,7 +20,14 @@ import { randomUUID } from 'crypto';
 import net from 'net';
 
 import { KERNEL_SOCKET_PATH } from '../config.js';
-import type { ContainerSpec, MountSpec, SessionKey, SessionResources, SessionSpec } from '../drivers/types.js';
+import type {
+  ContainerSpec,
+  MountSpec,
+  NetworkAccessIntent,
+  SessionKey,
+  SessionResources,
+  SessionSpec,
+} from '../drivers/types.js';
 
 import {
   CAPABILITY_CONTAINER_BUILD_IMAGE,
@@ -37,6 +44,7 @@ import {
   type WireContainer,
   type WireMountSpec,
   type WireResources,
+  type WireNetworkAccessIntent,
   type WireRunAs,
   type WireSession,
 } from './protocol.js';
@@ -244,6 +252,18 @@ function toWireSession(spec: SessionSpec): WireSession {
     containers: spec.containers.map(toWireContainer),
     runtimeTier: spec.runtimeTier,
     stopGraceSeconds: spec.stopGraceSeconds,
+    ...(spec.networkAccess ? { networkAccess: toWireNetworkAccessIntent(spec.networkAccess) } : {}),
+  };
+}
+
+function toWireNetworkAccessIntent(intent: NetworkAccessIntent): WireNetworkAccessIntent {
+  return {
+    endpoint: intent.endpoint,
+    target: {
+      kind: intent.target.kind,
+      identity: intent.target.identity,
+      role: intent.target.role,
+    },
   };
 }
 

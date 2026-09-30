@@ -7,11 +7,12 @@
 import { backfillContainerConfigs } from './backfill-container-configs.js';
 import { CENTRAL_DB_PATH } from './config.js';
 import { enforceStartupBackoff, resetCircuitBreaker } from './circuit-breaker.js';
-import { adoptRunningSessions } from './container-runner.js';
+import { adoptRunningSessions, releaseAllGatewaySessions } from './container-runner.js';
 import { closeDb, initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { getSessionDriver } from './drivers/index.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
+import { startHostInstanceLease, stopHostInstanceLease } from './host-instance.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { startHostModules, stopHostModules } from './host-lifecycle.js';
 import { routeInbound } from './router.js';
@@ -86,6 +87,11 @@ async function main(): Promise<void> {
   // Idempotent — skips groups that already have a config row.
   if (db.dialect === 'sqlite') await backfillContainerConfigs();
   else log.info('Skipping local container.json backfill for non-local central DB');
+
+  // 1c. Durable host-instance lease (v2.4.0 promotion, Workstream C9): must
+  // start before adoption/spawn, since claimSessionRun's fencing reads
+  // getHostInstanceId().
+  await startHostInstanceLease();
 
   // 2. Session runtime: prove it is reachable, then reconcile what survived a
   // restart. Adoption replaces the old reap-everything cleanup — a session that
@@ -183,7 +189,15 @@ async function shutdown(signal: string): Promise<void> {
   await stopHostModules();
   stopDeliveryPolls();
   stopHostSweep();
+  // Detaches this process's observation of every active session's gateway
+  // lease (kind: 'host-detached') without killing any container — they
+  // survive for adoptRunningSessions to re-admit in the successor process.
+  // See releaseAllGatewaySessions's own doc comment for the one known,
+  // named gap (Iron Proxy doesn't yet distinguish this from a real
+  // session end).
+  await releaseAllGatewaySessions('host-shutdown');
   await stopCliServer();
+  await stopHostInstanceLease();
   try {
     await teardownChannelAdapters();
   } finally {

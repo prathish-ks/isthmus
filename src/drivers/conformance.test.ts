@@ -87,8 +87,9 @@ function dockerHarness(): Harness {
     kernelClient,
     async realize(spec) {
       await driver.prepare(spec);
-      // The Docker realization refuses specs carrying auxiliary containers
-      // (capabilities().auxiliaryContainers is false), so the one wake per
+      // The Docker realization sends the whole spec to the kernel in one
+      // `wake` call (`internal/kernel`'s `Wake` owns creating every
+      // container, agent and auxiliary alike — ADR-016), so the one wake per
       // prepare IS the whole session; read back what the driver asked the
       // kernel to realize.
       // What the driver handed the kernel client (its own internal
@@ -257,10 +258,13 @@ describe('conformance: mount and env policy', () => {
 });
 
 describe('conformance: the multi-container contract (validateSpec is the shared layer)', () => {
-  // Multi-container specs are contract-legal; this tree's Docker realization
-  // refuses to REALIZE them (the last case), so the validation rules over
-  // auxiliary containers are asserted at the shared layer every driver runs
-  // before allocating anything.
+  // Multi-container specs are contract-legal; a driver whose capabilities
+  // declare it cannot realize them refuses whole rather than dropping a
+  // subset (the last case below) — but this tree's Docker realization now
+  // delegates realization to the kernel (v2.4.0 promotion, Workstream B) and
+  // DOES realize them, so the validation rules over auxiliary containers
+  // still matter at the shared layer every driver runs before allocating
+  // anything.
   it('accepts the overlay-composed auxiliary container, its identity material, and its trust anchor', () => {
     // The CA from outside the material root rides as an allowlisted extra:
     // same file, correct class — it verifies an upstream's server certificate,
@@ -767,8 +771,11 @@ describe('conformance: capabilities are honest', () => {
     expect(capabilities.admissionEnforced).toBe(false);
     expect(capabilities.networkPolicy).toBe('topology');
     expect(capabilities.sharedNetworkNamespace).toBe(false);
-    // Realizes the agent container only — and refuses, never drops, the rest.
-    expect(capabilities.auxiliaryContainers).toBe(false);
+    // v2.4.0 promotion, Workstream B: `internal/kernel`'s `Wake` now realizes
+    // every container in a spec, agent and auxiliary alike (ADR-016), so
+    // this driver's own capability declaration follows what it actually
+    // realizes rather than staying pinned to the pre-EC-02 TS-side executor.
+    expect(capabilities.auxiliaryContainers).toBe(true);
     // The session daemon doubles as the build daemon: rebuild-in-place works.
     expect(capabilities.imageBuild).toBe(true);
   });

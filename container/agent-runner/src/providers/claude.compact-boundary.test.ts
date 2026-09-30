@@ -21,6 +21,11 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
 
 const { ClaudeProvider } = await import('./claude.js');
 const { MEMORY_SESSION_HOOK } = await import('../memory/session-hook.js');
+// Workstream C15: ClaudeProvider now requires the contract's resolved
+// configuration as its second constructor argument.
+const { claudeRuntimeContract } = await import('../provider-contracts/claude.js');
+const { resolveRuntimeConfiguration } = await import('../provider-contracts/realize.js');
+const TEST_CONFIGURATION = resolveRuntimeConfiguration(claudeRuntimeContract, {});
 
 let tmp: string;
 let prevHome: string | undefined;
@@ -46,7 +51,7 @@ describe('compact_boundary translation', () => {
       { type: 'result', subtype: 'success', result: '<message to="user">hello</message>' },
     );
 
-    const provider = new ClaudeProvider({});
+    const provider = new ClaudeProvider({}, TEST_CONFIGURATION);
     provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
     const q = provider.query({ prompt: 'hi', cwd: tmp });
 
