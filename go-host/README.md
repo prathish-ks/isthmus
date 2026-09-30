@@ -28,24 +28,25 @@ security control needs low-friction UX), and
 [`docs/host-decomposition.md`](../docs/host-decomposition.md) for the full
 inventory of what stays TypeScript versus what this repo ports.
 
-Building and operating this kernel surfaced real security work beyond
-the initial port. An audit trace of the kernel-mediated wake path found
-that egress-lockdown — the cloud-metadata/link-local SSRF block — had
-been silently disabled by an earlier wiring change
-([ADR-024](docs/ADR-024-egress-lockdown-network-wiring-gap.md)); the
-response didn't stop at patching that bug: the kernel now refuses to
-start at all if it cannot actually enforce egress lockdown
+This kernel also carries egress lockdown, a feature upstream NanoClaw
+doesn't have: agent containers are blocked from reaching the
+cloud-metadata and link-local address ranges, closing a well-known
+credential-theft path. Getting it enforced correctly took several
+passes: a wiring gap that silently dropped the arguments enforcing it
+was found and closed
+([ADR-024](docs/ADR-024-egress-lockdown-network-wiring-gap.md)), the
+kernel now refuses to start if it can't actually enforce the block
 ([ADR-025](docs/ADR-025-kernel-side-egress-lockdown-enforcement.md)), a
-required CI job re-proves that exact enforcement against a live Docker
-daemon on every pull request
+required CI job re-proves that enforcement against a live Docker daemon
+on every pull request
 ([ADR-026](docs/ADR-026-egress-lockdown-live-ci-gate.md)), and a
-general, machine-checked wiring-and-boundary registry now exists to
-catch this whole class of bug elsewhere in the codebase
+general wiring-and-boundary registry now checks the rest of the codebase
+for the same class of gap
 ([ADR-028](docs/ADR-028-wiring-boundary-registry.md)). See the
-[top-level README](../README.md#what-isthmus-adds) for the rest —
-CI-gate strength, fuzzing, the differential-fixture harness, and other
-hardening work, some of it deliberately out of this directory's own
-Go-kernel scope.
+[top-level README](../README.md#what-isthmus-adds) for the rest — the
+test-suite uplift, CI-gate strength, the differential-fixture harness,
+and other hardening work, some of it deliberately out of this
+directory's own Go-kernel scope.
 
 ## Status
 
