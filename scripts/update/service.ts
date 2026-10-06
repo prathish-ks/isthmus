@@ -152,10 +152,35 @@ export function detectService(projectRoot: string, env: ServiceEnvironment): Ser
 export async function stopService(handle: ServiceHandle, env: ServiceEnvironment): Promise<void> {
   if (!handle.active) return;
   if (handle.mode === 'launchd') {
+    const target = `gui/${env.uid}/${handle.name}`;
+    // Every PID the job ever reports while we poll — KeepAlive can respawn
+    // the host under a new PID between checks, so track all of them, not
+    // just the first.
+    const pids = new Set<number>();
+    const stillLoaded = (): boolean => {
+      const probe = env.runner.tryRun('launchctl', ['print', target]);
+      const pid = Number(/^\s*pid = (\d+)/m.exec(probe.stdout)?.[1]);
+      if (pid) pids.add(pid);
+      return probe.ok;
+    };
+    stillLoaded();
     try {
-      env.runner.run('launchctl', ['bootout', `gui/${env.uid}/${handle.name}`]);
+      env.runner.run('launchctl', ['bootout', target]);
     } catch (err) {
       if (!/No such process/i.test(err instanceof Error ? err.message : String(err))) throw err;
+    }
+    // bootout returns while the host is still running its own shutdown
+    // handlers — without waiting here, the next snapshot/bootstrap can race
+    // that shutdown and fail with "5: Input/output error", rolling the
+    // whole update back. Poll the same way the nohup branch below already
+    // does (60 x 500ms).
+    const stillStopping = () => stillLoaded() || [...pids].some(processExists);
+    for (let i = 0; i < 60 && stillStopping(); i += 1) await env.sleep(500);
+    if (stillStopping()) {
+      throw new Error(
+        `NanoClaw service ${handle.name} did not stop (PID ${[...pids].join(', ') || 'unknown'}). ` +
+          `Once it has exited, start it again with: launchctl bootstrap gui/${env.uid} ${handle.definition}`,
+      );
     }
   } else if (handle.mode === 'systemd-user') {
     env.runner.run('systemctl', ['--user', 'stop', handle.name!]);

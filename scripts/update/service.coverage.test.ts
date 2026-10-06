@@ -244,9 +244,22 @@ describe('stopService branch coverage', () => {
   });
 
   it('boots out an active launchd job', async () => {
-    const { env, calls } = makeEnv('darwin');
+    // Not loaded before or after bootout: stopService's own poll (print
+    // before bootout to seed any pid, bootout, print again to confirm the
+    // job actually left the domain) sees no job at any point and returns
+    // without sleeping.
+    const { env, calls } = makeEnv('darwin', {
+      'launchctl print gui/1000/com.nanoclaw-v2-x': { ok: false },
+    });
     await stopService({ mode: 'launchd', active: true, name: 'com.nanoclaw-v2-x' }, env);
-    expect(calls).toEqual(['launchctl bootout gui/1000/com.nanoclaw-v2-x']);
+    // print (seed, before bootout) -> bootout -> print (loop condition) ->
+    // print (post-loop confirmation) -- three checks around one bootout.
+    expect(calls).toEqual([
+      'launchctl print gui/1000/com.nanoclaw-v2-x',
+      'launchctl bootout gui/1000/com.nanoclaw-v2-x',
+      'launchctl print gui/1000/com.nanoclaw-v2-x',
+      'launchctl print gui/1000/com.nanoclaw-v2-x',
+    ]);
   });
 
   it('does nothing for a nohup handle with no pid recorded', async () => {

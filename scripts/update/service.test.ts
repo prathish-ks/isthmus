@@ -16,6 +16,7 @@ import {
   verifyServiceHealth,
   type CommandRunner,
   type ServiceEnvironment,
+  type ServiceHandle,
 } from './service.js';
 
 const roots: string[] = [];
@@ -216,26 +217,59 @@ describe('stopService idempotency (already-stopped is success, per mode)', () =>
     sleep: async () => {},
   });
 
-  it('tolerates launchd bootout of a not-loaded job, in launchctl own words', async () => {
+  // launchctl as stopService sees it: `print` reports the job (with a pid)
+  // while it's still in the domain, for `loadedPolls` calls after bootout,
+  // then reports not-found.
+  function launchd(options: { loadedPolls: number; pid?: number; bootoutError?: string }) {
+    let remaining: number | undefined;
+    let sleeps = 0;
     const runner: CommandRunner = {
-      run() {
-        throw new Error('Command failed: launchctl bootout gui/501/x\nBoot-out failed: 3: No such process');
+      run(command, args) {
+        if (args[0] === 'bootout') {
+          remaining = options.loadedPolls;
+          if (options.bootoutError) throw new Error(`Boot-out failed: ${options.bootoutError}`);
+          return '';
+        }
+        return '';
       },
-      tryRun: () => ({ ok: true, stdout: '' }),
+      tryRun(command, args) {
+        if (args[0] === 'print') {
+          if (remaining === undefined || remaining-- > 0) {
+            return { ok: true, stdout: `state = running\n\tpid = ${options.pid ?? 99999999}\n` };
+          }
+          return { ok: false, stdout: '' };
+        }
+        return { ok: true, stdout: '' };
+      },
     };
-    await expect(stopService({ mode: 'launchd', active: true, name: 'x' }, env(runner))).resolves.toBeUndefined();
+    const environment: ServiceEnvironment = { ...env(runner), sleep: async () => void (sleeps += 1) };
+    return { environment, sleeps: () => sleeps };
+  }
+  const handle: ServiceHandle = { mode: 'launchd', active: true, name: 'x', definition: '/Users/me/x.plist' };
+
+  it('waits after launchd bootout until the job has left the domain', async () => {
+    const fake = launchd({ loadedPolls: 3 });
+    await expect(stopService(handle, fake.environment)).resolves.toBeUndefined();
+    expect(fake.sleeps()).toBe(3);
+  });
+
+  it('throws when the launchd job is still loaded after the bounded wait', async () => {
+    const fake = launchd({ loadedPolls: Infinity, pid: 4242 });
+    await expect(stopService(handle, fake.environment)).rejects.toThrow(
+      /NanoClaw service x did not stop \(PID 4242\)\..*launchctl bootstrap gui\/501 \/Users\/me\/x\.plist/,
+    );
+    expect(fake.sleeps()).toBe(60);
+  });
+
+  it('tolerates launchd bootout of a not-loaded job, in launchctl own words', async () => {
+    const fake = launchd({ loadedPolls: 0, bootoutError: '3: No such process' });
+    await expect(stopService(handle, fake.environment)).resolves.toBeUndefined();
+    expect(fake.sleeps()).toBe(0);
   });
 
   it('still throws for any other launchd stop failure — the caller must abort before destroying anything', async () => {
-    const runner: CommandRunner = {
-      run() {
-        throw new Error('Boot-out failed: 5: Input/output error');
-      },
-      tryRun: () => ({ ok: true, stdout: '' }),
-    };
-    await expect(stopService({ mode: 'launchd', active: true, name: 'x' }, env(runner))).rejects.toThrow(
-      /Input\/output error/,
-    );
+    const fake = launchd({ loadedPolls: 0, bootoutError: '5: Input/output error' });
+    await expect(stopService(handle, fake.environment)).rejects.toThrow(/Input\/output error/);
   });
 
   it('tolerates ESRCH for a nohup pid that already exited', async () => {

@@ -356,7 +356,16 @@ describe('update-nanoclaw transaction end to end', () => {
         }
         return '';
       },
-      tryRun: () => ({ ok: true, stdout: '' }),
+      tryRun(command, args) {
+        // stopService polls `launchctl print` after bootout to wait for the
+        // job to actually leave the domain — without this reflecting
+        // `running`, the poll never sees the job go away and spins for the
+        // full 60 retries before stopService throws.
+        if (command === 'launchctl' && args[0] === 'print') {
+          return running ? { ok: true, stdout: 'state = running\n\tpid = 1\n' } : { ok: false, stdout: '' };
+        }
+        return { ok: true, stdout: '' };
+      },
     };
     runtime.detectService = () => ({ mode: 'launchd', active: true, name: 'nanoclaw-test' });
     runtime.stopService = (handle) =>
