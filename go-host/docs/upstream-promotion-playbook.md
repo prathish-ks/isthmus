@@ -128,10 +128,28 @@ path,status,source,destination,bucket,consumed_contract_row,security_review_stat
 `security_review_status` populated for Bucket B rows (`closed`, or a link
 to the Step 3 acceptance record); `reconciliation_decision` populated for
 Bucket C rows (`port-verbatim`/`port-with-modification`/
-`declined:<reason>`). A row with a required field blank for its bucket
-counts as unclassified for the promotion gate's "zero unclassified rows"
-requirement — a prose sweep claim is not sufficient evidence on its own
-that the sweep was actually complete.
+`declined:<reason>`/`declined-independently-fixed:<reason>`). The fourth
+value is distinct from a plain decline: it's for when upstream's own
+mechanism is declined but the underlying bug or gap it addresses is real
+and gets closed anyway, by different means — not a reconciliation gap,
+a deliberately different fix. **Worked example**: upstream v2.4.0's
+`poll-loop.ts` fixes stale multi-turn reply routing via a
+`queuedTurns`/`adoptTurn`/`pushRetry` rewrite bundled with an unrelated
+provider-contract migration; Isthmus's own `poll-loop.ts` was
+independently more mature than what that rewrite would have replaced
+(2,400+ lines of pinned test coverage, a concurrent-poller architecture
+upstream's diff doesn't have, a real file-naming collision with
+upstream's `db/session-routing.ts`/`db/session-state.ts`), so the
+rewrite itself was declined — but the same underlying bug it was meant
+to fix was real, and got closed with a narrower, independently-designed
+mechanism (`pendingTurns` + an `answering` flag) sharing no code or
+timing behavior with upstream's own fix. See `go-host/docs/
+ADR-035-v2.4.0-pin-promotion-closure.md`'s 2026-09-28 addendum for the
+full account, including a real timing bug an external review caught in
+the first version of the independent fix. A row with a required field
+blank for its bucket counts as unclassified for the promotion gate's
+"zero unclassified rows" requirement — a prose sweep claim is not
+sufficient evidence on its own that the sweep was actually complete.
 
 Do not scope the sweep to `src/` alone. **Lesson from the v2.4.0
 promotion**: the credential-provider restructuring (OneCLI moving from a
@@ -232,7 +250,7 @@ promotion needed them and a future promotion might assume otherwise:
   works — real container membership and isolation, not just that the
   generated request/argv looks right (this project's own repeated lesson
   about mocked vs. real coverage — see the wiring-boundary-registry work,
-  ADR-022 — applies here too). This coverage must be PASSED + REQUIRED per
+  ADR-028 — applies here too). This coverage must be PASSED + REQUIRED per
   the terminology above, not a report-only run; a report-only live-Docker
   job having executed does not mean the promotion would have been blocked
   if the new network-isolation or multi-container behavior actually
@@ -275,6 +293,17 @@ modification / decline and why) in Step 2's inventory, not separately.
   an optional skill is a separate decision each promotion can make
   independently; closing the CI gap for whatever the pin itself adds to
   the trust boundary is not optional.
+- **Register every new or touched Bucket A wiring path in the
+  wiring-and-boundary registry (ADR-028), not just give it one-off CI
+  coverage.** The v2.4.0 promotion's own egress-lockdown regression
+  (ADR-024 — a caller silently losing its last reference, found only by
+  a later, unrelated audit trace of the kernel-mediated wake path) is
+  exactly the failure class ADR-028's registry exists to catch
+  automatically on every future change, not just this one time it
+  happened to be noticed. One-off CI coverage proves the surface works
+  *today*; registering the wiring is what keeps a *future* promotion or
+  refactor from silently disconnecting it the same way without anyone
+  noticing until another audit gets lucky.
 - **Definition of done, not just a design decision**: a required-coverage
   task is not complete until `.github/workflows/ci.yml` has actually been
   edited — the job exists, its name is in the `ci` gate's `needs:` array,
@@ -340,6 +369,35 @@ than buried inside a large mixed diff or requiring a reviewer to go
 hunting across many prior PRs. The implementation work across Steps 1–7
 can span however many PRs it naturally needs; only this final step is
 constrained to its own PR.
+
+**A promotion can close with named, non-blocking follow-ups still open —
+but each one needs an explicit owner and a tracked path to closure, not
+just a mention in the closing ADR's prose.** The v2.4.0 promotion did
+this in practice (`ADR-035`'s own "What this review deliberately does
+not claim closed" section named two real gaps — gateway-lease
+continuity across a host restart, and `poll-loop.ts`'s reply-routing
+fix — and both were closed within a day via their own dedicated PRs,
+recorded in a dated addendum to the same ADR) without this playbook
+ever saying that pattern was allowed. It is: a follow-up is fine to
+defer past the pin move itself as long as it's named plainly (not
+silently absorbed into "future work"), has a clear owner, and the
+closing ADR gets a dated addendum (or a fresh ADR cross-referencing it)
+once it's actually resolved — don't let a named gap quietly age into an
+unnamed one.
+
+**Moving the pin is not the same event as an Isthmus release being
+ready to cut.** The v2.4.0 pin moved 2026-09-27; `isthmus-v1.2.0` (the
+first release built on it) wasn't cut until 2026-09-30, and `docs/
+release-gate-checklist.md` — a separate living document covering what
+an actual Isthmus release tag needs (fresh test/fuzz/race evidence
+against the real release candidate, a live install-and-round-trip
+smoke test, the customization-regression catalogue, and more) — turned
+out to be stale against the new pin and needed its own full
+re-verification pass before that tag could go out. This playbook's
+Step 6 testing requirements establish that the *promotion* is correct;
+they are not a substitute for that separate release-gate pass, and a
+future promotion should not assume moving the pin alone means
+`isthmus-vX.Y.Z` is ready to tag the same day.
 
 ## Step 10 — Retrospective: does this change the constitution?
 
