@@ -236,8 +236,9 @@ Isthmus's `.github/CODEOWNERS` marks `ci.yml`/`approve-agent-image.yml`/`verify-
 
 Everything above marked `port-verbatim` or `port-with-modification` still needs to actually be implemented, tested, and committed — this section only records the classification. Grouping for upcoming batches, roughly in priority order:
 
-- **Batch 11 (security-first)**: `#4013` (webhook auth — verbatim, no blockers), `#3920` (restrict failure-assist agent — verbatim-ish, one doc-wording adaptation), `#3948`'s `reapResidue` gateway-role exclusion half (verbatim-shaped once `GATEWAY_ROLE` is added to `src/drivers/types.ts`).
-- **Batch 12 (update/cutover safety)**: `#4012` (atomic restore), `#3956` (nohup rollback + drain), `#3913` (update controller self-containment), `#3883` (Iron Control DB on uninstall).
+- **Batch 11 (security-first) — DONE (`92f6c51a`)**: `#4013`, `#3920`, `#3948`'s `reapResidue` gateway-role exclusion half.
+- **`CommandRunner` exit-status extension + `#3962` — DONE (`3127590b`)**: user-approved scope increase, unblocks the cutover-liveness-probe fix.
+- **Batch 12 (update/cutover safety) — 3 of 4 DONE**: `#4012` atomic restore (`4ef60e45`), `#3956` nohup rollback + drain (`76a72caa`), `#3913` controller self-containment, scoped to the SKILL.md fix only (`705067a1`). `#3883` (Iron Control DB on uninstall) deferred — 799 lines across 7 files, new generic Compose-project-scanning machinery, needs its own dedicated pass reading Isthmus's full uninstall scan/plan/remove pipeline and its interaction with the existing `onecli-agents.ts` removal step.
 - **Batch 13 (agent-runner/container)**: `#3893`+`#3994` (sequenced), `#3998` (gateway CA trust), `#3999` (compact-window passthrough), `#3959` (async bun test spawns).
 - **Batch 14 (Iron Proxy mechanical)**: `#3915`, `#3953`, `#3969`, `#3965` (iron half), `#3981`, `#3982`.
 - **Batch 15 (setup/misc fixes)**: `#3884`, `#3905` (trunk half), `#3910` (wire-dm.ts/q.test.ts), `#3901`, `#3889`, `#3892`, `#3946`, `#3957`, `#3947`, `#3958`+`#3983` combined, `#4008`, `#4017`, `#3997`.
