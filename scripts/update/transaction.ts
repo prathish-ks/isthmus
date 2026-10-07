@@ -444,16 +444,118 @@ function entrySize(source: string): number {
   return fs.readdirSync(source).reduce((total, entry) => total + entrySize(path.join(source, entry)), 0);
 }
 
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** A live path, its snapshot copy (none: remove only), and two same-directory siblings. */
+interface RestoreSwap {
+  live: string;
+  source?: string;
+  staged: string;
+  aside: string;
+}
+
+function planRestore(state: UpdateState, snapshotRoot: string): RestoreSwap[] {
+  const token = randomUUID().slice(0, 8);
+  // Siblings, so every rename stays on one filesystem; `.tmp-*` is git-ignored,
+  // so a leftover never makes the next update refuse a dirty checkout.
+  return (state.snapshot ?? []).map((entry) => {
+    const live = path.join(state.projectRoot, entry.relativePath);
+    const source = entry.existed ? path.join(snapshotRoot, entry.relativePath) : undefined;
+    const sibling = (kind: string) => path.join(path.dirname(live), `.tmp-${kind}-${token}-${path.basename(live)}`);
+    const staged = sibling('restore');
+    const aside = sibling('replaced');
+    if (fs.lstatSync(staged, { throwIfNoEntry: false }) || fs.lstatSync(aside, { throwIfNoEntry: false })) {
+      throw new Error(`Restore path already exists: ${staged}`);
+    }
+    return { live, source, staged, aside };
+  });
+}
+
+// Deletes what this user can and keeps going past what it cannot (root-owned
+// mount points Docker created), so only those are left. True if fully gone.
+function removeAll(target: string): boolean {
+  try {
+    const stat = fs.lstatSync(target, { throwIfNoEntry: false });
+    if (!stat) return true;
+    if (stat.isDirectory()) {
+      const kept = fs.readdirSync(target).filter((name) => !removeAll(path.join(target, name)));
+      if (kept.length > 0) return false;
+      fs.rmdirSync(target);
+    } else {
+      fs.unlinkSync(target);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copy the snapshot next to each live path, swap it in by rename, then delete
+ * what it replaced. Live state is never deleted before its replacement is in
+ * place: an in-place delete (the old `rmSync` then `copyEntry`) stops part way
+ * on folders this user cannot delete (root-owned Docker mount points), losing
+ * the live state with nothing restored in its place. A failure here renames
+ * everything back instead.
+ */
 function restoreSnapshot(state: UpdateState): void {
   if (!state.snapshot) throw new Error('No mutable-state snapshot exists');
   const snapshotRoot = path.join(state.transactionRoot, 'snapshot');
   // Abort BEFORE touching live state when the snapshot is gone — discovering
   // it entry-by-entry would delete live targets and then fail anyway.
   if (!fs.existsSync(snapshotRoot)) throw new Error(`Mutable-state snapshot missing: ${snapshotRoot}`);
-  for (const entry of state.snapshot) {
-    const target = path.join(state.projectRoot, entry.relativePath);
-    fs.rmSync(target, { recursive: true, force: true });
-    if (entry.existed) copyEntry(path.join(snapshotRoot, entry.relativePath), target);
+
+  const staged: string[] = [];
+  const moved: { swap: RestoreSwap; aside: boolean; staged: boolean }[] = [];
+  let swaps: RestoreSwap[] = [];
+  try {
+    swaps = planRestore(state, snapshotRoot);
+    for (const swap of swaps) {
+      if (!swap.source) continue;
+      staged.push(swap.staged);
+      copyEntry(swap.source, swap.staged);
+    }
+    for (const swap of swaps) {
+      const step = { swap, aside: false, staged: false };
+      moved.push(step);
+      if (fs.lstatSync(swap.live, { throwIfNoEntry: false })) {
+        fs.renameSync(swap.live, swap.aside);
+        step.aside = true;
+      }
+      if (swap.source) {
+        fs.renameSync(swap.staged, swap.live);
+        step.staged = true;
+      }
+    }
+  } catch (err) {
+    const stranded: string[] = [];
+    for (const step of moved.reverse()) {
+      try {
+        if (step.staged) fs.renameSync(step.swap.live, step.swap.staged);
+        if (step.aside) fs.renameSync(step.swap.aside, step.swap.live);
+      } catch {
+        const before = step.aside ? `; what was there before is at ${step.swap.aside}` : '';
+        stranded.push(`${step.swap.live} is not as it was${before}`);
+      }
+    }
+    for (const copy of staged) removeAll(copy);
+    throw new Error(
+      [
+        `Could not restore the mutable-state snapshot: ${errorText(err)}`,
+        stranded.length === 0
+          ? 'Nothing was deleted: the live files are back where they were. The snapshot is complete.'
+          : `Some live files could not be put back: ${stranded.join('; ')}. The snapshot is complete.`,
+      ].join('\n'),
+    );
+  }
+  for (const { aside } of swaps) {
+    if (!removeAll(aside)) {
+      console.error(
+        `Could not delete all of ${aside} (usually folders Docker created as root). Remove it with: sudo rm -rf ${aside}`,
+      );
+    }
   }
 }
 
@@ -492,6 +594,17 @@ async function rollbackLocal(state: UpdateState, runtime: UpdateRuntime): Promis
   saveState(state);
 }
 
+// A rollback's own failure must not hide the failure that started it.
+async function rollbackAfter(cause: unknown, state: UpdateState, runtime: UpdateRuntime): Promise<void> {
+  try {
+    await rollbackLocal(state, runtime);
+  } catch (err) {
+    state.lastError = `${errorText(cause)}\nThe automatic rollback failed too: ${errorText(err)}`;
+    saveState(state);
+    throw new Error(state.lastError);
+  }
+}
+
 export async function cutoverUpdate(
   projectRoot: string,
   id: string,
@@ -520,7 +633,7 @@ export async function cutoverUpdate(
   } catch (err) {
     state.lastError = err instanceof Error ? err.message : String(err);
     saveState(state);
-    if (state.snapshot) await rollbackLocal(state, runtime);
+    if (state.snapshot) await rollbackAfter(err, state, runtime);
     else if (state.service.active) runtime.startService(state.service, state.projectRoot);
     throw err;
   }
@@ -582,7 +695,7 @@ export async function finishUpdate(
   } catch (err) {
     state.lastError = err instanceof Error ? err.message : String(err);
     saveState(state);
-    await rollbackLocal(state, runtime);
+    await rollbackAfter(err, state, runtime);
     throw err;
   }
 }

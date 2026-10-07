@@ -784,6 +784,34 @@ describe('cutoverUpdate branches', () => {
     expect(exec(fixture.install, 'git', ['rev-parse', 'HEAD'])).toBe(fixture.originalHead);
   });
 
+  it('preserves the original cutover failure when the automatic rollback itself also fails', async () => {
+    // Before rollbackAfter, a rollback failure replaced the original error
+    // outright — the operator saw only "pnpm install exploded again", with
+    // no trace of what actually started the rollback.
+    const fixture = createForkFixture();
+    useUpdateDir();
+    stubAmpleDiskSpace();
+    const { runtime } = fakeRuntime(fixture.install);
+    const state = await prepareAndValidate(fixture, runtime);
+    const originalRun = runtime.runner.run.bind(runtime.runner);
+    let installCalls = 0;
+    runtime.runner.run = (command, args, cwd) => {
+      if (command === 'pnpm' && args[0] === 'install') {
+        installCalls += 1;
+        throw new Error(installCalls === 1 ? 'pnpm install exploded' : 'pnpm install exploded again');
+      }
+      return originalRun(command, args, cwd);
+    };
+
+    await expect(cutoverUpdate(fixture.install, state.id, runtime)).rejects.toThrow(
+      /pnpm install exploded[\s\S]*automatic rollback failed too[\s\S]*pnpm install exploded again/,
+    );
+    const failed = loadState(fixture.install, state.id);
+    expect(failed.lastError).toContain('pnpm install exploded');
+    expect(failed.lastError).toContain('automatic rollback failed too');
+    expect(failed.lastError).toContain('pnpm install exploded again');
+  });
+
   it('refuses to cut over a validated state whose target commit was stripped', async () => {
     const fixture = createForkFixture();
     useUpdateDir();
