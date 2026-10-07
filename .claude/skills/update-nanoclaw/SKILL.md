@@ -94,12 +94,17 @@ pnpm exec tsx "$controller_dir/scripts/update-nanoclaw.ts" prepare \
 The JSON result is `nanoclaw-update/v1`. Record its `id`, `stageRoot`, backup
 branch/tag, changed files, and requirements. The live `HEAD` is still unchanged.
 
+Run every transaction command from `$controller_dir`, not from `stageRoot`: a
+cherry-pick stage can still hold the old controller. If `$controller_dir` is
+gone (a reboot clears temp directories), recreate it with the step 1 commands
+without fetching again.
+
 If `phase` is `conflict`, resolve conflicts only inside `stageRoot`, preserving
 intentional local customizations. Complete the merge/rebase/cherry-pick there,
 commit it, then run:
 
 ```bash
-pnpm exec tsx "$stageRoot/scripts/update-nanoclaw.ts" resume \
+pnpm exec tsx "$controller_dir/scripts/update-nanoclaw.ts" resume \
   --project-root "$PWD" --id "$id"
 ```
 
@@ -107,14 +112,14 @@ Show the user the upstream commits, changed-file buckets, requirements, and any
 resolved conflicts. To stop with no live mutation:
 
 ```bash
-pnpm exec tsx "$stageRoot/scripts/update-nanoclaw.ts" abandon \
+pnpm exec tsx "$controller_dir/scripts/update-nanoclaw.ts" abandon \
   --project-root "$PWD" --id "$id"
 ```
 
 ## 3. Validate the staged result
 
 ```bash
-pnpm exec tsx "$stageRoot/scripts/update-nanoclaw.ts" validate \
+pnpm exec tsx "$controller_dir/scripts/update-nanoclaw.ts" validate \
   --project-root "$PWD" --id "$id"
 ```
 
@@ -135,7 +140,7 @@ Before downtime, show the exact changed files, required migrations, detected
 backup tag, and rollback command. Ask for one confirmation to begin cutover.
 
 ```bash
-pnpm exec tsx "$stageRoot/scripts/update-nanoclaw.ts" cutover \
+pnpm exec tsx "$controller_dir/scripts/update-nanoclaw.ts" cutover \
   --project-root "$PWD" --id "$id"
 ```
 
@@ -163,7 +168,7 @@ changes before acknowledging it. Finish refuses a dirty cut-over checkout.
 After verification, acknowledge the requirement:
 
 ```bash
-pnpm exec tsx "$stageRoot/scripts/update-nanoclaw.ts" ack \
+pnpm exec tsx "$controller_dir/scripts/update-nanoclaw.ts" ack \
   --project-root "$PWD" --id "$id" \
   --requirement "$requirement_id" --status succeeded
 ```
@@ -181,7 +186,7 @@ path for forward local migrations.
 ## 6. Finish and health-check
 
 ```bash
-pnpm exec tsx "$stageRoot/scripts/update-nanoclaw.ts" finish \
+pnpm exec tsx "$controller_dir/scripts/update-nanoclaw.ts" finish \
   --project-root "$PWD" --id "$id"
 ```
 

@@ -358,3 +358,26 @@ describe('main() output shaping', () => {
     expect(exitCode).toBe(1);
   });
 });
+
+describe('update-nanoclaw skill: self-contained controller invocation', () => {
+  it('runs every transaction command from $controller_dir, never from $stageRoot', async () => {
+    // A cherry-pick stage can still hold the old controller (it's a worktree
+    // of the live checkout, not a fresh extract) — if any step after prepare
+    // ran from $stageRoot instead of the just-fetched $controller_dir, it
+    // could execute stale safety code.
+    const fs = await import('node:fs');
+    const skillPath = path.resolve(import.meta.dirname, '../.claude/skills/update-nanoclaw/SKILL.md');
+    const skill = fs.readFileSync(skillPath, 'utf8');
+    expect(skill).not.toContain('$stageRoot/scripts/update-nanoclaw.ts');
+    const invocations = skill.match(/pnpm exec tsx "\$controller_dir\/scripts\/update-nanoclaw\.ts" \w+/g) ?? [];
+    expect(invocations.map((line) => line.split(' ').pop())).toEqual([
+      'prepare',
+      'resume',
+      'abandon',
+      'validate',
+      'cutover',
+      'ack',
+      'finish',
+    ]);
+  });
+});
