@@ -86,7 +86,7 @@ describe('createCommandRunner (real execFileSync)', () => {
   it('tryRun reports ok:true with the trimmed stdout on success', () => {
     const runner = createCommandRunner();
     const result = runner.tryRun('node', ['-e', "process.stdout.write('fine')"]);
-    expect(result).toEqual({ ok: true, stdout: 'fine' });
+    expect(result).toEqual({ ok: true, stdout: 'fine', status: 0 });
   });
 
   it('tryRun reports ok:false and joins stdout+stderr on failure', () => {
