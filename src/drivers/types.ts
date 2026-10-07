@@ -27,6 +27,13 @@ export interface SessionKey {
  */
 export type ContainerRole = string;
 
+/**
+ * The role a gateway's own long-lived container carries (e.g. Iron Proxy's
+ * front proxy). Not session-scoped — `reapResidue` must never sweep it as
+ * orphaned pre-seam residue just because it carries no session label.
+ */
+export const GATEWAY_ROLE = 'gateway';
+
 export type MountClass =
   | 'group-state'
   | 'install-surface'

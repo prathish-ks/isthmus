@@ -474,6 +474,24 @@ describe('idempotency and adoption', () => {
     expect(cli.joined().some((c) => c === 'rm --force ncl-spike-s1')).toBe(false);
   });
 
+  it('never sweeps a gateway-role container as pre-seam residue, even with no session label', async () => {
+    cli.responses = [{ match: /^ps --filter/, output: 'nanoclaw-iron-proxy||gateway\nncl-spike-s1|s1|\n' }];
+
+    await driver().reapResidue('spike');
+
+    expect(cli.joined().some((c) => c === 'rm --force nanoclaw-iron-proxy')).toBe(false);
+    expect(cli.joined().some((c) => c === 'rm --force ncl-spike-s1')).toBe(false);
+  });
+
+  it('never sweeps a gateway-role container as stale/exited residue', async () => {
+    cli.responses = [{ match: /^ps -a --filter/, output: 'nanoclaw-iron-proxy|gateway\nncl-spike-s1|\n' }];
+
+    await driver().reapResidue('spike');
+
+    expect(cli.joined()).toContain('rm --force ncl-spike-s1');
+    expect(cli.joined().some((c) => c === 'rm --force nanoclaw-iron-proxy')).toBe(false);
+  });
+
   it('reaps install-owned networks whose containers are gone', async () => {
     cli.responses = [{ match: /^network ls/, output: 'nc-spike-a-session\nnc-spike-a-uplink\n' }];
 
