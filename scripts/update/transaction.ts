@@ -12,6 +12,7 @@ import {
   startService,
   stopService,
   verifyServiceHealth,
+  withRecordedNohupHost,
   type CommandRunner,
   type ServiceEnvironment,
   type ServiceHandle,
@@ -572,14 +573,24 @@ function installAndBuild(root: string, state: UpdateState, runtime: UpdateRuntim
 
 async function rollbackLocal(state: UpdateState, runtime: UpdateRuntime): Promise<void> {
   if (!state.service) throw new Error('Update state has no captured service handle for rollback');
-  // On the cutover failure path the service was already stopped by cutover
-  // itself; `stopService` is idempotent per mode (already-stopped is success
-  // in the manager's own vocabulary — see its header), so this cannot abort
-  // the restore for a service that is simply gone, while a service that is
-  // genuinely still running still aborts loudly BEFORE anything is destroyed.
-  // Deliberately not a fresh detection: an under-reporting detection would
-  // skip the stop and reset the checkout under a live service.
-  await runtime.stopService(state.service);
+  // Stop via the captured handle (not a fresh detection) so an under-reporting
+  // detection cannot skip it and reset the checkout under a live service;
+  // `stopService` is idempotent per mode (already-stopped is success in the
+  // manager's own vocabulary — see its header), so this cannot abort the
+  // restore for a service that is simply gone. For nohup, the captured handle's
+  // pid may be stale — finishUpdate's own restart records a NEW pid in
+  // nanoclaw.pid — so re-point it at whatever is actually running now first.
+  const live = withRecordedNohupHost(state.service, state.projectRoot, runtime.serviceEnv);
+  const wasRunning = runtime.detectService(state.projectRoot).active;
+  await runtime.stopService(live);
+  try {
+    // Agent containers outlive the host's SIGTERM and still mount the data/ the restore replaces.
+    await runtime.drainContainers(state.projectRoot);
+  } catch (err) {
+    // Nothing is reset yet: restart the host only if this rollback is what stopped it.
+    if (wasRunning) runtime.startService(live, state.projectRoot);
+    throw err;
+  }
   git(runtime, state.projectRoot, ['reset', '--hard', state.originalHead]);
   restoreSnapshot(state);
   installAndBuild(state.projectRoot, state, runtime);

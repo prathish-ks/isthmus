@@ -60,6 +60,10 @@ export interface ServiceEnvironment {
   uid: number;
   runner: CommandRunner;
   sleep(ms: number): Promise<void>;
+  /** Progress line for a wait the operator would otherwise read as a hang. */
+  log?(message: string): void;
+  /** procfs mount for nohup host identity checks; tests point it at a fixture. */
+  procRoot?: string;
 }
 
 export function defaultServiceEnvironment(runner = createCommandRunner()): ServiceEnvironment {
@@ -83,6 +87,61 @@ function processExists(pid: number): boolean {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function nohupPidFile(projectRoot: string): string {
+  return path.join(projectRoot, 'nanoclaw.pid');
+}
+
+function readNohupPid(projectRoot: string): number | undefined {
+  try {
+    const text = fs.readFileSync(nohupPidFile(projectRoot), 'utf8').trim();
+    // Positive only: `kill` with 0 or a negative pid signals a process group.
+    return /^[1-9][0-9]*$/.test(text) ? Number(text) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function realpathOr(value: string): string {
+  try {
+    return fs.realpathSync(value);
+  } catch {
+    return value;
+  }
+}
+
+// start-nanoclaw.sh's launched entrypoint (argv[1] is this checkout's dist/index.js),
+// by realpath so a symlinked checkout matches. A recorded pid may be reused.
+function isNohupHost(pid: number, projectRoot: string, env: ServiceEnvironment): boolean {
+  try {
+    const script = fs.readFileSync(path.join(env.procRoot ?? '/proc', String(pid), 'cmdline'), 'utf8').split('\0')[1];
+    const entrypoint = realpathOr(path.join(projectRoot, 'dist', 'index.js'));
+    return !!script && path.isAbsolute(script) && realpathOr(script) === entrypoint;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The launcher records every start in nanoclaw.pid, so a handle captured
+ * before a later start (e.g. finishUpdate's own restart) must be re-pointed
+ * at whichever host is recorded now, not the pid captured at cutover time —
+ * which may be stale or, worse, reused by an unrelated process since.
+ */
+export function withRecordedNohupHost(
+  handle: ServiceHandle,
+  projectRoot: string,
+  env: ServiceEnvironment,
+): ServiceHandle {
+  if (handle.mode !== 'nohup') return handle;
+  const pid = readNohupPid(projectRoot);
+  if (pid !== undefined && isNohupHost(pid, projectRoot, env)) {
+    env.log?.(`Found running NanoClaw host (PID ${pid}); stopping it`);
+    return { ...handle, pid, active: true };
+  }
+  env.log?.('No running NanoClaw host found for this checkout; nothing to stop');
+  return { ...handle, pid: undefined, active: false };
 }
 
 /**
@@ -176,15 +235,9 @@ export function detectService(projectRoot: string, env: ServiceEnvironment): Ser
     }
 
     const definition = path.join(projectRoot, 'start-nanoclaw.sh');
-    const pidFile = path.join(projectRoot, 'nanoclaw.pid');
-    if (fs.existsSync(definition) && fs.existsSync(pidFile)) {
-      const pid = Number.parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
-      return {
-        mode: 'nohup',
-        definition,
-        pid: Number.isFinite(pid) ? pid : undefined,
-        active: Number.isFinite(pid) && processExists(pid),
-      };
+    if (fs.existsSync(definition) && fs.existsSync(nohupPidFile(projectRoot))) {
+      const pid = readNohupPid(projectRoot);
+      return { mode: 'nohup', definition, pid, active: pid !== undefined && isNohupHost(pid, projectRoot, env) };
     }
   }
 
