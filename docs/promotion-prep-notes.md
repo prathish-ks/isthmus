@@ -89,7 +89,157 @@ looking at before the trickle of the other ~63 PRs.
 
 ---
 
-## Batches not yet started
+## Full-review classification (2026-10-07) — all 70 PRs now classified
 
-- Keyword-sweep hits outside the two clusters above (`add-iron-proxy`, `add-onecli` payload changes beyond #4028, `src/gateway-*`, `src/drivers/*`) — the Bucket-B-likely territory; deliberately saved for after the clusters, per the skill's own "where the call isn't clear, don't force it" guidance — these need real Step 3 trust-boundary scrutiny, not a quick classification.
-- The remaining ~63-PR trickle — not yet grouped by theme.
+Batches 1–3 (above) covered the two tag-adjacent clusters (7 PRs). The
+remaining 63 were classified in this pass, delegated across 7 thematic
+research agents (read-only: bucket + draft decision only, no edits). This
+section is the classification record; the "Implementation plan" section
+below tracks what actually gets ported, in what order, and the
+"Decisions needed" section lists what's waiting on the user.
+
+`#4028` (flagged in Batch 1) is now resolved: Isthmus's `init-onecli` is
+a one-time bootstrap/credential-migration skill with no `versions.json`
+pin-tracking or `/update-nanoclaw`-driven upgrade-guide concept at all —
+not a renamed equivalent of upstream's `add-onecli`. `declined:
+not-applicable`.
+
+Note: a fresh `git log` against `upstream/main` during this pass showed
+one new commit beyond the watched range (`66f0823a`, PR #4051,
+`fix(setup): carry the upgrade marker across setup's local commits`) —
+out of scope for this review (not in the original 70), left for the next
+Watch-mode cycle.
+
+### Batch 4 — setup/readiness
+
+| PR | Title | Bucket | Decision |
+|---|---|---|---|
+| #3884 | keep the Claude CLI offer to Claude installs | C | `port-verbatim` — same stale provider-resolution guard in `setup/lib/claude-handoff.ts`/`picked-provider.ts` |
+| #3905 | log the first-chat ping result + real OpenCode auth duration | C | `port-with-modification` — trunk half (first-chat ping never logged) real and portable; OpenCode-duration half targets a `providers`-branch-only file, not reviewed |
+| #3887 | never clip a readiness probe to the deadline | C | `declined:not-applicable` — the whole socket-probe-with-deadline mechanism doesn't exist; Isthmus's closest analog (`verifyServiceHealth`) doesn't clip the same way |
+| #3910 | detect installed gateways without parsing nested pnpm output | C | `port-with-modification` — no generic gateway-detection abstraction to fix, but the identical un-silenced `pnpm exec tsx` JSON-parse bug is real in `add-wechat/scripts/wire-dm.ts` and `scripts/q.test.ts` |
+| #3920 | restrict failure-assist agents on a live install | B | `port-with-modification` — real, high-value security fix: `setup/lib/claude-assist.ts` spawns an unattended `claude -p ... --permission-mode bypassPermissions` session with full tool access; restricting it to read-only tools ports cleanly. Doc-wording adaptation needed for `debug/SKILL.md` (no `gateway` step exists, only `onecli`) |
+| #3901 | host service reach the internet through an HTTPS proxy | B | `port-with-modification` — real gap, zero proxy handling anywhere in `setup/service.ts`; insertion points (launchd plist, systemd unit, nohup wrapper) all exist and match structurally |
+| #4001 | mirror host pnpm patches in the nested-pnpm probe | C | `declined:not-applicable` — test-only, targets the same nonexistent `setup/gateways/selection.ts` as #3910's core fix |
+
+### Batch 5 — container/agent-runner runtime
+
+| PR | Title | Bucket | Decision |
+|---|---|---|---|
+| #3893 | keep the heartbeat alive during a long streamed block | C | `port-verbatim` — `claude.ts`'s `translateEvents` is byte-identical to upstream's pre-fix shape |
+| #3908 | never answer an a2a failure notice with another | B | `port-with-modification` — single-turn `deliverErrorResult` half ports with adaptation; the "thrown stream, multiple queued a2a turns" half has no structural home in Isthmus's architecture (no `queuedTurns` loop) — **needs a human call**, see Decisions needed |
+| #3841 | opencode memory hook: spawnSync → async spawn | — | `flag` — target file lives on the `providers` branch only, not reviewed here |
+| #3959 | test infra: async bun children instead of spawnSync | C | `port-verbatim` — `stdin-json.test.ts`/`memory/hook.test.ts` still use the hang-prone sync spawn |
+| #3994 | show the Claude SDK's own failure notice | C | `port-verbatim` — same generic-notice gap in `claude.ts`; sequence with #3893 (same function) |
+| #3998 | trust the gateway CA in the agent browser | B | `port-verbatim` — confirmed real: any TLS-inspecting gateway (OneCLI or Iron Proxy) breaks `agent-browser` HTTPS today; `agent-browser` skill has zero CA-trust handling |
+| #3999 | pass `CLAUDE_CODE_AUTO_COMPACT_WINDOW` host→container | C | `port-with-modification` — container-side gap confirmed; host-side needs merging into Isthmus's existing (differently-purposed) `src/providers/claude.ts` registration, and making its barrel import unconditional (today only loaded for custom-endpoint installs) |
+
+### Batch 6 — update/cutover lifecycle
+
+| PR | Title | Bucket | Decision |
+|---|---|---|---|
+| #3913 | load the update controller without setup/ or node_modules | C | `port-with-modification` — real: `update-nanoclaw/SKILL.md` still calls back into `$stageRoot` instead of `$controller_dir`. Gateway-module-loading half declined (no `setup/gateways/` subsystem) |
+| #3948 | keep gateway-owned containers through cutover and residue reaping | A/C | `port-with-modification` — **confirmed real bug**: Isthmus's `reapResidue` would `docker rm --force` the Iron Proxy gateway container on a routine sweep, no gateway-role exclusion exists. The drain/restart half is murkier — Isthmus's `drainContainers` never force-stops at all (possibly deliberate) |
+| #3956 | rollback stops the live nohup host and drains agent containers | C | `port-with-modification` — real: nohup rollback can target a stale/reused pid (same bug class as #4037, unaddressed for nohup), and never drains containers before restoring `data/` |
+| #3962 | refuse cutover when the service liveness probe itself fails | C | `flag` — real bug, but the fix needs `CommandRunner` to expose a numeric exit status, which the #4037 port deliberately left out — **needs a human call**, see Decisions needed |
+| #3963 | remove the data symlink with unlinkSync, not rmSync | C | `declined:not-applicable` — the specific symlinked-data test scenario doesn't exist in Isthmus's `transaction.e2e.test.ts` |
+| #4012 | restore the snapshot by rename so rollback never half-deletes data/ | C | `port-with-modification` — **confirmed real bug**: Isthmus's `restoreSnapshot` still does delete-then-copy; a mid-copy failure or an undeletable mount point leaves `data/` gone or partial. Isthmus's own `createSnapshot` already uses the atomic build-then-rename pattern — natural, in-spirit fix |
+| #4016 | load gateway helpers before cutover swaps node_modules | C | `declined:not-applicable` — bug is intrinsic to the `loadGatewayModules` mechanism from #3913's gateway half, which Isthmus never ported |
+| #3988 | refresh the installed gateway when only its skill payload changed | C | `declined:not-applicable` — depends on the same absent `setup/gateways/` subsystem |
+| #3986 | follow release tags by default via update channels | C | `declined:conflicts-with-isthmus-governance` — this `feat` would auto-follow upstream's newest release tag by default, directly undercutting the human-reviewed, PR-by-PR promotion model (LAW-09) this whole review exists to enforce |
+
+### Batch 7 — OneCLI/gateway security
+
+| PR | Title | Bucket | Decision |
+|---|---|---|---|
+| #3960 | name the credential, not the provider, in adapter errors | B | `declined:not-applicable` — `add-onecli` skill tree doesn't exist |
+| #3989 | pin the gateway to 1.42.0 for the host-enforcement bypass fix | B | `port-with-modification` — **security finding**: Isthmus's own `versions.json` pins `onecli-gateway` at `1.41.0`, the version upstream explicitly says is vulnerable to a credential-injection host-enforcement bypass (onecli/onecli#438). Also requires rebuilding/re-verifying the Iron-proxy builder's Rust approval-summary crate against the real 1.42.0 source, not just editing JSON. **Needs a human call on sequencing** — see Decisions needed |
+| #4039 | upgrade guide refuses an empty gateway pin | B | `port-with-modification` — real risk class (empty pin silently falls back to `:latest`), but Isthmus's upgrade doc uses an older, different mechanism (`ONECLI_VERSION=<pin> docker compose up -d`) than what this PR's guard assumes — needs re-authoring for that shape. Sequence after #3989 |
+| #4041 | migration warning points back to the pin, not the old version | B | `declined:not-applicable` — fixes a typo in a doc paragraph (DB-migration-on-upgrade warning) that Isthmus's doc never carried in the first place |
+| #4015 | skip the approval card for reads that carry no credential | B | `flag` — Isthmus's `gateway-approval-coordinator.ts` is missing multiple predecessor abstractions this PR assumes exist (`modelAuthorities`, `credentialScope`, `gateway-read-policy.ts`); needs its own dedicated Step-3 trust-boundary pass, not a quick port. Deferred, not blocking |
+| #4013 | authenticate the loopback Gateway webhook | B | `port-verbatim` — **security finding, high confidence**: `chat-sdk-bridge.ts`'s `startLocalWebhookServer` accepts any POST with zero auth and resolves pending approval cards from it; Isthmus already sends the right header on the sending side but the receiver never checks it |
+| #4017 | fetch the current WhatsApp Web version before linking | C | `port-with-modification` — real, same pre-fix lineage confirmed in `setup/whatsapp-auth.ts`; verify the `getPlatformId` monkeypatch removal is still safe at Isthmus's pinned Baileys `7.0.0-rc.9` before dropping it |
+
+### Batch 8 — Iron Proxy
+
+Confirmed Iron Proxy has real core + skill footprint in Isthmus (`src/gateway-providers/iron-proxy*.ts`, `.claude/skills/add-iron-proxy/`) — not blanket-declined.
+
+| PR | Title | Bucket | Decision |
+|---|---|---|---|
+| #3915 | skip invalid allowed-hosts entries instead of aborting setup | B | `port-verbatim` — identical pre-fix code in `iron-proxy.ts`/`setup.ts` |
+| #3883 | remove Iron Control's database on uninstall | A/B | `port-with-modification` — real: Iron Control's Postgres volume (every stored credential) has no install/role label, so Isthmus's uninstall scan never finds it |
+| #3953 | stop early on arm64 engines that cannot run amd64 images | C | `port-verbatim` — no preflight check exists today |
+| #3964 | let a provider declare exact host:port model endpoints | B | `port-with-modification`, but **no current consumer in `main`** (OpenCode's consuming half lives on the `providers` branch) — defer until something in `main` needs it |
+| #3965 | check the model URL against the selected gateway at the prompt | B | `port-with-modification` — Iron half real and portable (`ironModelEndpoint` byte-identical pre-fix); OpenCode half not applicable here |
+| #3966 | allow a keyless model on this machine over plain HTTP | B | `flag` — **new capability, not a bug fix**; relaxes Iron's TLS-only policy at the Go front-proxy's core security boundary — **needs a human call**, see Decisions needed |
+| #3969 | send a Basic challenge with the front proxy's 407 | B | `port-verbatim` — identical gap in `front-proxy/main.go` |
+| #3981 | bump grpc to 1.83.2 in the Iron front proxy | C | `port-verbatim` — Go module, not pnpm-governed, no release-age gate involved |
+| #3982 | pin Iron Proxy to v0.52.0 | C | `port-verbatim` — commit pin matches the exact pre-bump SHA |
+| #4005 | bump @grpc/grpc-js to 1.14.5 in the Iron approval bridge | C | `declined-independently-fixed` — root `package.json` already at 1.14.5; only the skill's own `nc:dep` directive text is stale (doc-sync nit) |
+| #3985 | keep proxy credentials out of readable service files | B | `declined:not-applicable` — this is the unrelated corporate-HTTP-proxy work (#3901's territory); Isthmus's `service.ts` has zero proxy-credential handling to leak |
+
+### Batch 9 — misc fixes
+
+| PR | Title | Bucket | Decision |
+|---|---|---|---|
+| #3889 | drop `unknown_sender_public` from dropped-messages reasons | C | `port-with-modification` — `public` was never in Isthmus's enum, but it's genuinely missing `unknown_sender_decline_notify`, which `handleUnknownSender` actually writes — same bug class, different manifestation |
+| #3892 | wait for the journal to clear instead of sleeping | B | `port-with-modification` — identical sleep-then-read race in `community-portal/runtime.test.ts`, different fixture names |
+| #3803 | recover on the fixture-owned port | C | `declined:not-applicable` — the underlying EADDRINUSE-recovery feature (`#2901`) was never ported; no test to de-flake |
+| #3945 | seed one session past the cap in the drain test | C | `declined:architecture-differs` — Isthmus's delivery poll is a genuinely different per-session design, no batch-drain function exists |
+| #3946 | show a failed step's own error instead of a generic bounce | B/C | `port-verbatim` — confirmed byte-identical pre-fix base in both `add-iron-proxy/scripts/install-command.ts` and `scripts/skill-apply.ts` |
+| #3957 | kill the whole process group when a pre-task script times out | B | `port-with-modification` — real: `execFile('bash', ...)` orphans grandchildren on timeout; needs adapting to Isthmus's 2-arg `runScript` signature |
+| #3947 | stop containers whose session or agent group was deleted | A | `port-with-modification` — **confirmed real bug**: `groups.ts delete` cascades DB rows but never kills the container, and `host-sweep.ts` only visits active sessions so it never notices. Port the narrow fix (`stopOrphanedSessions()`), not upstream's full queue-based sweep rearchitecture |
+| #3958 | log never throws on unserializable data | C | `port-verbatim` — land together with #3983 below (end-state, not sequentially) |
+| #3983 | keep nested toJSON redaction with BigInt/cycle | C | `port-verbatim` — actually *replaces* part of #3958's own fix; port the combined end-state |
+| #3974 | refresh agent-runner lockfile for transitive advisories | C | `declined-independently-fixed` — Isthmus's current `bun audit` is already clean of every package this PR touches (confirmed via live `bun audit --audit-level=high` run) |
+| #4008 | open chat.db under Node with core's prebuilt better-sqlite3 | C | `port-verbatim` — confirmed `add-imessage` exists directly on `main`; identical pre-fix gap |
+
+### Batch 10 — docs/CI/build housekeeping
+
+Isthmus's `.github/CODEOWNERS` marks `ci.yml`/`approve-agent-image.yml`/`verify-agent-image.yml` as its own actively-maintained release/CI surface — these are not inert upstream housekeeping. `release.yml`/`RELEASING.md`/`scripts/release.mjs` are, by contrast, an inherited-but-uncustomized copy (literal upstream reviewer names still present, not CODEOWNERS-claimed) — likely vestigial.
+
+| PR | Title | Bucket | Decision |
+|---|---|---|---|
+| #3954 | docs(gateways): correct credential-reread comments | B | `port-with-modification` — iron-proxy half byte-identical stale comment, applies; opencode half not applicable (file absent) |
+| #3955 | docs(opencode): keep gateway notes in the gateway skills | B | `declined:not-applicable` — the doc-architecture problem (duplicated gateway prose) doesn't exist in Isthmus's simpler `add-opencode` skill |
+| #3968 | ci: pin workflow actions and cosign to exact versions | B | `port-with-modification` — real, and **worse in Isthmus than upstream**: ~30 unpinned `uses:` lines in `ci.yml` alone (vs upstream's handful), same unverified cosign download in both agent-image workflows. Needs SHA pins for Isthmus's actual (newer) action versions, not a verbatim copy |
+| #3977 | build(deps): bump tsx to 4.23 | C | `port-verbatim` — confirmed current pin is `^4.19.0`, bump clears `minimumReleaseAge` |
+| #3979 | test(onecli): umask-independent unsafe-directory test | B | `declined:not-applicable` — target skill doesn't exist; confirmed Isthmus's one structurally-similar test (`install-slug.test.ts`) isn't umask-fragile the same way |
+| #3912 | ci(labels): run the area labeler after label-pr | C | `declined:not-applicable` — no path-based area-labeler workflow exists to reorder |
+| #3997 | fix(setup): commit applied skill files so a fresh install can update | C | `port-verbatim` — confirmed identical gap: `update-nanoclaw/SKILL.md`'s dirty-checkout guard exists but nothing commits applied skill files, leaving a fresh install unable to update |
+| #4011 | docs(contributing): write down the core-or-fork rule | — | `flag` — policy question for a solo-maintained fork with no external PR flow — **needs a human call**, see Decisions needed |
+| #4009 | ci: merge agent-image pin bumps by hand, drop the auto-approver | B | `port-with-modification` — directly applicable hardening: delete the never-safely-armable auto-approver workflow, same `AGENT_IMAGE_AUTO_APPROVE` gap confirmed in Isthmus's own CODEOWNERS-claimed workflows |
+| #4007 | ci: let Dependabot see skill-pinned npm versions | C | `port-with-modification` — generic scanner reuses existing `scripts/skill-directives.ts` infra; needs regenerating against Isthmus's own ~34-skill tree, not copying upstream's generated output |
+| #3987 | feat(release): self-approved pre-releases; widen stable approvers | — | `declined:not-applicable` — Isthmus's own `RELEASING.md` explicitly states it ships a single channel with no RC concept; this release machinery looks vestigial/unmaintained |
+
+---
+
+## Cross-cutting findings from the full review (not tied to one PR's port decision)
+
+- **Security — OneCLI gateway pinned at a disclosed-vulnerable version.** Isthmus's `versions.json` pins `onecli-gateway` at `1.41.0`; upstream's `#3989` states `1.42.0` closes a credential-injection host-enforcement bypass (`onecli/onecli#438`). See Decisions needed.
+- **Security — unauthenticated loopback gateway webhook.** `src/channels/chat-sdk-bridge.ts`'s `startLocalWebhookServer` accepts any POST with no auth check and can resolve pending approval cards from it. Confirmed real, high confidence, no judgment call needed — `#4013` ports verbatim and should land promptly.
+- **Security (incidental, not from any PR in this range) — unbaselined MCP SDK advisory.** `container/agent-runner`'s `@modelcontextprotocol/sdk@1.30.0` carries `GHSA-6qxp-vccf-f47h` (OAuth client credential leak to an attacker-chosen auth server), found while auditing for `#3974`. Not caused by any PR in this range; worth triaging on its own.
+- **Operational — residue-reaping would force-remove the Iron Proxy gateway container.** Confirmed via direct code read (`#3948`'s findings): nothing in `reapResidue` exempts gateway-role containers from a routine sweep.
+- **Operational — Isthmus's own CI surface has drifted further from supply-chain best practice than upstream's current state**, on files Isthmus actively owns per `CODEOWNERS` (`#3968`/`#4009`'s findings) — more unpinned `uses:` lines, same unverified cosign binary.
+- **Doc drift — `docs/gateway-seam.md`** is referenced by `CLAUDE.md` but doesn't exist anywhere in the tree. Pre-existing, not caused by any PR here; blocks a doc-only hunk in `#3964`.
+- **Architecture gaps noted but explicitly out of scope for this round**: no generic `setup/gateways/` provider-selection subsystem (blocks `#4016`/`#3988`), `CommandRunner` has no numeric exit status (blocks `#3962`), `poll-loop.ts` has no queued-turn structure for multi-hop a2a failure notices (blocks half of `#3908`), and several PRs target files that live only on the `channels`/`providers` sibling branches and were not reviewed here (`#3841`'s opencode half, `#3905`'s opencode half, `#3964`/`#3965`'s opencode halves, `#3954`/`#3955`'s opencode halves).
+
+## Decisions needed from the user
+
+1. **Bump the OneCLI gateway pin from 1.41.0 to 1.42.0 now (`#3989`), accepting that `/add-dial-tool` goes dark** (by the `#4036` version-gate's own design, until that skill is rewritten against OneCLI's new policy API) — or hold the vulnerable pin a bit longer while that migration is scoped separately? This is a security-vs-availability sequencing call, not a technical unknown.
+2. **Adopt Iron Proxy's new "keyless local model over plain HTTP" capability (`#3966`)?** This is a `feat`, not a bug fix — it relaxes Iron's TLS-only policy at the Go front-proxy's core security boundary. Needs a real security read of how "this machine only" gets enforced before it could even be considered.
+3. **Extend `CommandRunner` (`scripts/update/service.ts`) with a numeric exit status** to unblock `#3962`'s cutover-liveness-probe fix? This was a disclosed, deliberately-deferred gap from the `#4037` port; extending it is a small scope increase to the primitive, not just applying `#3962`'s diff.
+4. **Add a "core vs. fork" contribution-triage policy to `CONTRIBUTING.md` (`#4011`)?** Isthmus is solo-maintained with no external PR flow today — this is a process-fit question, not a technical one.
+5. **How to handle the two incidentally-found vulnerabilities** (MCP SDK `GHSA-6qxp-vccf-f47h`, and the OneCLI 1.41.0 pin above) — fold into this review's implementation batches, or split off as separate tracked backlog items?
+
+## Implementation plan (pending, not yet done)
+
+Everything above marked `port-verbatim` or `port-with-modification` still needs to actually be implemented, tested, and committed — this section only records the classification. Grouping for upcoming batches, roughly in priority order:
+
+- **Batch 11 (security-first)**: `#4013` (webhook auth — verbatim, no blockers), `#3920` (restrict failure-assist agent — verbatim-ish, one doc-wording adaptation), `#3948`'s `reapResidue` gateway-role exclusion half (verbatim-shaped once `GATEWAY_ROLE` is added to `src/drivers/types.ts`).
+- **Batch 12 (update/cutover safety)**: `#4012` (atomic restore), `#3956` (nohup rollback + drain), `#3913` (update controller self-containment), `#3883` (Iron Control DB on uninstall).
+- **Batch 13 (agent-runner/container)**: `#3893`+`#3994` (sequenced), `#3998` (gateway CA trust), `#3999` (compact-window passthrough), `#3959` (async bun test spawns).
+- **Batch 14 (Iron Proxy mechanical)**: `#3915`, `#3953`, `#3969`, `#3965` (iron half), `#3981`, `#3982`.
+- **Batch 15 (setup/misc fixes)**: `#3884`, `#3905` (trunk half), `#3910` (wire-dm.ts/q.test.ts), `#3901`, `#3889`, `#3892`, `#3946`, `#3957`, `#3947`, `#3958`+`#3983` combined, `#4008`, `#4017`, `#3997`.
+- **Batch 16 (housekeeping)**: `#3977` (tsx bump), `#3968`+`#4009` (CI pinning/hardening), `#4007` (Dependabot skill-pin visibility), `#3954` (doc comment).
+- **Deferred, not scheduled**: `#3964`/`#3965` opencode halves, `#4015` (needs dedicated Step-3 pass), `#4039` (sequence after `#3989`'s decision).
