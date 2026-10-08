@@ -36,7 +36,13 @@ import { getActiveSessions, isTaskThread, updateSession } from './db/sessions.js
 import { getAgentGroup } from './db/agent-groups.js';
 import { log } from './log.js';
 import { heartbeatPath, withExistingMailboxSession } from './session-manager.js';
-import { getContainerStartedAtMs, isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
+import {
+  getContainerStartedAtMs,
+  isContainerRunning,
+  killContainer,
+  stopOrphanedSessions,
+  wakeContainer,
+} from './container-runner.js';
 import type { Session } from './types.js';
 import type { ContainerState, InboundMailbox, OutboundMailbox } from './mailbox/index.js';
 
@@ -154,6 +160,14 @@ async function sweep(): Promise<void> {
     log.error('Reject-with-reason sweep failed', { err });
   }
   // MODULE-HOOK:approvals-reason-sweep:end
+
+  // Stop containers whose session or agent group was deleted: the per-session
+  // loop above only visits sessions that still have a row.
+  try {
+    await stopOrphanedSessions();
+  } catch (err) {
+    log.error('Orphaned container sweep failed', { err });
+  }
 
   setTimeout(() => void sweep(), SWEEP_INTERVAL_MS);
 }
