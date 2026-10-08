@@ -1663,14 +1663,9 @@ async function runCustomEndpointAuth(baseUrl: string, token: string): Promise<vo
 
   // ANTHROPIC_BASE_URL has to be in .env so the runtime provider config
   // reads it when building container env. The token is *not* written —
-  // OneCLI holds it.
+  // OneCLI holds it. src/providers/claude.ts is always loaded (providers/
+  // index.ts imports it unconditionally), so nothing else to register here.
   writeEnvLine('ANTHROPIC_BASE_URL', baseUrl);
-
-  // Register the claude provider so the runtime passes ANTHROPIC_BASE_URL
-  // and the placeholder bearer into the container. Only appended when the
-  // user has configured a custom endpoint; standard installs don't load
-  // the file at all.
-  appendProviderImport('./claude.js');
 }
 
 function writeEnvLine(key: string, value: string): void {
@@ -1681,15 +1676,6 @@ function writeEnvLine(key: string, value: string): void {
     ? content.replace(re, `${key}=${value}`)
     : content.trimEnd() + (content ? '\n' : '') + `${key}=${value}\n`;
   fs.writeFileSync(envFile, next);
-}
-
-function appendProviderImport(modulePath: string): void {
-  const file = path.join(process.cwd(), 'src', 'providers', 'index.ts');
-  const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
-  const line = `import '${modulePath}';`;
-  if (content.includes(line)) return;
-  const sep = content && !content.endsWith('\n') ? '\n' : '';
-  fs.writeFileSync(file, content + sep + line + '\n');
 }
 
 // ─── timezone step ─────────────────────────────────────────────────────
