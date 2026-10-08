@@ -25,9 +25,14 @@ const TEST_DIR = '/tmp/nanoclaw-test-cli-dropped-messages';
 
 import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
 import { recordDroppedMessage, getUnregisteredSenders } from '../../db/dropped-messages.js';
+import { UNKNOWN_SENDER_POLICIES } from '../../types.js';
+import { registerResourceHelpCommands } from '../commands/help.js';
+import { dispatch } from '../dispatch.js';
 import { getResource } from '../crud.js';
 // Side-effect import: registers the `dropped-message` resource.
-import './dropped-messages.js';
+import { DROPPED_MESSAGE_REASONS } from './dropped-messages.js';
+
+registerResourceHelpCommands();
 
 describe('dropped-messages CLI reason enum', () => {
   beforeEach(async () => {
@@ -43,6 +48,7 @@ describe('dropped-messages CLI reason enum', () => {
 
   it('lists every unknown_sender_* reason the host actually records, and not unknown_sender_public', () => {
     const column = getResource('dropped-messages')!.columns.find((c) => c.name === 'reason')!;
+    expect(column.enum).toBe(DROPPED_MESSAGE_REASONS);
     expect(column.enum).toEqual([
       'no_agent_wired',
       'no_agent_engaged',
@@ -51,6 +57,20 @@ describe('dropped-messages CLI reason enum', () => {
       'unknown_sender_decline_notify',
     ]);
     expect(column.enum).not.toContain('unknown_sender_public');
+  });
+
+  it('derives its unknown_sender_* reasons from UNKNOWN_SENDER_POLICIES, minus public', () => {
+    expect(DROPPED_MESSAGE_REASONS).toEqual([
+      'no_agent_wired',
+      'no_agent_engaged',
+      ...UNKNOWN_SENDER_POLICIES.filter((policy) => policy !== 'public').map((policy) => `unknown_sender_${policy}`),
+    ]);
+  });
+
+  it('help lists unknown_sender_decline_notify as a reason value', async () => {
+    const resp = await dispatch({ id: 'req-help', command: 'dropped-messages-help', args: {} }, { caller: 'host' });
+    if (!resp.ok) throw new Error(resp.error.message);
+    expect(String(resp.data)).toContain('unknown_sender_decline_notify');
   });
 
   it('describes the public-group exception in the resource description', () => {

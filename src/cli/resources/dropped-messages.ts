@@ -1,10 +1,23 @@
+import { UNKNOWN_SENDER_POLICIES } from '../../types.js';
 import { registerResource } from '../crud.js';
 
-// unknown_sender_<policy> covers every UnknownSenderPolicy (src/types.ts) the
-// host actually writes a drop for — strict, request_approval, decline_notify.
-// 'public' is excluded on purpose: setAccessGate (src/modules/permissions/
-// index.ts) admits every sender on a public group before handleUnknownSender
-// ever runs, so the host never records unknown_sender_public.
+/**
+ * Every reason the router or access gate records. unknown_sender_<policy>
+ * covers every UnknownSenderPolicy (src/types.ts) except 'public', which is
+ * excluded on purpose: setAccessGate (src/modules/permissions/index.ts)
+ * admits every sender on a public group before handleUnknownSender ever
+ * runs, so the host never records unknown_sender_public. Deriving the rest
+ * from UNKNOWN_SENDER_POLICIES means a new policy shows up here
+ * automatically instead of silently falling behind.
+ */
+export const DROPPED_MESSAGE_REASONS = [
+  'no_agent_wired',
+  'no_agent_engaged',
+  ...UNKNOWN_SENDER_POLICIES.filter((policy) => policy !== 'public').map(
+    (policy) => `unknown_sender_${policy}` as const,
+  ),
+];
+
 registerResource({
   name: 'dropped-message',
   plural: 'dropped-messages',
@@ -22,13 +35,7 @@ registerResource({
       name: 'reason',
       type: 'string',
       description: 'Why the message was dropped.',
-      enum: [
-        'no_agent_wired',
-        'no_agent_engaged',
-        'unknown_sender_strict',
-        'unknown_sender_request_approval',
-        'unknown_sender_decline_notify',
-      ],
+      enum: DROPPED_MESSAGE_REASONS,
     },
     { name: 'messaging_group_id', type: 'string', description: 'Messaging group ID if resolved.' },
     { name: 'agent_group_id', type: 'string', description: 'Target agent group ID if resolved.' },
