@@ -356,6 +356,24 @@ jobs:
           echo >> "$GITHUB_STEP_SUMMARY"
           echo "Budgets are fixed ceilings tuned against real GitHub Actions runner measurements, not a %-vs-baseline comparison — see each test file's own comment for the baseline this was set against." >> "$GITHUB_STEP_SUMMARY"
 
+  # Skill pins sit outside the lockfile; .github/skill-pins mirrors them so
+  # Dependabot and audit tools can see them. Red when the mirror is stale.
+  skill-pins:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run skill-pins:check
+
   # Repository rules require exact `ci`; always run it so matrix, go-host,
   # pnpm-audit, coverage-gate, performance-gate, and live-egress-lockdown
   # failures all remain blocking. bun-audit is deliberately NOT in this list
@@ -367,7 +385,7 @@ jobs:
   ci:
     if: always()
     needs:
-      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test, go-multi-container-live-docker]
+      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test, go-multi-container-live-docker, skill-pins]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -381,6 +399,7 @@ jobs:
           test "${{ needs.wiring-registry-check.result }}" = success
           test "${{ needs.sync-sibling-branch-script-test.result }}" = success
           test "${{ needs.go-multi-container-live-docker.result }}" = success
+          test "${{ needs.skill-pins.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
