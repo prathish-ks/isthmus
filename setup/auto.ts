@@ -44,7 +44,7 @@ import {
   type ChannelChoice,
 } from './channels/initial-setup.js';
 import { runInheritScript } from './lib/inherit-script.js';
-import { pingCliAgent, PING_AGENT_FOLDER, type PingResult } from './lib/agent-ping.js';
+import { logFirstChat, pingCliAgent, PING_AGENT_FOLDER, type PingResult } from './lib/agent-ping.js';
 import { getSetupProvider, listSetupProviders } from './providers/registry.js';
 import { applyProviderSkill } from './providers/install.js';
 // Provider payloads self-register their picker entry + auth on import.
@@ -576,7 +576,9 @@ async function main(): Promise<void> {
           ),
         ),
       );
+      const pingStart = Date.now();
       const ping = await confirmAssistantResponds();
+      logFirstChat(ping, Date.now() - pingStart);
       if (ping === 'ok') {
         phEmit('first_chat_ready');
         const cleanupRawLog = setupLog.stepRawLog('cleanup-cli-agent');
