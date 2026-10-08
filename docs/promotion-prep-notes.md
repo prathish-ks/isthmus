@@ -239,7 +239,7 @@ Everything above marked `port-verbatim` or `port-with-modification` still needs 
 - **Batch 11 (security-first) — DONE (`92f6c51a`)**: `#4013`, `#3920`, `#3948`'s `reapResidue` gateway-role exclusion half.
 - **`CommandRunner` exit-status extension + `#3962` — DONE (`3127590b`)**: user-approved scope increase, unblocks the cutover-liveness-probe fix.
 - **Batch 12 (update/cutover safety) — 3 of 4 DONE**: `#4012` atomic restore (`4ef60e45`), `#3956` nohup rollback + drain (`76a72caa`), `#3913` controller self-containment, scoped to the SKILL.md fix only (`705067a1`). `#3883` (Iron Control DB on uninstall) deferred — 799 lines across 7 files, new generic Compose-project-scanning machinery, needs its own dedicated pass reading Isthmus's full uninstall scan/plan/remove pipeline and its interaction with the existing `onecli-agents.ts` removal step.
-- **Batch 13 (agent-runner/container)**: `#3893`+`#3994` (sequenced), `#3998` (gateway CA trust), `#3999` (compact-window passthrough), `#3959` (async bun test spawns).
+- **Batch 13 (agent-runner/container) — DONE**: `#3893`+`#3994` (`7dfc02b6`), `#3998` (`87228a36`), `#3999` (`66eb618c`), `#3959` (`7b3ad3a7`).
 - **Batch 14 (Iron Proxy mechanical)**: `#3915`, `#3953`, `#3969`, `#3965` (iron half), `#3981`, `#3982`.
 - **Batch 15 (setup/misc fixes)**: `#3884`, `#3905` (trunk half), `#3910` (wire-dm.ts/q.test.ts), `#3901`, `#3889`, `#3892`, `#3946`, `#3957`, `#3947`, `#3958`+`#3983` combined, `#4008`, `#4017`, `#3997`.
 - **Batch 16 (housekeeping)**: `#3977` (tsx bump), `#3968`+`#4009` (CI pinning/hardening), `#4007` (Dependabot skill-pin visibility), `#3954` (doc comment).
