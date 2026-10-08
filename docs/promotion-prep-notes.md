@@ -216,21 +216,23 @@ Isthmus's `.github/CODEOWNERS` marks `ci.yml`/`approve-agent-image.yml`/`verify-
 
 ## Cross-cutting findings from the full review (not tied to one PR's port decision)
 
-- **Security — OneCLI gateway pinned at a disclosed-vulnerable version.** Isthmus's `versions.json` pins `onecli-gateway` at `1.41.0`; upstream's `#3989` states `1.42.0` closes a credential-injection host-enforcement bypass (`onecli/onecli#438`). See Decisions needed.
+- **Security — OneCLI gateway pinned at a disclosed-vulnerable version — RESOLVED.** User approved bumping now (accepting `/add-dial-tool` going dark); done in `e7864d41` (Batch 7). See Batch 7 table.
 - **Security — unauthenticated loopback gateway webhook.** `src/channels/chat-sdk-bridge.ts`'s `startLocalWebhookServer` accepts any POST with no auth check and can resolve pending approval cards from it. Confirmed real, high confidence, no judgment call needed — `#4013` ports verbatim and should land promptly.
-- **Security (incidental, not from any PR in this range) — unbaselined MCP SDK advisory.** `container/agent-runner`'s `@modelcontextprotocol/sdk@1.30.0` carries `GHSA-6qxp-vccf-f47h` (OAuth client credential leak to an attacker-chosen auth server), found while auditing for `#3974`. Not caused by any PR in this range; worth triaging on its own.
+- **Security (incidental, not from any PR in this range) — unbaselined MCP SDK advisory, STILL OPEN.** `container/agent-runner`'s `@modelcontextprotocol/sdk` is still pinned `^1.30.0` (confirmed via direct read 2026-10-08) — carries `GHSA-6qxp-vccf-f47h` (OAuth client credential leak to an attacker-chosen auth server), found while auditing for `#3974`. Fix is `1.31.0`+. Not caused by any PR in this range. Not currently exploitable in Isthmus's own usage (confirmed via search: `container/agent-runner/src/` has zero use of the SDK's OAuth client — no `authProvider`, `withOAuth`, `fetchToken`), but the vulnerable version sits in the tree regardless — defense in depth if an HTTP MCP server with OAuth is ever wired via `add_mcp_server`. Said earlier in this review that this would be "folded into the housekeeping batch" — it was not; Batch 16 as actually implemented didn't touch it. Still an open action item, not a decision: CLAUDE.md's own supply-chain section already directs "check the release date on npm, pin deliberately" for exactly this package — doing so is a small, independent bump, not blocked on anything else.
 - **Operational — residue-reaping would force-remove the Iron Proxy gateway container.** Confirmed via direct code read (`#3948`'s findings): nothing in `reapResidue` exempts gateway-role containers from a routine sweep.
 - **Operational — Isthmus's own CI surface has drifted further from supply-chain best practice than upstream's current state**, on files Isthmus actively owns per `CODEOWNERS` (`#3968`/`#4009`'s findings) — more unpinned `uses:` lines, same unverified cosign binary.
 - **Doc drift — `docs/gateway-seam.md`** is referenced by `CLAUDE.md` but doesn't exist anywhere in the tree. Pre-existing, not caused by any PR here; blocks a doc-only hunk in `#3964`.
 - **Architecture gaps noted but explicitly out of scope for this round**: no generic `setup/gateways/` provider-selection subsystem (blocks `#4016`/`#3988`), `CommandRunner` has no numeric exit status (blocks `#3962`), `poll-loop.ts` has no queued-turn structure for multi-hop a2a failure notices (blocks half of `#3908`), and several PRs target files that live only on the `channels`/`providers` sibling branches and were not reviewed here (`#3841`'s opencode half, `#3905`'s opencode half, `#3964`/`#3965`'s opencode halves, `#3954`/`#3955`'s opencode halves).
 
-## Decisions needed from the user
+## Decisions from the user (all answered)
 
-1. **Bump the OneCLI gateway pin from 1.41.0 to 1.42.0 now (`#3989`), accepting that `/add-dial-tool` goes dark** (by the `#4036` version-gate's own design, until that skill is rewritten against OneCLI's new policy API) — or hold the vulnerable pin a bit longer while that migration is scoped separately? This is a security-vs-availability sequencing call, not a technical unknown.
-2. **Adopt Iron Proxy's new "keyless local model over plain HTTP" capability (`#3966`)?** This is a `feat`, not a bug fix — it relaxes Iron's TLS-only policy at the Go front-proxy's core security boundary. Needs a real security read of how "this machine only" gets enforced before it could even be considered.
-3. **Extend `CommandRunner` (`scripts/update/service.ts`) with a numeric exit status** to unblock `#3962`'s cutover-liveness-probe fix? This was a disclosed, deliberately-deferred gap from the `#4037` port; extending it is a small scope increase to the primitive, not just applying `#3962`'s diff.
-4. **Add a "core vs. fork" contribution-triage policy to `CONTRIBUTING.md` (`#4011`)?** Isthmus is solo-maintained with no external PR flow today — this is a process-fit question, not a technical one.
-5. **How to handle the two incidentally-found vulnerabilities** (MCP SDK `GHSA-6qxp-vccf-f47h`, and the OneCLI 1.41.0 pin above) — fold into this review's implementation batches, or split off as separate tracked backlog items?
+Recorded here for reference; see the Implementation plan section for commit hashes.
+
+1. OneCLI gateway pin 1.41.0 to 1.42.0: bump now. Done, Batch 7.
+2. Iron Proxy keyless local model over plain HTTP (#3966): adopt it. Implementation still pending a dedicated security read of main.go; see Batch 8 table.
+3. Extend CommandRunner with a numeric exit status for #3962: do it now. Done.
+4. CONTRIBUTING.md core vs fork policy (#4011): skip for now.
+5. Vulnerability tracking: not asked as a separate question; see the MCP SDK note under Cross-cutting findings.
 
 ## Implementation plan (pending, not yet done)
 
