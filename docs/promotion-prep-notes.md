@@ -11,7 +11,13 @@ actually require. When a stable `v2026.10.0` tag lands, this feeds Step
 Step 8, not copied in verbatim.
 
 Source data: `docs/upstream-watch-log.md`'s 2026-10-06 entry — 70 PRs,
-range `b200712e5...`→`d00931ef3` (2026-09-27 through 2026-10-05).
+range `b200712e5...`→`d00931ef3` (2026-09-27 through 2026-10-05). Batch 17
+(2026-10-08) closed the rest of the true `v2.4.0`-to-present range: the
+pre-range gap (4 PRs, 2026-09-23 tag through 2026-09-27) and the one
+PR that landed after `d00931ef3` (`#4051`, 2026-10-06) — confirmed via
+`git log --format=%s v2.4.0..upstream/main` and a fresh fetch that
+nothing newer exists as of 2026-10-08. This document now covers every
+PR upstream has merged since `v2.4.0`, 75 total.
 
 ---
 
@@ -211,6 +217,32 @@ Isthmus's `.github/CODEOWNERS` marks `ci.yml`/`approve-agent-image.yml`/`verify-
 | #4009 | ci: merge agent-image pin bumps by hand, drop the auto-approver | B | `port-with-modification` — directly applicable hardening: delete the never-safely-armable auto-approver workflow, same `AGENT_IMAGE_AUTO_APPROVE` gap confirmed in Isthmus's own CODEOWNERS-claimed workflows |
 | #4007 | ci: let Dependabot see skill-pinned npm versions | C | `port-with-modification` — generic scanner reuses existing `scripts/skill-directives.ts` infra; needs regenerating against Isthmus's own ~34-skill tree, not copying upstream's generated output |
 | #3987 | feat(release): self-approved pre-releases; widen stable approvers | — | `declined:not-applicable` — Isthmus's own `RELEASING.md` explicitly states it ships a single channel with no RC concept; this release machinery looks vestigial/unmaintained |
+
+---
+
+## Batch 17 — completing the review: the v2.4.0 gap + the post-range PR (2026-10-08)
+
+The original "70 PRs" range (`b200712e5...d00931ef3`, 2026-09-27 through
+2026-10-05) was not actually the full v2.4.0-to-present range. Verified
+by diffing every PR number in `git log --format=%s v2.4.0..upstream/main`
+(75 unique, 83 commits) against every PR number this document already
+mentioned (72): exactly 4 PRs merged between the `v2.4.0` tag
+(2026-09-23) and the start of the 70-PR range (2026-09-27) had never
+been reviewed at all, plus the one PR already flagged as "beyond the
+watched range" (`#4051`, merged 2026-10-06 — confirmed via a fresh
+`git fetch upstream main` that it is still the tip as of 2026-10-08,
+nothing newer). This batch closes both gaps — the review is now
+genuinely complete for everything upstream has merged since `v2.4.0`.
+
+| PR | Title | Bucket | Decision |
+|---|---|---|---|
+| #3882 | expose `awaiting_reason` / derive policy-based enums from canonical arrays | C | `port-with-modification` — **confirmed real bug, same class as this session's own #3889**: `src/types.ts`'s `PendingApproval.status` type already includes `'awaiting_reason'`, but `src/cli/resources/approvals.ts`'s CLI-facing enum never did — `ncl approvals help`/filtering has been silently missing it. Upstream's fix introduces `UNKNOWN_SENDER_POLICIES`/`PENDING_APPROVAL_STATUSES` as runtime const arrays and derives `DROPPED_MESSAGE_REASONS` and the `messaging-groups.ts`/`approvals.ts` enums from them — adopting this now also absorbs and properly re-homes this session's own #3889 fix (which hand-edited the literal array directly, before this PR's derivation pattern was known to be upstream's actual shape). |
+| #3890 | explain inbound message block kinds in the chat system prompt | C | `port-verbatim` — confirmed `container/agent-runner/src/destinations.ts`'s `buildSystemPromptAddendum`/`buildDestinationsSection` match the pre-fix shape exactly; the `<cross-session-context>`/`dm-history`/`channel-history` tags it documents all exist in `formatter.ts` exactly as described |
+| #3895 | normalize non-ASCII `send_card` link URLs; llama.cpp-grammar-safe URL pattern | — | `declined:not-applicable` — confirmed `container/agent-runner/src/mcp-tools/interactive.ts`'s `send_card` has no `LINK_ACTION_SCHEMA`/link-action validation at all (a structurally earlier, simpler card implementation: `card` is an untyped object, no `actions` schema). Nothing to fix here yet — would need its own feature work to add link-action support first |
+| #3917 | stop Claude from paying for a named output style on every turn | C | `port-with-modification` — **confirmed real, high-value fix**: `container/agent-runner/src/provider-contracts/claude.ts`'s `tone` default is still the literal `'Concise'`, byte-identical to upstream's pre-fix line. A named Claude Code output style defeats prompt caching (adds a style message to every request, so the cached prefix is never read back) — upstream's fix moves the "be concise" instruction into `container/CLAUDE.md` (already in the cached prefix) and changes the declared default to `'default'`. Isthmus's `container/CLAUDE.md` has the identical pre-fix "Be concise" line. Test/doc halves don't carry over verbatim: Isthmus's `claude.memory-hook.test.ts` has diverged (no `outputStyle`/`'Concise'` assertions to update) and `docs/agent-runner-details.md` has no `configuration.tone` section at all — both skipped, core fix only |
+| #4051 | carry the upgrade marker across setup's local commits | A | **`port-verbatim` — urgent, fixes a regression in this session's own #3997.** Confirmed `src/upgrade-state.ts` matches the pre-fix shape exactly (no `channel`/`ref` fields, no `currentUpgradeState`, `markerPath`/`readUpgradeState`/`isUpgradeCurrent`/`enforceUpgradeTripwire` all still take no `projectRoot` override where this fix adds one). This session's own `#3997` port added `setup/lib/setup-commit.ts`'s `withSetupCommit`/`commitSetupChanges`, which creates a new commit after every skill apply — moving HEAD's commit/tree hash. The upgrade marker (stamped by the service step, checked by `enforceUpgradeTripwire()` on every host boot via `src/index.ts:79`) is never re-stamped after that commit, so the very next boot sees a marker that no longer matches HEAD and refuses to start — treating setup's own sanctioned commit as if it were an unsanctioned `git pull`. No judgment call: this closes a confirmed boot-blocking regression in already-shipped work, not a feature choice. Implemented and verified in this batch, ahead of the other four — see Implementation plan. |
+
+**Batch 17 status**: #4051 implemented immediately given severity (see below). #3882, #3890, #3917 are straightforward ports with no judgment calls — implemented in this same batch. #3895 declined, nothing to port.
 
 ---
 
