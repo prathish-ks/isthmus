@@ -395,6 +395,22 @@ walked through during the test — checked into the promotion instance's own
 docs alongside its other evidence. A rollback claim with no artifact does
 not satisfy this step.
 
+**Lesson from the v2026.10.0 promotion — an architectural argument is not
+a substitute for this step's live test, even a correct one.** Upstream's
+own release named a real lifecycle bug: its update-cutover drain could
+force-stop the gateway container, and residue-reaping then deleted it,
+breaking every subsequent session until the gateway's own setup was
+re-run. Reading Isthmus's own `drainContainers` confirmed it never
+force-stops anything at all, so the exact precondition for upstream's bug
+doesn't exist here — a real, checkable reason the bug can't manifest the
+same way. That is still not what this step asks for. It's a code read,
+not the live gateway-plus-active-session cutover/rollback test Step 7
+actually requires, and an external review correctly declined to accept it
+as equivalent. Any claim of this shape ("our architecture differs, so
+upstream's fix doesn't apply") belongs in Step 7's write-up as the
+*hypothesis* a live run then confirms or refutes — never as the
+conclusion on its own, no matter how sound the reasoning reads.
+
 ## Step 8 — Re-validate immediately before promoting
 
 Re-run Step 2's inventory and classification against the actual release
@@ -439,6 +455,42 @@ silently absorbed into "future work"), has a clear owner, and the
 closing ADR gets a dated addendum (or a fresh ADR cross-referencing it)
 once it's actually resolved — don't let a named gap quietly age into an
 unnamed one.
+
+**Lesson from the v2026.10.0 promotion — three different claims get
+conflated under "parity"; keep them distinct, in the instance document
+and in your own head.** An external review of that promotion's
+implementation PR drew this distinction and it is worth keeping
+permanently:
+
+- **Implementation parity** — Isthmus ports the same mechanism upstream
+  uses. Not required everywhere; demanding it project-wide would
+  undermine this fork's own Go-kernel architecture (LAW-06/LAW-07).
+- **Behavioral parity** — Isthmus produces the same user-visible or
+  security outcome through its own, differently-built mechanism (the
+  `declined-independently-fixed` reconciliation decision, Step 2's
+  `poll-loop.ts` precedent, is exactly this). This is the actual bar for
+  most Bucket C reconciliation — and it requires the same evidence
+  implementation parity would: a test proving the outcome, not just an
+  argument that the architecture differs.
+- **Intentional divergence** — Isthmus consciously does not carry a
+  capability upstream ships, with the limitation named, the user-visible
+  difference stated, and (if it touches a trust boundary) its security
+  implication stated. This is a legitimate, final answer — not every gap
+  needs closing — but it is not the same claim as either kind of parity,
+  and must not be filed as "deferred" if the actual decision is "won't
+  do this, on purpose."
+
+**Completion language is a real claim, not a rhetorical wrap-up — say
+exactly which one you're making.** "All N upstream PRs reviewed and
+classified" is a true, valuable claim about Step 0/2's coverage. It is
+not the same claim as "every applicable upstream behavior is implemented
+or proven equivalent," and a promotion instance document (or this
+skill's own summary to the user) must never let the first sentence imply
+the second — that gap is exactly what let an earlier draft of the
+v2026.10.0 instance document claim "Steps 0–7 done" when Step 7 had not
+actually been run. State the Step 0/2 coverage claim and the Step
+1–7 completion claim separately, and audit the second one before writing
+it, not after.
 
 **Moving the pin is not the same event as an Isthmus release being
 ready to cut.** The v2.4.0 pin moved 2026-09-27; `isthmus-v1.2.0` (the
