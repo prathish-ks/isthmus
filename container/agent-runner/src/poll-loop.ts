@@ -25,6 +25,7 @@ import {
   isRunnerCommand,
   isSessionEcho,
   stripInternalTags,
+  FAILURE_NOTICE_FIELD,
   type RoutingContext,
 } from './formatter.js';
 import { stripHarnessTagArtifacts } from './harness-tag-strip.js';
@@ -271,15 +272,21 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         clearContinuation(config.providerName);
       }
 
-      // Write error response so the user knows something went wrong
-      await writeMessageOut({
-        id: generateId(),
-        kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
-        content: JSON.stringify({ text: `Error: ${errMsg}` }),
-      });
+      // Write error response so the user knows something went wrong — unless
+      // this turn was itself woken only by a failure notice, in which case
+      // writing one here would answer a notice with another (#3908).
+      if (sendsFailureNotice(routing)) {
+        await writeMessageOut({
+          id: generateId(),
+          kind: 'chat',
+          platform_id: routing.platformId,
+          channel_type: routing.channelType,
+          thread_id: routing.threadId,
+          content: JSON.stringify({ text: `Error: ${errMsg}`, [FAILURE_NOTICE_FIELD]: true }),
+        });
+      } else {
+        log('Suppressing failure notice — triggering message was itself a failure notice (#3908)');
+      }
 
       // The batch is still acked completed below (no redelivery). Without
       // this line the only log trace of the errored turn is "Query error"
@@ -785,6 +792,19 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
 }
 
 /**
+ * True when this turn is actually allowed to send a failure notice —
+ * mirrors upstream's own `sendsFailureNotice()` (#3908). A task run has its
+ * own one-door delivery (the run log, not chat); routing with no
+ * platform/channel has nowhere to send to; and a turn woken only by
+ * failure notices must never answer with another one, or an error-notice
+ * exchange between two agents loops (upstream's real incident: 428
+ * notices in 12 minutes).
+ */
+function sendsFailureNotice(routing: RoutingContext): boolean {
+  return !routing.taskRun && !!routing.platformId && !!routing.channelType && !routing.failureNoticeWake;
+}
+
+/**
  * Deliver a turn's text straight to the channel the batch arrived on. Used when
  * a turn ends in a provider error (e.g. a non-retryable 403 billing_error) with
  * no <message> envelope: the notice would otherwise be dropped as scratchpad.
@@ -792,6 +812,10 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
  * `Error:` prefix — the provider's text is already a user-facing message.
  */
 async function deliverErrorResult(text: string, routing: RoutingContext): Promise<void> {
+  if (!sendsFailureNotice(routing)) {
+    log('Suppressing failure notice — replying to another failure notice (#3908)');
+    return;
+  }
   log('Error result with no <message> envelope — delivering to channel');
   await writeMessageOut({
     id: generateId(),
@@ -800,7 +824,7 @@ async function deliverErrorResult(text: string, routing: RoutingContext): Promis
     platform_id: routing.platformId,
     channel_type: routing.channelType,
     thread_id: routing.threadId,
-    content: JSON.stringify({ text: stripHarnessTagArtifacts(text) }),
+    content: JSON.stringify({ text: stripHarnessTagArtifacts(text), [FAILURE_NOTICE_FIELD]: true }),
   });
 }
 

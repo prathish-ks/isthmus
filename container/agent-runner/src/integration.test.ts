@@ -429,6 +429,37 @@ describe('poll loop — provider error recovery', () => {
 
     await loopPromise.catch(() => {});
   });
+
+  it('never answers a failure notice with another, even from the outer catch (#3908)', async () => {
+    insertMessage(
+      'm1',
+      { sender: 'agent-a', text: 'something failed on my end', failureNotice: true },
+      { platformId: 'ag-a', channelType: 'agent' },
+    );
+
+    const provider = new ThrowingProvider('downstream gateway unavailable');
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 2000);
+
+    // getPendingMessages() excludes 'processing' rows too, so it goes empty
+    // as soon as markProcessing runs — well before the batch actually
+    // finishes. markCompleted acks through processing_ack in the outbound
+    // DB (sqlite/operations.ts's mark()), not a messages_in column — wait
+    // for that ack directly.
+    await waitFor(() => {
+      const row = getOutboundDb()
+        .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
+        .get('m1') as { status: string } | undefined;
+      return row?.status === 'completed';
+    }, 2000);
+    controller.abort();
+
+    // The triggering batch was entirely a failure notice, so this error must
+    // not be written back — it would otherwise answer a notice with another.
+    expect(getUndeliveredMessages()).toHaveLength(0);
+
+    await loopPromise.catch(() => {});
+  });
 });
 
 describe('poll loop — stale session recovery', () => {
