@@ -692,28 +692,42 @@ describe('P2-04 guard catalog: CLI-derived restart-style guard (commandDecide)',
   });
 
   it('cli_scope=group denies a wirings-update arg outside the allowed set', async () => {
+    // agent_group_id/group filled as dispatch's own auto-fill always would —
+    // #4061 made the per-key scope check unconditional (present-but-empty no
+    // longer exempted), so a direct commandDecide call must supply the same
+    // values dispatch guarantees in production, or it trips the cross-group
+    // check before ever reaching the branch this fixture means to isolate.
     const decision = await guard(wiringUpdateGuard, {
       actor: agent('g1'),
-      payload: { engage_pattern: '.', foo: 'bar' },
+      payload: { agent_group_id: 'g1', group: 'g1', engage_pattern: '.', foo: 'bar' },
     });
     expect(decision.effect).toBe('deny');
     expect(toParity('guard-cli-scope-wiring-update-args', decision)).toMatchSnapshot();
   });
 
   it('cli_scope=group denies any attempt to change cli_scope itself — privilege escalation', async () => {
-    const decision = await guard(openGroupsGuard, { actor: agent('g1'), payload: { cli_scope: 'global' } });
+    const decision = await guard(openGroupsGuard, {
+      actor: agent('g1'),
+      payload: { agent_group_id: 'g1', group: 'g1', id: 'g1', cli_scope: 'global' },
+    });
     expect(decision.effect).toBe('deny');
     expect(toParity('guard-cli-scope-mutation-denied', decision)).toMatchSnapshot();
   });
 
   it('an access=approval command that passes every scope check holds for admin approval', async () => {
-    const decision = await guard(restartLikeGuard, { actor: agent('g1'), payload: {} });
+    const decision = await guard(restartLikeGuard, {
+      actor: agent('g1'),
+      payload: { agent_group_id: 'g1', group: 'g1', id: 'g1' },
+    });
     expect(decision.effect).toBe('hold');
     expect(toParity('guard-cli-approval-required-hold', decision)).toMatchSnapshot();
   });
 
   it('an access=open command that passes every scope check is allowed', async () => {
-    const decision = await guard(openGroupsGuard, { actor: agent('g1'), payload: {} });
+    const decision = await guard(openGroupsGuard, {
+      actor: agent('g1'),
+      payload: { agent_group_id: 'g1', group: 'g1', id: 'g1' },
+    });
     expect(decision.effect).toBe('allow');
     expect(toParity('guard-cli-open-command', decision)).toMatchSnapshot();
   });
@@ -728,7 +742,11 @@ describe('P2-04 guard catalog: CLI-derived restart-style guard (commandDecide)',
       payload: JSON.stringify({ frame: { command: 'test-restart' } }),
     });
     await createPendingApproval(grant);
-    const decision = await guard(restartLikeGuard, { actor: agent('g1'), payload: {}, grant });
+    const decision = await guard(restartLikeGuard, {
+      actor: agent('g1'),
+      payload: { agent_group_id: 'g1', group: 'g1', id: 'g1' },
+      grant,
+    });
     expect(decision.effect).toBe('allow');
     expect(toParity('guard-cli-grant-satisfied', decision)).toMatchSnapshot();
   });
@@ -740,7 +758,11 @@ describe('P2-04 guard catalog: CLI-derived restart-style guard (commandDecide)',
       payload: JSON.stringify({ frame: { command: 'some-other-command' } }),
     });
     await createPendingApproval(grant);
-    const decision = await guard(restartLikeGuard, { actor: agent('g1'), payload: {}, grant });
+    const decision = await guard(restartLikeGuard, {
+      actor: agent('g1'),
+      payload: { agent_group_id: 'g1', group: 'g1', id: 'g1' },
+      grant,
+    });
     expect(decision.effect).toBe('deny');
     expect(toParity('guard-cli-grant-mismatch', decision)).toMatchSnapshot();
   });

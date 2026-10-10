@@ -156,13 +156,21 @@ func DecideRestartLike(ctx context.Context, scopes CLIScopeLookup, cmd CommandSp
 			return deny(fmt.Sprintf("CLI access is scoped to this agent group. Cannot access %q.", cmd.Resource)), nil
 		}
 
+		// present-but-empty is not exempted here: upstream's own commandDecide
+		// (src/cli/guard.ts) treats "" as a value like any other, and TS's
+		// dispatch.ts fix (#4061) relies on exactly that — an explicitly
+		// empty/falsy scope arg must still deny, not silently pass through as
+		// if the key had never been sent. `present` still gates the check to
+		// "a value this request actually named," so this package's own
+		// synthetic test CommandDefs that never set these keys at all are
+		// unaffected.
 		for _, key := range [...]string{"agent_group_id", "group"} {
-			if v, present := args[key]; present && v != "" && v != actor.AgentGroupID {
+			if v, present := args[key]; present && v != actor.AgentGroupID {
 				return deny("CLI access is scoped to this agent group."), nil
 			}
 		}
 		if cmd.Resource == "groups" || cmd.Resource == "destinations" {
-			if v, present := args["id"]; present && v != "" && v != actor.AgentGroupID {
+			if v, present := args["id"]; present && v != actor.AgentGroupID {
 				return deny("CLI access is scoped to this agent group."), nil
 			}
 		}

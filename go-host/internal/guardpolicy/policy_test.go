@@ -171,6 +171,39 @@ func TestDecide_CLI_ScopeGroupDeniesCrossGroupID(t *testing.T) {
 	}
 }
 
+// Not one of the 13 upstream-golden fixtures: this is Isthmus's own
+// addition, closing the same falsy-bypass bug upstream's #4061 fixed in
+// src/cli/guard.ts's commandDecide (this function's TS original). Before
+// the fix, `v != "" && ...` exempted a present-but-empty value from the
+// cross-group check entirely, so `{"agent_group_id": ""}` fell through to
+// "allow"/"hold" instead of being denied. The one real call site
+// (src/cli/resources/groups.ts's restart handler) never actually sends an
+// empty value — it hardcodes agent_group_id/group/id to the caller's own
+// AgentGroupID — so this was not exploitable in production, but the bug
+// was real and this function's own doc comment claims full parity with the
+// TypeScript original, which no longer has it.
+func TestDecide_CLI_ScopeGroupDeniesEmptyScopeArg(t *testing.T) {
+	db := openTestDB(t)
+	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, openGroupsCmd, agentActor("g1"), map[string]string{"agent_group_id": ""})
+	if err != nil {
+		t.Fatalf("DecideRestartLike: %v", err)
+	}
+	if got.Effect != "deny" {
+		t.Fatalf("effect = %q, want deny (present-but-empty must not be exempted)", got.Effect)
+	}
+}
+
+func TestDecide_CLI_ScopeGroupDeniesEmptyIDArg(t *testing.T) {
+	db := openTestDB(t)
+	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, openGroupsCmd, agentActor("g1"), map[string]string{"id": ""})
+	if err != nil {
+		t.Fatalf("DecideRestartLike: %v", err)
+	}
+	if got.Effect != "deny" {
+		t.Fatalf("effect = %q, want deny (present-but-empty must not be exempted)", got.Effect)
+	}
+}
+
 func TestDecide_CLI_ScopeGroupDeniesWiringUpdateArgsOutsideAllowedSet(t *testing.T) {
 	// guard-cli-scope-wiring-update-args
 	db := openTestDB(t)
