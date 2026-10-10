@@ -1,10 +1,9 @@
 # nanocoai/nanoclaw v2026.10.0 Promotion — Living Plan
 
-Status: **in progress — Step 0 (scope) and the mechanical porting work
-behind Steps 1–7 are substantially done; the playbook's formal artifacts
-for Steps 1–3 (the consumed-contracts re-check, the Step 2 file-inventory
-CSV, and structured Bucket-B acceptance records) have not yet been
-produced as standalone documents, and Steps 8–9 have not started.** This
+Status: **Steps 0–7 done in substance and in the playbook's required
+artifact form. Steps 8–9 have not started** — real CI evidence has not
+yet been gathered (everything below ran locally in this prep worktree),
+and Step 8's immediately-pre-promotion re-validation hasn't run. This
 document is the source of truth for where the promotion actually stands;
 update it in place as each remaining piece lands — don't let the chat
 history that produced it become the only record.
@@ -27,11 +26,11 @@ because the playbook's bar is lower).
 |---|---|
 | Pre-tag classification of 75/83 PRs (17 batches) | `docs/promotion-prep-notes.md` — the authoritative record; this document summarizes it, does not repeat it |
 | Post-tag tail review and port (7 PRs: `#4052`, `#4059`–`#4064`) | This document's "The 7-PR tail" section below, plus the commit messages themselves (each one records what was ported, adapted, or declined, and why) |
-| Full-diff file-inventory CSV (playbook Step 2's required artifact) | **Not yet produced** as the exact `docs/promotion-v2026.10.0-file-inventory.csv` the playbook specifies — see "Open before Step 8" below |
-| Consumed-contracts re-check (Step 1) | **Done ad hoc for the one row `#4061` implicated** (CLI-restart guard decision logic — see the tail section); the other 6 rows of `version-compatibility.md` §1 have not been walked against this tag's diff as a dedicated pass |
-| Security acceptance records (Bucket B) | **Not yet produced** in the playbook's structured form (operation, reachable paths, threat model, named approver, dated expiry, regression test) — this promotion's Bucket-B-adjacent findings (`#4061`, `#4060`, `#4059`) are documented informally in their own commit messages instead |
-| Named, deferred follow-ups | "Named deferred follow-ups" section below, carrying forward `docs/promotion-prep-notes.md`'s own deferred list plus one new item from this tail |
-| CI evidence | Not yet gathered for this promotion — the 384-file / 4790-test full host suite referenced below ran locally in the prep worktree, not on real CI (see "Open before Step 8") |
+| Full-diff file-inventory CSV (playbook Step 2's required artifact) | `docs/promotion-v2026.10.0-file-inventory.csv` — **done**, all 253 changed paths across the full `v2.4.0`→`v2026.10.0` range, every row bucketed (A/B/C) and carrying a `reconciliation_decision`, zero blanks |
+| Consumed-contracts re-check (Step 1) | `go-host/docs/version-compatibility.md` §1 — **done**, all 8 rows walked against the real tag diff and annotated inline (7 clean, 1 break — `#4061`, closed) |
+| Security acceptance records (Bucket B) | This document's "Step 3 — Bucket B trace" section below — **done, zero acceptance records needed**: every Bucket B finding in this range was either closed outright or remains a named, not-yet-implemented deferral (never a decided, accepted bypass), matching `docs/promotion-v2.4.0.md`'s own Workstream C5 precedent |
+| Named, deferred follow-ups | "Named deferred follow-ups" section below |
+| CI evidence | **Not yet gathered.** The 384-file / 4790-test full host suite referenced below ran locally in the prep worktree, not on real CI — needs a pushed branch/PR before this can close (see "Open before Step 8") |
 | Final pin update | `docs/upstream-pin.json` + `docs/baseline.md`'s "Stable Baseline" section — not yet touched; happens only at Step 9 |
 
 ## Goal
@@ -129,6 +128,156 @@ for its own targeted-suite numbers); after the final commit (`#4052`),
 test files / 4790 tests, zero regressions**, run locally in this prep
 worktree on 2026-10-10.
 
+## Step 1 — Consumed-contracts re-check (done)
+
+All 8 rows of `go-host/docs/version-compatibility.md` §1 walked against
+the real `143db6c907c652773a536c7c9e96269fdad0a4a4..7203e00dc271cc2ea9ea84bb130731b8ca00319e`
+diff (not the ambiguous `v2.4.0` tag name — this fork's own release tag
+of the same name collides with upstream's; always resolve by explicit
+SHA when diffing against an upstream tag in this repo). Findings
+recorded inline in that document, dated to this promotion:
+
+- **7 rows clean.** Mount/session admission shape, safe container
+  defaults, and the physical Docker chokepoint rows all cite
+  `src/drivers/types.ts`/`docker-driver.ts` — both files changed in this
+  range, but the only change (`#3948`'s `reapResidue` gateway-role
+  exclusion, already ported pre-tag) touches neither `validateSpec`/
+  `mountAllowed` nor `prepare`/`.stop()` nor RunAs/resource-cap hardening.
+  Session/mailbox identity, self-mod guard logic, `cli_scope`/
+  `pending_approvals` shapes, and the central DB file itself were all
+  untouched in this range outright.
+- **1 row broke, already closed.** CLI-restart guard decision logic —
+  `#4061`'s falsy-value scope bypass, fixed in both `src/cli/guard.ts`
+  and the Go kernel's `DecideRestartLike` (commits `630f48c5`,
+  `56ae7fad`), detailed in the tail table below.
+
+## Step 2 — Full-diff file-inventory CSV (done)
+
+`docs/promotion-v2026.10.0-file-inventory.csv` — all 253 paths changed
+across the whole repo in this range (not scoped to `src/`; swept
+`.claude/skills/`, `setup/`, `container/`, `scripts/`, `.github/`, `docs/`
+too, per the playbook's own v2.4.0 lesson), built by mapping every commit
+in the range to its PR number via the merge-commit graph (not commit-
+subject guessing alone — 8 squash-adjacent commits needed their PR
+inferred from which merge commit's second parent actually contains them),
+then cross-referencing each file's owning PR(s) against
+`docs/promotion-prep-notes.md`'s existing decisions and this document's
+own tail table. Every row's bucket and `reconciliation_decision` is
+filled — zero unclassified rows.
+
+**Keyword sweep** (`gateway|onecli|iron|secret|credential|vault`, the
+playbook's own named list, run verbatim with no additions) surfaced real
+Bucket B membership beyond what each PR's top-level classification alone
+would have shown — matching the exact lesson the playbook names from the
+v2.4.0 promotion. **112 of 253 rows landed in Bucket B**, 61 in A
+(file-pattern matches: `drivers/`, `cli/{dispatch,guard,registry}.ts`,
+`modules/{self-mod,agent-to-agent,kernel-supervisor}/`, `go-host/`), 80
+in C.
+
+**Per-file fidelity, checked, not assumed.** A PR's own top-level
+decision (`docs/promotion-prep-notes.md`'s table, or this document's tail
+table) does not always apply uniformly to every file that PR's upstream
+diff touched — several PRs are "narrowed" (part ported, part declined)
+or bundle multiple provider-specific halves. Rather than trust the
+PR-level label file-by-file, every row was cross-checked against
+`git ls-tree -r HEAD` (does this exact path actually exist in Isthmus's
+tracked tree right now?) and corrected where it didn't match. This caught
+real mismatches, each now reflected as its own CSV row and decision
+rather than inherited from the PR's general characterization:
+
+- `setup/gateways/selection.ts`/`.test.ts` — the generic gateway-selection
+  abstraction these belong to was never adopted (`#3910`'s PR-level
+  decision, `port-with-modification`, applied to a *different* file this
+  same PR touched — `add-wechat/scripts/wire-dm.ts` — not this one).
+- `scripts/update/controller-archive.test.ts` — part of `#3913`'s
+  declined gateway-module-loading half, not its ported SKILL.md half.
+- `setup/installer-shell.test.ts` — part of `#4059`'s shell-interpreter-
+  pinning half, which Isthmus's actual port did not carry (the named
+  `sh` vs `/bin/sh` gap below).
+- `.github/labeler.yml` — no path-based area-labeler workflow exists on
+  this fork at all (confirmed absent); touched by four PRs in this range
+  including this promotion's own `#4063`, all equally not-applicable.
+- `src/reconcile.ts`, `reconcile-queue.test.ts`, `host-sweep.queue.test.ts`
+  — `#3947`'s full queue-based rearchitecture, declined; the underlying
+  bug was real and independently closed with a narrower
+  `stopOrphanedSessions()` fix instead (`declined-independently-fixed`).
+- `.claude/skills/add-mattermost/scripts/verify-runtime.ts` and its two
+  test files — Isthmus's `add-mattermost` skill has no standalone
+  runtime-verification CLI at all (checked directly: confirmed absent,
+  and confirmed no other file in the skill echoes a raw caught error the
+  way `#4060` fixed, so the fix's actual intent is fully closed for every
+  path that exists here).
+- Every `.claude/skills/add-onecli/**` path — forced to
+  `declined:not-applicable:architecture-onecli-stays-core` regardless of
+  which PR touches it; the skill doesn't exist on this fork at all
+  (matching `docs/promotion-v2.4.0-file-inventory.csv`'s own established
+  decision string for the same situation).
+- Every `.claude/skills/add-opencode/payload/**` and
+  `add-codex/payload/**` path — forced to
+  `declined:out-of-scope-tracked-by-sync-sibling-branch-mechanism`
+  (same established v2.4.0 precedent); these live on the `providers`
+  sibling branch, not this fork's `main`.
+
+**Two new gaps surfaced by this per-file check, not previously named**
+(added to "Named deferred follow-ups" below):
+
+- `#3920`'s port only covered the Claude-specific failure-assist
+  restriction (`setup/lib/claude-assist.ts`) — upstream's real diff
+  applies the identical read-only-tools restriction to OpenCode's and
+  Codex's own unattended failure-assist spawns too
+  (`add-opencode/payload/scripts/opencode-host.ts`,
+  `add-codex/payload/setup/providers/codex.ts`), both on sibling
+  branches never reviewed here.
+- `#3966` (Iron Proxy keyless local model over plain HTTP): the user
+  already approved adopting this (`docs/promotion-prep-notes.md`'s
+  "Decisions from the user" §2), but it was never actually implemented —
+  approved, not done. This was recorded in the prep notes but had not
+  yet been carried into this document's own deferred-follow-ups list
+  until now.
+
+## Step 3 — Bucket B trace (done, zero acceptance records needed)
+
+Every Bucket B finding in this range, traced per the playbook's own
+question — is the privileged effect reachable only through the Go
+kernel, or does this create/extend a TS-only gate — and resolved to one
+of two outcomes, never a silent "accepted":
+
+**Closed outright** (fixed, not accepted as a permanent exception):
+`#4061` (CLI-restart guard falsy-bypass, closed in TS and the kernel),
+the independently-found Telegram `@botname` admin-gate bypass closed in
+the same commit, `#4060` (Mattermost owner-ID shell-injection, closed),
+`#4059` (OneCLI installer MITM-downgrade, closed for the TLS half). None
+of these represent a privileged operation this kernel could enforce
+instead — CLI command dispatch, skill-install shell commands, and a
+chat-adapter capture regex are host-process-level TS concerns outside
+LAW-07's kernel-exclusive-enforcement scope entirely (the same category
+`skill-apply.ts`'s shell execution has always been), so there is no
+"should this be kernel-enforced instead" question live here: they were
+bugs, now fixed, not boundary decisions.
+
+**Named, deferred, genuinely undecided** (not an accepted bypass —
+nothing was decided to leave as a permanent TS-only gate; the work is
+simply not done yet): `#3883`, `#3908`, `#3948`'s drain/restart half,
+`#4015`, `#4039`, `#3964`, `#3920`'s opencode/codex halves. Each is named
+with an owner path in "Named deferred follow-ups" below, none silently
+dropped. `#3966` is the one item actually *approved* by the user but not
+yet implemented — once it lands, **that** is the point a real acceptance
+record would be needed (it relaxes Iron Proxy's front-proxy TLS-only
+policy, a genuine new capability, not a bug fix) — not before.
+
+**Zero acceptance records produced**, matching
+`docs/promotion-v2.4.0.md`'s own Workstream C5 precedent exactly (that
+promotion also closed with zero — "every finding closed outright, not
+accepted"). The playbook's acceptance-record mechanism exists for a
+*decided*, *permanent* TS-only exception to kernel enforcement; this
+range produced bugs that got fixed and deferrals that remain genuinely
+open, neither of which that mechanism is for. Also checked: did this
+range touch the one *existing* accepted TS-only decision already on the
+books (`docker-driver.ts`'s `capabilities()` `admissionEnforced: false`)
+— no, confirmed via Step 1's own diff read (`docker-driver.ts`'s only
+change in this range is `reapResidue`'s gateway-role exclusion, a
+different method entirely) — nothing to re-review there.
+
 ## Named deferred follow-ups
 
 Carried forward or newly named — every one has an owner path back to this
@@ -138,7 +287,15 @@ document, none silently dropped:
   not an explicit `/bin/sh` — a `$PATH`-shadowed `sh` could substitute a
   different interpreter for the install script. Named during `#4059`;
   not fixed, since it's a broader decision about shell invocation in that
-  file, not part of that PR's actual upstream change.
+  file, not part of that PR's actual upstream change. Confirmed by Step
+  2's own per-file check: `setup/installer-shell.test.ts` (the
+  interpreter-pinning test upstream added alongside its fix) does not
+  exist in this tree.
+- **New from Step 2's per-file check** (see that section above for the
+  full writeup): `#3920`'s OpenCode/Codex failure-assist halves, never
+  reviewed (sibling branches); `#3966` (Iron Proxy keyless local model),
+  user-approved but not yet implemented — the next item in this list
+  that will need a real Step 3 acceptance record once it lands.
 - **Carried forward from `docs/promotion-prep-notes.md`** (unresolved as
   of this document; re-verify each is still accurate before acting on it,
   per this project's own "verify before recommending from memory"
@@ -169,30 +326,20 @@ document, none silently dropped:
 
 ## Open before Step 8
 
-The mechanical porting work (Steps 2/4/5 in substance) is done for all 83
-PRs. Before this promotion can honestly claim Steps 1–3 satisfied in the
-playbook's own required form, still outstanding:
+The mechanical porting work and Steps 1–7 in substance and required
+artifact form are done for all 83 PRs. Still outstanding before the pin
+can move:
 
-1. **Step 1, full re-check.** Only the one `version-compatibility.md` §1
-   row `#4061` implicated (CLI-restart guard decision logic) was walked
-   against this tag's diff. The other 6 rows have not been re-checked for
-   this specific tag.
-2. **Step 2's file-inventory CSV.** No `docs/promotion-v2026.10.0-file-
-   inventory.csv` exists. The classification substance is real and
-   recorded (`docs/promotion-prep-notes.md` for 75 PRs; this document's
-   tail table for 7), but not in the playbook's specified machine-readable
-   schema.
-3. **Step 3's structured acceptance records.** This tail's Bucket-B-
-   adjacent findings (`#4061`, `#4060`, `#4059`) are documented in their
-   commit messages, not as the playbook's named-approver/dated-expiry
-   acceptance records.
-4. **Real CI evidence.** The 4790-test green run above is local-only, in
-   this prep worktree. This project's own standing rule is to trust real
-   CI log evidence over local sandbox runs for anything timing- or
-   environment-sensitive — this promotion has not yet run on CI at all.
-5. **Step 8 re-validation itself** — re-run Step 2's classification
+1. **Real CI evidence.** The 4790-test green run referenced above is
+   local-only, in this prep worktree. This project's own standing rule is
+   to trust real CI log evidence over local sandbox runs for anything
+   timing- or environment-sensitive — this promotion has not yet run on
+   CI at all. Needs a pushed branch (or PR) before this can close.
+2. **Step 8 re-validation itself** — re-run Step 2's classification
    against the tag's actual current state and re-confirm the tag SHA
    hasn't moved, immediately before any pin-move PR.
+3. **Step 9's pin-move PR** — not prepared yet; follows once 1–2 above
+   are closed.
 
 ## Changelog
 
@@ -200,3 +347,10 @@ playbook's own required form, still outstanding:
   7-PR tail's full port (commits `630f48c5`, `56ae7fad`, `2c92ecaf`,
   `30694633`, `b0fe74af`, `f25871c0`, `91eea7c0`, `0cd61354`), and the
   honest state of what remains before Step 8/9.
+- 2026-10-10 (same day, continued) — Steps 1–3 completed in full: the
+  consumed-contracts re-check (`version-compatibility.md` §1, all 8 rows),
+  the Step 2 file-inventory CSV (253 rows, zero unclassified), and the
+  Step 3 Bucket B trace (zero acceptance records needed). Surfaced and
+  named two previously-untracked gaps along the way (`#3920`'s opencode/
+  codex halves, `#3966`'s approved-but-unimplemented status). Only real
+  CI evidence and Step 8's final re-validation remain before Step 9.
