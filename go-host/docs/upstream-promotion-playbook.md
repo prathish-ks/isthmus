@@ -87,6 +87,17 @@ impressions, before doing anything else:
    move (a point release, a force-push, a correction) between when this
    playbook starts and when the pin actually moves.
 
+**Lesson from the v2026.10.0 promotion — resolve by SHA, never by bare tag
+name.** Isthmus cuts its own releases as `isthmus-vX.Y.Z`-shaped tags, but
+historically some also landed under the bare `vX.Y.Z` name upstream uses —
+a real, confirmed collision: this fork's own local `v2.4.0` tag points at a
+different commit than upstream's annotated `v2.4.0` tag. `git diff
+v2.4.0..v2026.10.0` silently diffed against the *wrong* `v2.4.0` with no
+error. Every Step 0/1/2/8 command that diffs against "the previous pin"
+must use the exact commit SHA recorded in `docs/upstream-pin.json`
+(`git diff <pin-sha>..<tag-sha>`), never the bare tag name, even though the
+tag name is what gets recorded in prose for readability.
+
 This step's output is not a design decision — it's just making sure Steps
 1–3 below are scoped against reality (how big is this, really) before
 spending effort on them.
@@ -160,6 +171,29 @@ inventory, not a prose claim, is now required: a sentence saying "the
 sweep was complete" would not have caught it either. Sweep the whole repo
 diff (`container/agent-runner/src/`, `setup/`, `.claude/skills/`, not just
 `src/`) before classifying.
+
+**Lesson from the v2026.10.0 promotion — a PR's own top-level decision does
+not reliably apply to every file that PR's upstream diff touched.** Several
+PRs are "narrowed" (part of the diff ported, part declined) or bundle
+multiple provider-specific halves (e.g. one PR fixing the same bug class in
+both Claude's and OpenCode's own failure-assist spawn — only the Claude
+half reviewed, the OpenCode half living on a sibling branch never looked
+at). Inheriting the PR-level label file-by-file produces real, silent
+mismatches: a file the PR's prose says was "ported" that was actually
+declined (or vice versa), because the prose was written about the PR as a
+whole, not that specific path. **Cross-check every row against `git
+ls-tree -r HEAD <path>`** — does this exact path actually exist in the
+tree right now? — and correct any row where the PR-level label doesn't
+hold for that specific file. This caught several real cases in that
+promotion: a generic abstraction a PR's diff touched but this fork never
+adopted at all (so that specific file is `declined:not-applicable` even
+though the PR's other files are genuinely `port-with-modification`), a
+test file for a mechanism that doesn't exist here, and a workflow-config
+file touched by four different PRs that's equally not-applicable to all
+four since the whole mechanism it configures is absent. Do this check
+before finalizing the inventory, not as an afterthought — a CSV that
+blindly repeats PR-level text per file is not meaningfully more trustworthy
+than the prose-sweep claim this format exists to replace.
 
 For every changed path, assign one of:
 
@@ -275,7 +309,28 @@ modification / decline and why) in Step 2's inventory, not separately.
   local sandboxes have repeatedly diverged from the actual GitHub Actions
   runner in ways that mattered, e.g. container UID/permission behavior).
   Apply the same zero-failures, named-exception-only standard to lint and
-  audit findings as to tests.
+  audit findings as to tests. **"Full suite" means both runtimes, every
+  time** — `pnpm test` (host, vitest) *and* `cd container/agent-runner &&
+  bun test` (container, bun). **Lesson from the v2026.10.0 promotion**:
+  this promotion's local verification only ever ran the host suite across
+  every single commit; the container suite was never run locally even
+  once, and a real pre-existing bug (a test file whose
+  registry-based provider lookup depended on *another* test file's import
+  side effects to register it, rather than importing the barrel itself)
+  slipped through 384 host test files clean, then failed on real CI —
+  which pins an exact `bun-version` different from the local sandbox's,
+  changing test-file discovery/execution order enough to expose it. Do
+  not report Step 6 as satisfied from a host-only local run.
+- **Before treating any red CI job as a Step 6 regression, check whether
+  it's actually in the required `ci` gate's `needs:` list** (or marked
+  `continue-on-error`) in `.github/workflows/ci.yml`. This project runs
+  several report-only jobs deliberately (e.g. `semgrep`'s `src/` scan is
+  diff-scoped against a pre-triaged baseline of known false positives —
+  see that job's own header comment — so it re-surfaces old, already-
+  accepted findings on any PR that merely touches one of those files, by
+  design, and is explicitly not required). A job going red is not
+  automatically a new finding to chase; confirm it's required first, then
+  investigate.
 - Update `version-compatibility.md` §1, `compatibility-matrix.md`'s
   ratings (any row covered by an open acceptance record from Step 3 stays
   below Stable unless that record explicitly says otherwise),
