@@ -283,7 +283,8 @@ it('rejects malformed proxy summary metadata', async () => {
 });
 
 const compatibilityFixtures = JSON.parse(fs.readFileSync('gateway-compat/onecli-summary/fixtures.json', 'utf8')) as {
-  name: string; request: { host: string; method: string; path: string };
+  name: string;
+  request: { host: string; method: string; path: string };
   summary: { action: string; details: { label: string; value: string }[] };
 }[];
 
@@ -294,7 +295,9 @@ it.each(compatibilityFixtures)('preserves OneCLI approval content: $name', async
   await vi.waitFor(() => expect(held.size).toBe(1));
   const decision = [...held.values()][0];
   expect(decision.request.summary).toEqual({
-    agent: identity.groupName, action: fixture.summary.action, details: fixture.summary.details,
+    agent: identity.groupName,
+    action: fixture.summary.action,
+    details: fixture.summary.details,
     resource: `${fixture.request.method} ${fixture.request.host}${fixture.request.path}`,
     reason: 'The gateway policy requires human approval for this request.',
   });
