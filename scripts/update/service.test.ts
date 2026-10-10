@@ -297,7 +297,7 @@ describe('drain and health gates', () => {
   it('filters active containers by this install slug', async () => {
     const root = temp();
     const label = `nanoclaw-install=${slug(root)}`;
-    const key = `docker ps -q --filter label=${label} --format ${roleFormat}`;
+    const key = `docker ps --filter label=${label} --format ${roleFormat}`;
     const { env, calls } = makeEnv('linux', {
       [key]: { ok: true, stdout: '' },
     });
@@ -309,7 +309,7 @@ describe('drain and health gates', () => {
   it('never waits on a gateway-role container (#3948) — returns immediately', async () => {
     const root = temp();
     const label = `nanoclaw-install=${slug(root)}`;
-    const key = `docker ps -q --filter label=${label} --format ${roleFormat}`;
+    const key = `docker ps --filter label=${label} --format ${roleFormat}`;
     const { env } = makeEnv('linux', {
       [key]: { ok: true, stdout: 'abc123|gateway' },
     });
@@ -322,7 +322,7 @@ describe('drain and health gates', () => {
   it('still waits for (and times out on) a real non-gateway container', async () => {
     const root = temp();
     const label = `nanoclaw-install=${slug(root)}`;
-    const key = `docker ps -q --filter label=${label} --format ${roleFormat}`;
+    const key = `docker ps --filter label=${label} --format ${roleFormat}`;
     let sleeps = 0;
     const { env } = makeEnv('linux', {
       [key]: { ok: true, stdout: 'def456|agent' },

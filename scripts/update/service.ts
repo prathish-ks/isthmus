@@ -353,9 +353,13 @@ export async function drainContainers(
     // (`--restart unless-stopped`), so draining must never wait on it —
     // a cutover or rollback that did would hang the full timeout and
     // fail every time Iron Proxy is installed.
+    // `-q` and `--format` cannot be combined — docker silently drops the
+    // format and falls back to bare IDs with a warning ("Ignoring custom
+    // format, because both --format and --quiet are set"), which would
+    // make every container's role read as undefined and defeat the
+    // exclusion below. `--format '{{.ID}}|...}'` already includes the ID.
     const listed = env.runner.tryRun(runtime, [
       'ps',
-      '-q',
       '--filter',
       `label=${label}`,
       '--format',
