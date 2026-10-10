@@ -248,14 +248,12 @@ async function ensureGatewaySession(sessionId: string, input: GatewaySessionInpu
  * is skipped; adopted sessions have a lease like any other and are
  * released the same way.
  *
- * Known, named gap, not fixed here: Iron Proxy declares no `release()`
- * method at all (cleanup is entirely abort-signal-driven), so a
- * `'host-detached'` release has the same effect on it as
- * `'session-ended'` today — it revokes the session's live identity via
- * `cancelIdentity()` immediately, rather than preserving it for a
- * successor host. Closing that fully needs a real, provider-specific
- * `release()` on Iron Proxy that treats the two kinds differently —
- * genuinely security-sensitive work, out of scope here.
+ * Iron Proxy's own `release()` (`attachLeaseLifecycle`,
+ * gateway-providers/iron-proxy.ts) already gates `cancelIdentity()` on
+ * `event.kind === 'session-ended'`, so a `'host-detached'` release here
+ * detaches this host's local lease tracking without revoking the
+ * session's live identity — the resource is preserved for a successor
+ * host's `adoptRunningSessions` to re-`ensure()`, as intended.
  */
 export async function releaseAllGatewaySessions(reason = 'host-shutdown'): Promise<void> {
   await Promise.all(
@@ -837,10 +835,17 @@ export async function buildMounts(
   const defaultSurfaces = !contract && !providerProvidesAgentSurfaces(provider);
 
   const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
-  // The host-owned anchor syncSkillSymlinks walks `.claude-shared` through,
-  // rather than baking it into the root it opens (see that function's own
-  // doc comment for why this split matters).
+  // False positive: `agentGroup.id` is always a DB primary key resolved by
+  // the caller, never external input. `groupSessionBaseDir` is the
+  // host-owned anchor syncSkillSymlinks walks `.claude-shared` through
+  // (rather than baking it into the root it opens — see that function's own
+  // doc comment for why this split matters); `claudeDir` below is used only
+  // for the Docker mount's hostPath, not a raw fs call. Same disposition as
+  // this project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const groupSessionBaseDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id);
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const claudeDir = path.join(groupSessionBaseDir, '.claude-shared');
   const sessDir = sessionDir(agentGroup.id, session.id);
   const projectDocument = contract?.projectDocument;

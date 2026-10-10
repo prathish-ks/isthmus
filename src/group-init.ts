@@ -86,7 +86,17 @@ export async function initGroupFilesystem(
     // baked into a root string checked with plain fs calls. Same bug class
     // as `provider-contracts/realize.ts`'s `prepareSpawnFile`, fixed there
     // first.
+    //
+    // False positive: `group.id` is always a DB primary key resolved by the
+    // caller, never external input. The `existsSync` below is a bookkeeping
+    // presence check only (for the "was this newly created" log signal), not
+    // the actual access — that goes through AnchoredDir.open() immediately
+    // after (descriptor-guarded, symlinks refused). Same disposition as this
+    // project's other path-join-resolve-traversal false positives (see
+    // .github/workflows/ci.yml's semgrep-scope comment).
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
     const groupSessionBaseDir = path.join(DATA_DIR, 'v2-sessions', group.id);
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
     const claudeSharedExisted = fs.existsSync(path.join(groupSessionBaseDir, '.claude-shared'));
     const claudeShared = AnchoredDir.open(groupSessionBaseDir, ['.claude-shared'], true);
     if (!claudeShared) throw new Error(`Claude state directory is missing: '${groupSessionBaseDir}'`);
