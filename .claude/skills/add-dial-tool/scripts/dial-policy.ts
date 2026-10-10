@@ -17,6 +17,8 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { getOnecliApiHost } from '../../../../setup/onecli.js';
+
 export const DIAL_HOST = 'api.getdial.ai';
 export const BLOCK_RULE = 'Dial: blocked agents';
 /** The legacy per-agent block rules migrate under their own names. */
@@ -322,15 +324,17 @@ export async function removeDial(client: PolicyClient): Promise<number> {
 const run = (cmd: string, args: string[]): string =>
   execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
-/** The gateway the onecli CLI writes to, and the key it authenticates with. */
+/**
+ * The gateway the onecli CLI writes to, and the key it authenticates with.
+ * The host lookup defers to `getOnecliApiHost()` (setup/onecli.ts) rather
+ * than re-parsing `onecli config get api-host` here — that helper tolerates
+ * both onecli 1.3+'s JSON output and older raw-text output; a second,
+ * JSON-`value`-only parser here previously meant this skill's `scope`/
+ * `remove` commands failed with "api-host is unknown" on installs the main
+ * setup flow handles fine.
+ */
 export function cliConnection(): { url: string; apiKey: string } {
-  let url = '';
-  try {
-    const parsed: unknown = JSON.parse(run('onecli', ['config', 'get', 'api-host']));
-    if (isRecord(parsed) && typeof parsed.value === 'string') url = parsed.value.trim();
-  } catch {
-    url = '';
-  }
+  const url = getOnecliApiHost();
   if (!url) throw new Error("could not read the onecli CLI's api-host, so the OneCLI gateway is unknown");
   // A gateway with ambient local auth needs no key; the CLI then fails here
   // and the requests go without one.

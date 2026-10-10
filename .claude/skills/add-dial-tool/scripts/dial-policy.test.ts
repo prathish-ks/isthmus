@@ -446,16 +446,23 @@ describe('dial-policy: the command', () => {
     return { url: `http://127.0.0.1:${port}`, log, rules: () => published, secrets };
   }
 
-  function stubs(url: string, opts: { apiKey?: boolean } = {}): string {
+  function stubs(url: string, opts: { apiKey?: boolean; rawTextHost?: boolean } = {}): string {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'dial-policy-'));
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin);
     const write = (name: string, body: string) =>
       fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    // `config get` output: JSON by default (onecli 1.3+), or older raw text
+    // when `rawTextHost` is set — getOnecliApiHost() (setup/onecli.ts) is
+    // the shared helper this skill defers to for this lookup specifically
+    // because it tolerates both shapes.
+    const configGet = opts.rawTextHost
+      ? `echo "api-host: ${url} (configured)"`
+      : `echo '{"key":"api-host","value":"${url}"}'`;
     write(
       'onecli',
       `case "$1 $2" in
-  "config get") echo '{"key":"api-host","value":"${url}"}' ;;
+  "config get") ${configGet} ;;
   "auth api-key") ${opts.apiKey === false ? 'echo "not logged in" >&2; exit 1' : `echo '{"apiKey":"oc_stub"}'`} ;;
   *) exit 1 ;;
 esac`,
@@ -507,6 +514,19 @@ esac`,
     expect(rm.status).toBe(0);
     expect(rm.stdout).toContain('removed 1 Dial policy rule(s)');
     expect(gw.rules()).toEqual([]);
+  }, 60_000);
+
+  it('reads the gateway host from older onecli raw-text output too, not just the JSON shape', async () => {
+    // cliConnection() used to parse `config get api-host` itself, checking
+    // only the JSON `{"value": ...}` shape — a real onecli CLI emitting the
+    // older raw-text form (which getOnecliApiHost() in setup/onecli.ts is
+    // written and tested to tolerate) made this command fail with "api-host
+    // is unknown" even though the main setup flow handles the same host fine.
+    const gw = await gateway();
+    const bin = stubs(gw.url, { rawTextHost: true });
+    const r = await cli(bin, ['scope', '--agents', 'none']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('blocked:ag-sales\nblocked:ag-support\npublished\n');
   }, 60_000);
 
   it('runs keyless when the CLI holds no key, and fails loudly on a bad selection', async () => {
