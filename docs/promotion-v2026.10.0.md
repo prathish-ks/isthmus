@@ -1,12 +1,16 @@
 # nanocoai/nanoclaw v2026.10.0 Promotion — Living Plan
 
-Status: **Steps 0–7 done in substance and in the playbook's required
-artifact form. Steps 8–9 have not started** — real CI evidence has not
-yet been gathered (everything below ran locally in this prep worktree),
-and Step 8's immediately-pre-promotion re-validation hasn't run. This
-document is the source of truth for where the promotion actually stands;
-update it in place as each remaining piece lands — don't let the chat
-history that produced it become the only record.
+Status: **Steps 0–6 done in substance and in the playbook's required
+artifact form (Step 6's wiring-registry/ADR-028 check still needs a real
+run). Step 7 (migration continuity) has not actually been done for this
+promotion — an earlier version of this document claimed Steps 0–7 were
+complete; that was wrong, caught during an external review of PR #73 (see
+"External review findings" below), and is corrected here.** Steps 8–9
+have not started. This document is the source of truth for where the
+promotion actually stands; update it in place as each remaining piece
+lands — don't let the chat history that produced it become the only
+record, and don't let a status line get ahead of what was actually
+checked.
 
 Companion to `go-host/docs/upstream-promotion-playbook.md` (the
 version-agnostic procedure this document is an instance of),
@@ -278,67 +282,144 @@ books (`docker-driver.ts`'s `capabilities()` `admissionEnforced: false`)
 change in this range is `reapResidue`'s gateway-role exclusion, a
 different method entirely) — nothing to re-review there.
 
+## External review findings (PR #73)
+
+An external review of this promotion's implementation PR (`#73`, head
+`3425f7f`) surfaced two real, previously-unnamed findings and correctly
+challenged this document's own completion language. Recorded here rather
+than left to scroll off in review comments.
+
+**Two concrete findings, both verified directly and fixed (not just
+named) in this PR:**
+- `src/provider-contracts/realize.ts`'s `prepareSpawnFile` (the
+  `append-open-close` operation) opened its target through a raw path
+  string with `O_NOFOLLOW` on the final component only — the same TOCTOU
+  class `#4063`'s `AnchoredDir` work closed everywhere else in this file,
+  missed here. Confirmed dormant (no registered provider contract
+  declares an `append-open-close` file today — zero matches in
+  `container/agent-runner/src/provider-contracts/claude.ts`), so not a
+  live regression, but a real gap for the next provider that declares
+  one. Fixed by routing through `AnchoredDir.open` + `appendFile` like
+  every other agent-writable-mount site in the file; added a
+  nested-relativePath test and a negative control (symlinked
+  intermediate directory refused, not followed).
+- `src/session-manager.ts`'s `extractAttachmentFiles` doc comment still
+  described the pre-`#4063` lstat/realpath defense list, even though the
+  function body already uses `AnchoredDir` correctly (confirmed: its own
+  inline comment, added by `#4063`, already said so). Corrected the doc
+  comment — no behavior change, just stopped describing a mechanism that
+  no longer enforces the boundary.
+
+**The completion-language correction**: this document previously said
+"Steps 0–7 done." That was wrong. Steps 1–6 are done in substance and
+artifact form (Step 6's ADR-028 wiring-registry check still needs a real
+run). **Step 7 (migration continuity) was never actually worked on in
+this promotion** — no concrete, executable acceptance test with a
+recorded rollback artifact exists for this tag, per the playbook's own
+Step 7 requirement. This matters specifically for the `#3948` item below.
+
+**On `#3948` (gateway survival through update cutover/rollback)**:
+checked directly, not assumed — `scripts/update/service.ts`'s
+`drainContainers` and `scripts/update/transaction.ts` contain zero
+`docker stop`/`docker kill` calls; drain only polls for containers to
+exit on their own. Upstream's bug (drain force-stopping the central Iron
+Proxy container, residue-reap then deleting it) requires a force-stop
+step that structurally doesn't exist in this codebase — a real
+architectural reason the bug can't manifest the way it did upstream, not
+just an assumption. But this has been read from the code, not proven by
+a live gateway+cutover+rollback test — exactly what Step 7 would produce
+if it were actually done. Reclassified below from "possibly deliberate,
+unresolved" to "architecturally sound, needs Step 7's live evidence."
+
+**Scope boundary, which the review itself draws and this document
+agrees with**: none of the above should block PR `#73` (the
+implementation-prep PR) from merging on its own CI and review — the
+playbook has always treated the implementation PR and the Step 9 pin-move
+PR as carrying different assurance bars, and named, non-blocking
+follow-ups are an accepted, tracked pattern here (the gateway-lease-
+continuity/poll-loop.ts precedent the skill already cites). What changes
+is Step 9's own gate: it cannot be satisfied by "all 83 PRs reviewed and
+classified" alone. See "Open before Step 8/9" below for the sharpened
+list.
+
 ## Named deferred follow-ups
 
 Carried forward or newly named — every one has an owner path back to this
-document, none silently dropped:
+document, none silently dropped. Each now carries an explicit
+disposition for the Step 9 gate (fix before pin / accept-and-document /
+needs a live test), not just a bucket of "deferred":
 
-- **New this tail**: `setup/onecli.ts`'s installer still pipes to `sh`,
-  not an explicit `/bin/sh` — a `$PATH`-shadowed `sh` could substitute a
-  different interpreter for the install script. Named during `#4059`;
-  not fixed, since it's a broader decision about shell invocation in that
-  file, not part of that PR's actual upstream change. Confirmed by Step
-  2's own per-file check: `setup/installer-shell.test.ts` (the
-  interpreter-pinning test upstream added alongside its fix) does not
-  exist in this tree.
-- **New from Step 2's per-file check** (see that section above for the
-  full writeup): `#3920`'s OpenCode/Codex failure-assist halves, never
-  reviewed (sibling branches); `#3966` (Iron Proxy keyless local model),
-  user-approved but not yet implemented — the next item in this list
-  that will need a real Step 3 acceptance record once it lands.
-- **Carried forward from `docs/promotion-prep-notes.md`** (unresolved as
-  of this document; re-verify each is still accurate before acting on it,
-  per this project's own "verify before recommending from memory"
-  discipline):
-  - `#3964`/`#3965`'s OpenCode-provider halves — target files live only
-    on the `providers` sibling branch, not reviewed against `main`.
-  - `#4039` (upgrade guide refuses an empty gateway pin) — sequencing
-    dependency (`#3989`) is now resolved; ready to schedule whenever this
-    branch returns to the deferred-items backlog.
-  - `#3908`'s multi-queued-a2a-turn half (no `queuedTurns` structure in
-    Isthmus's `poll-loop.ts`) — flagged during the v2.4.0-era review as
-    needing a human call on its own merits; that question was never
-    actually put to the user, and no part of it (including its simpler
-    single-turn half) has been implemented.
-  - `#3948`'s drain/restart half — Isthmus's `drainContainers` never
-    force-stops at all, flagged "possibly deliberate" during
-    classification and never resolved either way. (Its `reapResidue`
-    gateway-role-exclusion half already shipped, pre-tag.)
-  - `#3883` (remove Iron Control's database on uninstall) — 799 lines
+- **Must close or explicitly accept-and-document before Step 9** (real
+  operational or security-relevant gaps upstream's own release already
+  closed):
+  - `#3908` — A2A failure-notice loops. `poll-loop.ts` still uses
+    `deliverErrorResult()` with no suppression; upstream's own incident
+    (428 notices in 12 minutes) is a believable failure mode on this
+    fork too. Needs either a narrow suppression mechanism (preserving
+    this fork's own routing architecture, not upstream's `queuedTurns`
+    rewrite) or an explicit, dated risk-acceptance note.
+  - `#4039` — OneCLI upgrade guide has no executable version-validation
+    guard (manual env-var substitution only); an empty/unset pin could
+    silently resolve to `:latest`. Low severity (a doc/guide gap, not a
+    runtime enforcement path) and a small fix — no real reason to leave
+    this open past Step 9.
+  - `#3966` — Iron Proxy keyless local HTTP model. User-approved
+    adopting this (`docs/promotion-prep-notes.md`'s "Decisions from the
+    user" §2) but never implemented. This inconsistency (approved ≠
+    shipped) needs resolving one way before claiming parity: implement
+    it for real feature parity (needs its own security review — it
+    changes Iron's trust boundary), or explicitly keep this fork's
+    stricter TLS-only rule and document the divergence. Either is fine;
+    leaving it ambiguous is not.
+- **Needs Step 7's live evidence, not further architectural reasoning**:
+  - `#3948` — gateway survival through update cutover/rollback. See the
+    External review findings section above: the architectural argument
+    is real (`drainContainers` cannot force-stop anything), but
+    unproven by a live test. A real Step 7 pass for this tag should
+    include an Iron Proxy + active-session cutover/rollback scenario,
+    not just a code read.
+- **Large, separate efforts — reasonable to defer past this promotion,
+  tracked with an owner**:
+  - `#3883` — Iron Control database cleanup on uninstall. 799 lines
     across 7 files of new generic Compose-project-scanning machinery;
-    needs its own dedicated pass against Isthmus's full uninstall
-    scan/plan/remove pipeline.
-  - `#4015` (skip the approval card for reads carrying no credential) —
-    needs predecessor abstractions Isthmus's `gateway-approval-
-    coordinator.ts` doesn't have yet (`modelAuthorities`,
-    `credentialScope`, `gateway-read-policy.ts`); its own dedicated
-    Step-3 trust-boundary pass, not a quick port.
+    needs its own dedicated pass against this fork's uninstall
+    scan/plan/remove pipeline, not squeezed into this promotion.
+  - `#3964`/`#3965`'s OpenCode-provider halves, `#3920`'s OpenCode/Codex
+    failure-assist halves — target files live only on the `providers`
+    sibling branch, never reviewed against `main`. Reasonable to leave
+    there until that branch gets its own review pass; the sibling branch
+    itself still needs that pass before being offered to users.
+  - `#4015` — needs predecessor abstractions (`modelAuthorities`,
+    `credentialScope`, `gateway-read-policy.ts`) this fork doesn't have
+    yet. Its own dedicated Step-3 trust-boundary pass. Already more
+    restrictive than upstream's opt-in default, so not a regression —
+    just not yet implemented.
+  - `setup/onecli.ts`'s installer piping to `sh` instead of an explicit
+    `/bin/sh` (named during `#4059`) — a real but narrow hardening gap,
+    small fix, not security-critical (runs on the operator's own
+    machine during setup).
 
-## Open before Step 8
+## Open before Step 8/9
 
-The mechanical porting work and Steps 1–7 in substance and required
-artifact form are done for all 83 PRs. Still outstanding before the pin
-can move:
+Still outstanding before the pin can move — sharpened per the external
+review above, not just "CI + re-validation":
 
-1. **Real CI evidence.** The 4790-test green run referenced above is
-   local-only, in this prep worktree. This project's own standing rule is
-   to trust real CI log evidence over local sandbox runs for anything
-   timing- or environment-sensitive — this promotion has not yet run on
-   CI at all. Needs a pushed branch (or PR) before this can close.
-2. **Step 8 re-validation itself** — re-run Step 2's classification
+1. **Real CI evidence.** Now exists for this PR (`#73`'s own CI run) —
+   confirm the required `ci` gate (not `semgrep`, which is report-only
+   and already addressed above) is green before treating this as closed.
+2. **Step 7, actually done.** A concrete, executable migration-
+   continuity acceptance test for this tag, with a recorded rollback
+   artifact — including the live Iron Proxy cutover/rollback scenario
+   `#3948` needs. Not yet started.
+3. **The three "must close or accept-and-document" items** (`#3908`,
+   `#4039`, `#3966`) — either fixed, or each given an explicit, dated
+   risk-acceptance note naming the user-visible difference and the
+   security implication. Ask the user how much of this to do now versus
+   name as Step-9-blocking follow-ups with an owner.
+4. **Step 8 re-validation itself** — re-run Step 2's classification
    against the tag's actual current state and re-confirm the tag SHA
    hasn't moved, immediately before any pin-move PR.
-3. **Step 9's pin-move PR** — not prepared yet; follows once 1–2 above
+5. **Step 9's pin-move PR** — not prepared yet; follows once 1–4 above
    are closed.
 
 ## Changelog
