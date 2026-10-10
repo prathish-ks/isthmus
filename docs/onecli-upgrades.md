@@ -20,11 +20,12 @@ Why gateways fall behind: the OneCLI installer's docker-compose tracks the `late
 
 ## 2. Upgrade
 
-The gateway runs as a Docker service in `~/.onecli`. Upgrade just that container to the pinned `onecli-gateway` version — vault data lives in named Docker volumes and survives. This upgrades only the gateway; the CLI binary is pinned separately (see below).
+The gateway runs as a Docker service in `~/.onecli`. Upgrade just that container to the pinned `onecli-gateway` version — vault data lives in named Docker volumes and survives. This upgrades only the gateway; the CLI binary is pinned separately (see below). Every command below refuses to run if `ONECLI_VERSION` is left unset — Docker Compose silently falls back to `:latest` on an empty value, pinning nothing.
 
 **Local gateway (the common case):**
 
 ```bash
+: "${ONECLI_VERSION:?set this to the onecli-gateway pin from versions.json}"
 cd ~/.onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker compose pull onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker compose up -d
 ```
 
@@ -45,7 +46,14 @@ docker run --rm --add-host=host.docker.internal:host-gateway \
   curlimages/curl -s -o /dev/null -w '%{http_code}' http://host.docker.internal:10254/v1/health
 ```
 
-This must print `200`. If it can't connect while the host-side check passed, set the bind address in `~/.onecli/.env` to the docker-bridge IP (or `0.0.0.0` on a host with a closed firewall) and `cd ~/.onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker compose up -d`. Symptom if skipped: host log clean, agents fail all API calls.
+This must print `200`. If it can't connect while the host-side check passed, set the bind address in `~/.onecli/.env` to the docker-bridge IP (or `0.0.0.0` on a host with a closed firewall) and re-run:
+
+```bash
+: "${ONECLI_VERSION:?set this to the onecli-gateway pin from versions.json}"
+cd ~/.onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker compose up -d
+```
+
+Symptom if skipped: host log clean, agents fail all API calls.
 
 Finally, restart the NanoClaw service (per-install names — derive with `setup/lib/install-slug.sh`):
 
@@ -59,6 +67,7 @@ source setup/lib/install-slug.sh && systemctl --user restart $(systemd_unit)
 ## 4. Rollback
 
 ```bash
+: "${ONECLI_VERSION:?set this to the old onecli-gateway version you're rolling back to}"
 cd ~/.onecli && ONECLI_VERSION=<old-version> docker compose up -d
 ```
 
