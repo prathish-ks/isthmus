@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"strings"
 	"syscall"
 	"time"
@@ -174,8 +175,43 @@ func authority(raw, scheme string) (string, error) {
 	return net.JoinHostPort(strings.ToLower(u.Hostname()), port), nil
 }
 
+// Docker's own host-gateway alias, reachable only via the narrower
+// plain-HTTP, OpenAI-route-shaped rule forward() applies to it below — the
+// local-model path is deliberately never admitted by the normal
+// HTTPS/CONNECT allowlist, whatever an operator's allowed_hosts says.
+const localModelHost = "host.docker.internal"
+
+var openAIRoutes = map[string]string{
+	"/v1/models":           "GET",
+	"/v1/chat/completions": "POST",
+	"/v1/completions":      "POST",
+	"/v1/embeddings":       "POST",
+	"/v1/responses":        "POST",
+}
+
+// openAIRequest bounds the local-model path to recognized OpenAI inference
+// routes only — not an arbitrary request to whatever is listening on the
+// operator's machine. Rejects any path with raw-path/encoded-separator
+// tricks before matching, so a cleaned path can't be used to smuggle a
+// different route past the check than what the backend actually receives.
+func openAIRequest(r *http.Request) bool {
+	p := r.URL.Path
+	clean := path.Clean(p)
+	if r.URL.RawPath != "" || strings.ContainsAny(p, "\\%") || (clean != p && clean+"/" != p) {
+		return false
+	}
+	if strings.HasPrefix(clean, "/v1/models/") && !strings.Contains(clean[len("/v1/models/"):], "/") {
+		return r.Method == "GET"
+	}
+	method, ok := openAIRoutes[clean]
+	return ok && r.Method == method
+}
+
 func (g *gateway) allowed(host string) bool {
 	host = strings.ToLower(host)
+	if host == localModelHost {
+		return false
+	}
 	for _, pattern := range g.cfg.AllowedHosts {
 		pattern = strings.ToLower(pattern)
 		if host == pattern {
@@ -293,7 +329,18 @@ func (g *gateway) forward(r *http.Request, identity, tunnel string) *http.Respon
 	if err != nil || requested != target || (tunnel != "" && (target != tunnel || r.URL.Scheme != "https")) {
 		return deny(r, 403)
 	}
-	if !g.allowed(r.URL.Hostname()) {
+	// A keyless local model (#3966): host.docker.internal only, plain HTTP,
+	// no CONNECT tunnel, an explicit non-default port (an empty or :80 port
+	// is ambiguous and refused rather than guessed), and an OpenAI-shaped
+	// inference route — never admitted via the normal allowed_hosts check.
+	local := r.URL.Scheme == "http" && tunnel == "" && strings.EqualFold(r.URL.Hostname(), localModelHost)
+	if local && (r.URL.Port() == "" || r.URL.Port() == "80") {
+		return deny(r, 403)
+	}
+	if !local && !g.allowed(r.URL.Hostname()) {
+		return deny(r, 403)
+	}
+	if local && !openAIRequest(r) {
 		return deny(r, 403)
 	}
 	if ok, err := g.approve(r.Context(), r, identity); err != nil || !ok {

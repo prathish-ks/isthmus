@@ -159,6 +159,25 @@ describe('model domains and endpoints', () => {
       /within declared modelDomains/,
     );
   });
+
+  it('accepts a declared local-model authority shaped as host:port', () => {
+    register({ ...MODEL_ONLY, modelAuthorities: ['host.docker.internal:11434'] });
+    expect(getProviderHostContract(TEST_PROVIDER)).toMatchObject({
+      modelAuthorities: ['host.docker.internal:11434'],
+    });
+  });
+
+  it('rejects a modelAuthorities entry with no port or an out-of-range one', () => {
+    expect(() => register({ ...MODEL_ONLY, modelAuthorities: ['host.docker.internal'] })).toThrow(
+      /must contain "host:port" entries/,
+    );
+    expect(() => register({ ...MODEL_ONLY, modelAuthorities: ['host.docker.internal:0'] })).toThrow(
+      /must contain "host:port" entries/,
+    );
+    expect(() => register({ ...MODEL_ONLY, modelAuthorities: ['host.docker.internal:99999'] })).toThrow(
+      /must contain "host:port" entries/,
+    );
+  });
 });
 
 // The Isthmus-specific relaxation this widening introduces: see registry.ts's

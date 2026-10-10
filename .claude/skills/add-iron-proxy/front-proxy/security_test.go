@@ -655,3 +655,61 @@ func mustURL(raw string) *url.URL {
 	}
 	return u
 }
+
+// localModelRequest builds a request targeting host.docker.internal the
+// way forward()'s local-model branch expects: URL and Host set together
+// (authority() rejects a mismatch), proxy-authenticated.
+func localModelRequest(g *gateway, method, hostport, path string) *http.Request {
+	r := httptest.NewRequest(method, "http://"+hostport+path, nil)
+	r.URL, _ = url.Parse("http://" + hostport + path)
+	r.Host = hostport
+	r.Header.Set("Proxy-Authorization", auth(g, "session-A"))
+	return r
+}
+
+// A keyless local model (#3966) is admitted only through this narrower
+// rule, never the normal AllowedHosts check — host.docker.internal isn't
+// in AllowedHosts at all here, confirming that.
+func TestLocalModelPlainHTTPForwardedWhenAllowedHostsAndOpenAIShaped(t *testing.T) {
+	var gotPath string
+	g, _ := fixture(t, &fixtureBridge{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(200)
+	}))
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, localModelRequest(g, "POST", "host.docker.internal:11434", "/v1/chat/completions"))
+	if w.Code != 200 {
+		t.Fatalf("status=%d, want 200 (local OpenAI-shaped request should forward)", w.Code)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("backend saw path %q", gotPath)
+	}
+}
+
+func TestLocalModelRejections(t *testing.T) {
+	g, _ := fixture(t, &fixtureBridge{}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("rejected local-model request reached backend")
+	}))
+	for _, name := range []string{"default-port-empty", "default-port-80", "non-openai-path", "connect-tunnel"} {
+		t.Run(name, func(t *testing.T) {
+			var r *http.Request
+			switch name {
+			case "default-port-empty":
+				r = localModelRequest(g, "POST", "host.docker.internal", "/v1/chat/completions")
+			case "default-port-80":
+				r = localModelRequest(g, "POST", "host.docker.internal:80", "/v1/chat/completions")
+			case "non-openai-path":
+				r = localModelRequest(g, "POST", "host.docker.internal:11434", "/admin/shutdown")
+			case "connect-tunnel":
+				r = httptest.NewRequest("CONNECT", "/", nil)
+				r.Host = "host.docker.internal:11434"
+				r.Header.Set("Proxy-Authorization", auth(g, "session-A"))
+			}
+			w := httptest.NewRecorder()
+			g.ServeHTTP(w, r)
+			if w.Code < 400 {
+				t.Fatalf("accepted %s (status=%d)", name, w.Code)
+			}
+		})
+	}
+}

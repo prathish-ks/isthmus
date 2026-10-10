@@ -15,6 +15,7 @@ import { log } from '../log.js';
 
 import { IronProxyApprovalBridge, type IronApprovalIdentity } from './iron-proxy-approval.js';
 import { readAllowedHostsFile } from './iron-proxy-allowlist.js';
+import { localModelOrigins } from './iron-proxy-local-model.js';
 import {
   registerGatewayProvider,
   type GatewayContribution,
@@ -433,6 +434,7 @@ export function defineIronProxyProvider(initialSettings?: IronProxySettings): Ga
         socketPath: configured.approvalSocket,
         timeoutMs: configured.approvalTimeoutMs,
         maxPending: configured.maxPending,
+        plaintextOrigins: localModelOrigins(configured),
         ...(configured.approvalPort
           ? {
               tls: {
