@@ -837,7 +837,11 @@ export async function buildMounts(
   const defaultSurfaces = !contract && !providerProvidesAgentSurfaces(provider);
 
   const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
-  const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
+  // The host-owned anchor syncSkillSymlinks walks `.claude-shared` through,
+  // rather than baking it into the root it opens (see that function's own
+  // doc comment for why this split matters).
+  const groupSessionBaseDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id);
+  const claudeDir = path.join(groupSessionBaseDir, '.claude-shared');
   const sessDir = sessionDir(agentGroup.id, session.id);
   const projectDocument = contract?.projectDocument;
   let lateProjectDocumentMount: VolumeMount | undefined;
@@ -860,7 +864,7 @@ export async function buildMounts(
     );
     skillBackingPaths = providerSurfaces.skillBackingPaths;
   } else if (defaultSurfaces) {
-    syncSkillSymlinks(claudeDir, containerConfig);
+    syncSkillSymlinks(groupSessionBaseDir, containerConfig);
 
     // Compose CLAUDE.md fresh every spawn: every instruction source inlined
     // into one flat file. See `project-doc-compose.ts`.
@@ -1234,19 +1238,30 @@ export function parsePidsLimit(value: string): number | undefined {
  * Not the mechanism the composer stopped using: skill discovery is a directory
  * scan that follows a link wherever it lands, and only `@` imports are gated on
  * resolving inside the project directory.
+ *
+ * `groupBaseDir` must be the trusted session-base root
+ * (`DATA_DIR/v2-sessions/<group.id>`), NOT `.claude-shared` itself —
+ * AnchoredDir.open's root argument is opened without O_NOFOLLOW by design
+ * (host-owned by assumption), so `.claude-shared` has to be one of the
+ * segments it walks, not baked into the root string, or a container that
+ * swapped its own `.claude-shared` for a symlink (agent-writable, same mount
+ * this function's whole job is to protect) would have it followed on the
+ * very next respawn. Same bug class as `provider-contracts/realize.ts`'s
+ * `prepareSpawnFile`, fixed there first.
  */
 export function syncSkillSymlinks(
-  claudeDir: string,
+  groupBaseDir: string,
   containerConfig: import('./container-config.js').ContainerConfig,
 ): string[] {
   // Same body as the declared-contract path; real (non-symlink) entries are
   // either a template overlay (intentional; see src/group-skills.ts) or a
   // stale pre-refactor skill copy that shadows the shared skill (#3001), so
   // the skip is surfaced as a warning. syncSharedSkillLinks opens
-  // claudeDir/skills through an AnchoredDir — a symlink swapped in for
-  // .claude-shared/skills, or any entry below it, is refused, not followed.
+  // groupBaseDir/.claude-shared/skills through an AnchoredDir — a symlink
+  // swapped in for .claude-shared itself, .claude-shared/skills, or any
+  // entry below it, is refused, not followed.
   const selected = selectedSkillNames(containerConfig);
-  syncSharedSkillLinks(claudeDir, ['skills'], selected, true);
+  syncSharedSkillLinks(groupBaseDir, ['.claude-shared', 'skills'], selected, true);
   return selected;
 }
 

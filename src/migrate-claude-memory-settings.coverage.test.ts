@@ -20,7 +20,11 @@ let settingsFile: string;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-claude-settings-cov-'));
-  settingsFile = path.join(dir, 'settings.json');
+  // `dir` stands in for the session base dir (DATA_DIR/v2-sessions/<group.id>)
+  // prepareClaudeMemorySettings now takes — `.claude-shared` is a segment it
+  // walks itself via AnchoredDir, not something the caller pre-joins.
+  fs.mkdirSync(path.join(dir, '.claude-shared'), { recursive: true });
+  settingsFile = path.join(dir, '.claude-shared', 'settings.json');
 });
 
 afterEach(() => {
@@ -126,10 +130,10 @@ describe('prepareClaudeMemorySettings', () => {
     expect((result.hooks as Record<string, unknown>).PreCompact).toBeDefined();
   });
 
-  it('creates the claudeDir itself (and settings.json) when neither exists yet', () => {
-    const freshDir = path.join(dir, 'not-yet-created');
-    expect(prepareClaudeMemorySettings(freshDir)).toBe('created');
-    expect(fs.existsSync(path.join(freshDir, 'settings.json'))).toBe(true);
+  it('creates the .claude-shared dir itself (and settings.json) when neither exists yet', () => {
+    const freshBaseDir = path.join(dir, 'not-yet-created');
+    expect(prepareClaudeMemorySettings(freshBaseDir)).toBe('created');
+    expect(fs.existsSync(path.join(freshBaseDir, '.claude-shared', 'settings.json'))).toBe(true);
   });
 
   it('starts from an empty object and builds env/hooks structures from scratch', () => {

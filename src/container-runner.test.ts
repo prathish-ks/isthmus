@@ -459,34 +459,37 @@ describe('armSessionLifecycle', () => {
 });
 
 describe('syncSkillSymlinks', () => {
-  function tmpClaudeDir(): string {
+  // syncSkillSymlinks now takes the group's session base dir (not
+  // .claude-shared itself) and walks '.claude-shared'/'skills' through
+  // AnchoredDir's protected traversal — see its own doc comment.
+  function tmpGroupBaseDir(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-skills-'));
   }
 
   it('links every selected skill to its container path', () => {
-    const dir = tmpClaudeDir();
+    const dir = tmpGroupBaseDir();
     syncSkillSymlinks(dir, { ...containerConfig, skills: ['welcome'] } as ContainerConfig);
 
-    const link = path.join(dir, 'skills', 'welcome');
+    const link = path.join(dir, '.claude-shared', 'skills', 'welcome');
     expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
     // Dangling on the host, valid inside the container.
     expect(fs.readlinkSync(link)).toBe('/app/skills/welcome');
   });
 
   it('prunes symlinks that are no longer selected', () => {
-    const dir = tmpClaudeDir();
+    const dir = tmpGroupBaseDir();
     syncSkillSymlinks(dir, { ...containerConfig, skills: ['welcome', 'vercel-cli'] } as ContainerConfig);
     syncSkillSymlinks(dir, { ...containerConfig, skills: ['welcome'] } as ContainerConfig);
 
-    expect(fs.existsSync(path.join(dir, 'skills', 'vercel-cli'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, '.claude-shared', 'skills', 'vercel-cli'))).toBe(false);
   });
 
   it('warns instead of silently skipping when a real entry blocks a desired skill', () => {
     // Template overlays depend on surviving the prune (see src/group-skills.ts);
     // a stale pre-refactor skill copy (#3001) otherwise gets served forever with
     // no trace.
-    const dir = tmpClaudeDir();
-    fs.mkdirSync(path.join(dir, 'skills', 'welcome'), { recursive: true });
+    const dir = tmpGroupBaseDir();
+    fs.mkdirSync(path.join(dir, '.claude-shared', 'skills', 'welcome'), { recursive: true });
 
     syncSkillSymlinks(dir, { ...containerConfig, skills: ['welcome'] } as ContainerConfig);
 
@@ -497,10 +500,11 @@ describe('syncSkillSymlinks', () => {
   });
 
   it('leaves a host directory alone when the skills dir is a symlink to it', () => {
-    const dir = tmpClaudeDir();
+    const dir = tmpGroupBaseDir();
     const hostDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncl-host-'));
     fs.symlinkSync('/somewhere', path.join(hostDir, 'stale-link'));
-    fs.symlinkSync(hostDir, path.join(dir, 'skills'));
+    fs.mkdirSync(path.join(dir, '.claude-shared'), { recursive: true });
+    fs.symlinkSync(hostDir, path.join(dir, '.claude-shared', 'skills'));
 
     syncSkillSymlinks(dir, { ...containerConfig, skills: ['welcome'] } as ContainerConfig);
 

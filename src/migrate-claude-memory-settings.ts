@@ -108,24 +108,33 @@ export function reconcileClaudeSettingsContent(current: string): ClaudeSettingsR
 }
 
 /**
- * Seed or reconcile `settings.json` in the Claude state directory. The
- * directory is a read-write mount, so the file is reached through the
- * directory's descriptor: a symlink or FIFO planted under its name is refused
- * and the settings are left alone. Returns what was done.
+ * Seed or reconcile `settings.json` in the Claude state directory
+ * (`groupBaseDir/.claude-shared/settings.json`). The directory is a
+ * read-write mount, so the file is reached through the directory's
+ * descriptor: a symlink or FIFO planted under its name is refused and the
+ * settings are left alone. Returns what was done.
+ *
+ * `groupBaseDir` must be the trusted session-base root
+ * (`DATA_DIR/v2-sessions/<group.id>`), NOT `.claude-shared` itself —
+ * AnchoredDir.open's root argument is opened without O_NOFOLLOW (host-owned
+ * by assumption), so `.claude-shared` has to be a segment it walks, not
+ * baked into the root string, or a container that swapped its own
+ * `.claude-shared` for a symlink would have it followed. Same bug class as
+ * `provider-contracts/realize.ts`'s `prepareSpawnFile`, fixed there first.
  */
-export function prepareClaudeMemorySettings(claudeDir: string): 'created' | 'reconciled' | 'unchanged' {
+export function prepareClaudeMemorySettings(groupBaseDir: string): 'created' | 'reconciled' | 'unchanged' {
   // False positive: `CLAUDE_SETTINGS_FILE` is a module-level literal
   // ('settings.json'); `settingsFile` below is only used in a log message —
-  // the actual read/write goes through AnchoredDir.open(claudeDir, ...)
+  // the actual read/write goes through AnchoredDir.open(groupBaseDir, ...)
   // (descriptor-guarded, symlinks refused). Same disposition as this
   // project's other path-join-resolve-traversal false positives (see
   // .github/workflows/ci.yml's semgrep-scope comment).
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-  const settingsFile = path.join(claudeDir, CLAUDE_SETTINGS_FILE);
+  const settingsFile = path.join(groupBaseDir, '.claude-shared', CLAUDE_SETTINGS_FILE);
   let dir: AnchoredDir | null = null;
   try {
-    dir = AnchoredDir.open(claudeDir, [], true);
-    if (!dir) throw new Error(`Claude settings directory is missing: '${claudeDir}'`);
+    dir = AnchoredDir.open(groupBaseDir, ['.claude-shared'], true);
+    if (!dir) throw new Error(`Claude settings directory is missing: '${settingsFile}'`);
     let current: string;
     try {
       current = dir.readFile(CLAUDE_SETTINGS_FILE).toString('utf-8');
