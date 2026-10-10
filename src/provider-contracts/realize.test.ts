@@ -354,7 +354,7 @@ describe('syncSharedSkillLinks', () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.symlinkSync('/app/skills/stale', path.join(dir, 'stale'));
 
-    syncSharedSkillLinks(dir, ['keep'], true);
+    syncSharedSkillLinks(dir, [], ['keep'], true);
 
     expect(fs.existsSync(path.join(dir, 'stale'))).toBe(false);
     expect(fs.lstatSync(path.join(dir, 'keep')).isSymbolicLink()).toBe(true);
@@ -366,12 +366,12 @@ describe('syncSharedSkillLinks', () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.mkdirSync(path.join(dir, 'real-dir'));
 
-    syncSharedSkillLinks(dir, ['real-dir'], true);
+    syncSharedSkillLinks(dir, [], ['real-dir'], true);
     expect(log.warn).toHaveBeenCalledOnce();
     expect(fs.lstatSync(path.join(dir, 'real-dir')).isSymbolicLink()).toBe(false);
 
     vi.clearAllMocks();
-    syncSharedSkillLinks(dir, ['real-dir'], false);
+    syncSharedSkillLinks(dir, [], ['real-dir'], false);
     expect(log.warn).not.toHaveBeenCalled();
   });
 });

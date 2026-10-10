@@ -64,8 +64,83 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await closeDb();
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+});
+
+/**
+ * Let the container win the race: run `swap` once, right before the host's
+ * first fs call that creates `leaf`. Every way the host could create the file
+ * goes through one of these calls, so the swap lands after every check.
+ */
+function swapBeforeCreate(leaf: string, swap: () => void): void {
+  let fired = false;
+  for (const method of ['openSync', 'writeFileSync', 'copyFileSync'] as const) {
+    const original = fs[method] as (...args: unknown[]) => unknown;
+    vi.spyOn(fs, method).mockImplementation(((...args: unknown[]) => {
+      const target = method === 'copyFileSync' ? args[1] : args[0];
+      if (!fired && typeof target === 'string' && path.basename(target) === leaf) {
+        fired = true;
+        swap();
+      }
+      return original.apply(fs, args);
+    }) as never);
+  }
+}
+
+/** Replace inbox/<messageId> with a symlink to `target`, as a container could. */
+function swapInboxDir(messageId: string, target: string): () => void {
+  return () => {
+    const dir = path.join(sessionDir(AG, SESS), 'inbox', messageId);
+    fs.renameSync(dir, `${dir}-moved`);
+    fs.symlinkSync(target, dir);
+  };
+}
+
+function attachmentMessage(id: string, names: string[]) {
+  return {
+    id,
+    kind: 'chat' as const,
+    timestamp: now(),
+    platformId: 'whatsapp:123',
+    channelType: 'whatsapp',
+    threadId: null,
+    content: JSON.stringify({
+      text: 'see attached',
+      attachments: names.map((name) => ({ name, data: Buffer.from(`bytes-${name}`).toString('base64') })),
+    }),
+  };
+}
+
+describe('extractAttachmentFiles — inbox dir swapped after the checks', () => {
+  it('writes a single attachment into the directory it checked', async () => {
+    const canaryDir = path.join(TEST_DIR, 'canary-single');
+    fs.mkdirSync(canaryDir, { recursive: true });
+    swapBeforeCreate('one.txt', swapInboxDir('race-single', canaryDir));
+
+    await writeSessionMessage(AG, SESS, attachmentMessage('race-single', ['one.txt']));
+
+    expect(fs.readdirSync(canaryDir)).toHaveLength(0);
+  });
+
+  it('writes every attachment of a batch into the directory it checked', async () => {
+    const canaryDir = path.join(TEST_DIR, 'canary-batch');
+    fs.mkdirSync(canaryDir, { recursive: true });
+    swapBeforeCreate('second.txt', swapInboxDir('race-batch', canaryDir));
+
+    await writeSessionMessage(AG, SESS, attachmentMessage('race-batch', ['first.txt', 'second.txt']));
+
+    expect(fs.readdirSync(canaryDir)).toHaveLength(0);
+  });
+
+  it('still saves attachments when nothing interferes', async () => {
+    await writeSessionMessage(AG, SESS, attachmentMessage('plain', ['a.txt', 'b.txt']));
+
+    const inbox = path.join(sessionDir(AG, SESS), 'inbox', 'plain');
+    expect(fs.readFileSync(path.join(inbox, 'a.txt'), 'utf-8')).toBe('bytes-a.txt');
+    expect(fs.readFileSync(path.join(inbox, 'b.txt'), 'utf-8')).toBe('bytes-b.txt');
+  });
 });
 
 describe('extractAttachmentFiles — inbox-root symlink containment (#2828 sibling)', () => {
@@ -102,75 +177,13 @@ describe('extractAttachmentFiles — inbox-root symlink containment (#2828 sibli
   });
 });
 
-describe('extractAttachmentFiles — per-attachment re-validation (code review TOCTOU finding)', () => {
-  it('re-validates before EVERY attachment write, not just the first, in a multi-attachment message', async () => {
-    // Before this fix, `inboxDir` was resolved once (before the loop) and
-    // reused unchecked for every subsequent write in the same message — a
-    // co-resident process (the container, RW-mounted into this same
-    // session dir) swapping the per-message inbox dir for a symlink
-    // between two attachments would have gone undetected for every write
-    // after the first. There's no async yield point inside the
-    // synchronous write loop for an external test to interleave a real
-    // race at exactly that moment, so this spies on ensureContainedInboxDir
-    // itself and performs the swap as a side effect of its SECOND
-    // invocation, then delegates to the real implementation — if
-    // extractAttachmentFiles only calls it once per message (the bug this
-    // fix closes), the spy's second-call branch (and thus the injected
-    // attack) never fires, and this test would then trivially pass for
-    // the wrong reason. Asserting the spy call count below rules that out.
-    const inboxSafety = await import('./inbox-safety.js');
-    const canaryDir = path.join(TEST_DIR, 'canary-midbatch');
-    fs.mkdirSync(canaryDir, { recursive: true });
-
-    // Capture the real implementation BEFORE mocking — the mock below must
-    // call through to this captured reference, not back through the
-    // module's own (now-mocked) export, or it would recurse into itself.
-    const real = inboxSafety.ensureContainedInboxDir;
-    let calls = 0;
-    const spy = vi.spyOn(inboxSafety, 'ensureContainedInboxDir').mockImplementation((inboxRoot, messageId, ctx) => {
-      calls++;
-      if (calls === 2) {
-        // False positive: messageId here is always the hardcoded literal
-        // passed to writeSessionMessage below in this same test file, never
-        // external input — this path.join deliberately mirrors production's
-        // own inbox-dir construction (ensureContainedInboxDir) so the
-        // injected symlink lands exactly where the real per-attachment
-        // re-check would look, which is the point of this regression test.
-        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-        const msgInboxDir = path.join(inboxRoot, messageId);
-        fs.rmSync(msgInboxDir, { recursive: true, force: true });
-        fs.symlinkSync(canaryDir, msgInboxDir);
-      }
-      return real(inboxRoot, messageId, ctx);
-    });
-
-    try {
-      const content = JSON.stringify({
-        text: 'two attachments',
-        attachments: [
-          { name: 'first.txt', data: Buffer.from('first-bytes').toString('base64') },
-          { name: 'second.txt', data: Buffer.from('attacker-bytes').toString('base64') },
-        ],
-      });
-
-      await writeSessionMessage(AG, SESS, {
-        id: 'evil-mid-batch',
-        kind: 'chat',
-        timestamp: now(),
-        platformId: 'whatsapp:123',
-        channelType: 'whatsapp',
-        threadId: null,
-        content,
-      });
-
-      // Proves the fix actually ran the per-attachment path, not a no-op.
-      expect(calls).toBe(2);
-      // SECURE expectation: the second attachment (processed after the
-      // mid-batch swap) was refused, not silently written through the
-      // now-symlinked inbox dir.
-      expect(fs.readdirSync(canaryDir)).toHaveLength(0);
-    } finally {
-      spy.mockRestore();
-    }
-  });
-});
+// The former "per-attachment re-validation" regression test lived here,
+// spying on inbox-safety.ts's now-deleted ensureContainedInboxDir to prove
+// the host re-checked the inbox PATH before every write in a batch. #4063's
+// AnchoredDir port replaced that path-recheck strategy entirely: the inbox
+// dir is opened once by descriptor (see extractAttachmentFiles,
+// session-manager.ts), and every subsequent write in the batch goes through
+// that same descriptor — immune to a later symlink swap of the path, not just
+// re-checked against it. The "inbox dir swapped after the checks" describe
+// block above (swapBeforeCreate/swapInboxDir) exercises the equivalent, now
+// strictly stronger, property against the real implementation.

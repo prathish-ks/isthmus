@@ -15,6 +15,7 @@ vi.mock('./config.js', async () => {
   return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-session-mgr-cov' };
 });
 
+import { AnchoredDir } from './anchored-dir.js';
 import { initTestDb, closeDb, runMigrations, createAgentGroup, createMessagingGroup } from './db/index.js';
 import { createSession, getSession } from './db/sessions.js';
 import * as sessionsDb from './db/sessions.js';
@@ -319,11 +320,11 @@ describe('extractAttachmentFiles (via writeSessionMessage)', () => {
 
   it('rethrows a non-EEXIST error from the attachment write', async () => {
     const SESS = 'sess-attach-throw';
-    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation((p: fs.PathOrFileDescriptor) => {
-      if (typeof p === 'string' && p.includes('inbox')) {
-        throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
-      }
-      return undefined as never;
+    // The write now goes through AnchoredDir's own descriptor-based create,
+    // not a bare fs.writeFileSync(path, ...) call — spy on that method
+    // directly rather than trying to pattern-match an fd-based fs call.
+    const writeSpy = vi.spyOn(AnchoredDir.prototype, 'writeNewFile').mockImplementation(() => {
+      throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
     });
     const content = JSON.stringify({
       text: 'hi',
@@ -374,23 +375,26 @@ describe('readOutboxFiles safety rejections', () => {
     );
   });
 
-  it('logs and returns undefined when inspecting the outbox directory throws', () => {
+  it('logs and returns undefined when opening the outbox directory throws a non-ENOENT error', () => {
     const outboxMsgDir = path.join(sessionDir(AG, SESS), 'outbox', 'msg-inspect-throw');
     fs.mkdirSync(outboxMsgDir, { recursive: true });
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    const lstatSpy = vi.spyOn(fs, 'lstatSync').mockImplementation(() => {
-      throw new Error('EACCES');
+    // AnchoredDir.open no longer lstats a path string — it opens by
+    // descriptor. Any non-ENOENT failure from that open (here forced via
+    // openSync) is treated the same as a symlinked directory: unsafe.
+    const openSpy = vi.spyOn(fs, 'openSync').mockImplementation(() => {
+      throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
     });
     const result = readOutboxFiles(AG, SESS, 'msg-inspect-throw', ['a.txt']);
     expect(result).toBeUndefined();
     expect(warnSpy).toHaveBeenCalledWith(
-      'Failed to inspect outbox directory',
+      'Rejecting unsafe outbox directory',
       expect.objectContaining({ messageId: 'msg-inspect-throw' }),
     );
-    lstatSpy.mockRestore();
+    openSpy.mockRestore();
   });
 
-  it('skips unsafe filenames and reports files not found, returning undefined when nothing valid remains', () => {
+  it('skips unsafe filenames and reports missing files, returning undefined when nothing valid remains', () => {
     const outboxMsgDir = path.join(sessionDir(AG, SESS), 'outbox', 'msg-1');
     fs.mkdirSync(outboxMsgDir, { recursive: true });
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
@@ -401,32 +405,18 @@ describe('readOutboxFiles safety rejections', () => {
       expect.objectContaining({ filename: '../escape.txt' }),
     );
     expect(warnSpy).toHaveBeenCalledWith(
-      'Outbox file not found',
+      'Outbox file missing or not a regular file',
       expect.objectContaining({ filename: 'does-not-exist.txt' }),
     );
   });
 
-  it('rejects a file whose resolved realpath falls outside the message directory', () => {
-    const outboxMsgDir = path.join(sessionDir(AG, SESS), 'outbox', 'msg-escape');
-    fs.mkdirSync(outboxMsgDir, { recursive: true });
-    const realFile = path.join(outboxMsgDir, 'sneaky.txt');
-    fs.writeFileSync(realFile, 'hello');
-    const origRealpath = fs.realpathSync.bind(fs) as typeof fs.realpathSync;
-    const realpathSpy = vi.spyOn(fs, 'realpathSync').mockImplementation(((p: fs.PathLike) => {
-      if (typeof p === 'string' && p.endsWith('sneaky.txt')) return '/somewhere/else/sneaky.txt';
-      return origRealpath(p as string);
-    }) as typeof fs.realpathSync);
-    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    const result = readOutboxFiles(AG, SESS, 'msg-escape', ['sneaky.txt']);
-    expect(result).toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Rejecting outbox file outside message directory',
-      expect.objectContaining({ filename: 'sneaky.txt' }),
-    );
-    realpathSpy.mockRestore();
-  });
+  // The old "resolved realpath falls outside the message directory" escape
+  // no longer applies: AnchoredDir reads a NAME inside the directory it
+  // already opened by descriptor, so there is no path left to resolve
+  // elsewhere — see session-manager.outbox.test.ts for this file's current
+  // symlink/TOCTOU coverage.
 
-  it('rejects a symlinked outbox file and a file outside the message directory, returns real files', () => {
+  it('rejects a symlinked outbox file, returns the real files alongside it', () => {
     const outboxMsgDir = path.join(sessionDir(AG, SESS), 'outbox', 'msg-2');
     fs.mkdirSync(outboxMsgDir, { recursive: true });
     const realFile = path.join(outboxMsgDir, 'real.txt');
@@ -441,7 +431,7 @@ describe('readOutboxFiles safety rejections', () => {
     expect(result).toHaveLength(1);
     expect(result?.[0].filename).toBe('real.txt');
     expect(warnSpy).toHaveBeenCalledWith(
-      'Rejecting unsafe outbox file',
+      'Outbox file missing or not a regular file',
       expect.objectContaining({ filename: 'sym.txt' }),
     );
   });
@@ -464,38 +454,27 @@ describe('clearOutbox safety rejections', () => {
     expect(() => clearOutbox(AG, SESS, 'no-such-msg')).not.toThrow();
   });
 
-  it('rejects a symlinked outbox directory', () => {
+  it('rejects a symlinked outbox message directory', () => {
     const outsideDir = path.join(TEST_DIR, 'outside-clear');
     fs.mkdirSync(outsideDir, { recursive: true });
     const outboxMsgDir = path.join(sessionDir(AG, SESS), 'outbox', 'msg-symlink');
     fs.symlinkSync(outsideDir, outboxMsgDir);
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
     clearOutbox(AG, SESS, 'msg-symlink');
+    // openDir refuses the symlink (ELOOP → "not a real directory"), which
+    // propagates to the same catch-all as any other cleanup failure.
     expect(warnSpy).toHaveBeenCalledWith(
-      'Rejecting unsafe outbox cleanup directory',
+      'Outbox cleanup failed (message already delivered)',
       expect.objectContaining({ messageId: 'msg-symlink' }),
     );
     // The symlink itself must survive (not followed and rm'd).
     expect(fs.existsSync(outsideDir)).toBe(true);
   });
 
-  it('rejects cleanup when the resolved realpath falls outside the session outbox root', () => {
-    const outboxMsgDir = path.join(sessionDir(AG, SESS), 'outbox', 'msg-escape-clear');
-    fs.mkdirSync(outboxMsgDir, { recursive: true });
-    const origRealpath = fs.realpathSync.bind(fs) as typeof fs.realpathSync;
-    const realpathSpy = vi.spyOn(fs, 'realpathSync').mockImplementation(((p: fs.PathLike) => {
-      if (typeof p === 'string' && p.endsWith('msg-escape-clear')) return '/somewhere/else/msg-escape-clear';
-      return origRealpath(p as string);
-    }) as typeof fs.realpathSync);
-    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    clearOutbox(AG, SESS, 'msg-escape-clear');
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Rejecting outbox cleanup outside session outbox',
-      expect.objectContaining({ messageId: 'msg-escape-clear' }),
-    );
-    expect(fs.existsSync(outboxMsgDir)).toBe(true);
-    realpathSpy.mockRestore();
-  });
+  // The old "resolved realpath falls outside the session outbox root" escape
+  // no longer applies: there is no realpath step left to manipulate — see
+  // session-manager.outbox.test.ts for this file's current symlink/TOCTOU
+  // coverage of the outbox root itself.
 
   it('removes a legitimate outbox message directory', () => {
     const outboxMsgDir = path.join(sessionDir(AG, SESS), 'outbox', 'msg-real');
@@ -505,11 +484,11 @@ describe('clearOutbox safety rejections', () => {
     expect(fs.existsSync(outboxMsgDir)).toBe(false);
   });
 
-  it('logs and swallows when realpathSync throws mid-cleanup', () => {
+  it('logs and swallows when removing the message directory throws mid-cleanup', () => {
     const outboxMsgDir = path.join(sessionDir(AG, SESS), 'outbox', 'msg-throws');
     fs.mkdirSync(outboxMsgDir, { recursive: true });
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    const realpathSpy = vi.spyOn(fs, 'realpathSync').mockImplementation(() => {
+    const rmdirSpy = vi.spyOn(AnchoredDir.prototype, 'rmdir').mockImplementation(() => {
       throw new Error('boom');
     });
     expect(() => clearOutbox(AG, SESS, 'msg-throws')).not.toThrow();
@@ -517,6 +496,6 @@ describe('clearOutbox safety rejections', () => {
       'Outbox cleanup failed (message already delivered)',
       expect.objectContaining({ messageId: 'msg-throws' }),
     );
-    realpathSpy.mockRestore();
+    rmdirSpy.mockRestore();
   });
 });

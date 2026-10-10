@@ -1,6 +1,9 @@
-import fs from 'fs';
+import path from 'path';
 
+import { AnchoredDir } from './anchored-dir.js';
 import { log } from './log.js';
+
+const CLAUDE_SETTINGS_FILE = 'settings.json';
 
 const PRE_COMPACT_COMMAND = 'bun /app/src/compact-instructions.ts';
 const LEGACY_MEMORY_SESSION_START_COMMAND = 'bun /app/src/memory-hook.ts';
@@ -104,23 +107,42 @@ export function reconcileClaudeSettingsContent(current: string): ClaudeSettingsR
   return { changed: true, content: JSON.stringify(parsed, null, 2) + '\n' };
 }
 
-/** Reconcile existing Claude settings with NanoClaw's shared memory system. */
-export function migrateClaudeMemorySettings(settingsFile: string): boolean {
+/**
+ * Seed or reconcile `settings.json` in the Claude state directory. The
+ * directory is a read-write mount, so the file is reached through the
+ * directory's descriptor: a symlink or FIFO planted under its name is refused
+ * and the settings are left alone. Returns what was done.
+ */
+export function prepareClaudeMemorySettings(claudeDir: string): 'created' | 'reconciled' | 'unchanged' {
+  const settingsFile = path.join(claudeDir, CLAUDE_SETTINGS_FILE);
+  let dir: AnchoredDir | null = null;
   try {
-    const result = reconcileClaudeSettingsContent(fs.readFileSync(settingsFile, 'utf-8'));
+    dir = AnchoredDir.open(claudeDir, [], true);
+    if (!dir) throw new Error(`Claude settings directory is missing: '${claudeDir}'`);
+    let current: string;
+    try {
+      current = dir.readFile(CLAUDE_SETTINGS_FILE).toString('utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      dir.writeNewFile(CLAUDE_SETTINGS_FILE, Buffer.from(DEFAULT_SETTINGS_JSON));
+      return 'created';
+    }
+    const result = reconcileClaudeSettingsContent(current);
     if (result.notAnObject) {
       log.warn('Claude settings root is not an object; leaving it unchanged', { settingsFile });
-      return false;
+      return 'unchanged';
     }
-    if (!result.changed) return false;
-    writeAtomic(settingsFile, result.content);
-    return true;
+    if (!result.changed) return 'unchanged';
+    dir.replaceFile(CLAUDE_SETTINGS_FILE, result.content);
+    return 'reconciled';
   } catch (err) {
     log.warn('Failed to reconcile Claude settings; leaving them unchanged', {
       settingsFile,
       error: err instanceof Error ? err.message : String(err),
     });
-    return false;
+    return 'unchanged';
+  } finally {
+    dir?.close();
   }
 }
 
@@ -131,20 +153,6 @@ function removeLegacyNanoClawMemoryHook(value: unknown): unknown {
     return hook.command !== LEGACY_MEMORY_SESSION_START_COMMAND;
   });
   return remaining.length > 0 ? { ...value, hooks: remaining } : undefined;
-}
-
-function writeAtomic(filePath: string, content: string): void {
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    fs.writeFileSync(tmp, content, { flag: 'wx' });
-    fs.renameSync(tmp, filePath);
-  } finally {
-    try {
-      fs.unlinkSync(tmp);
-    } catch {
-      // The rename consumed the temp file, or creation failed before it existed.
-    }
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

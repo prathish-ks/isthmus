@@ -68,6 +68,7 @@ import './provider-contracts/index.js';
 import {
   realizeProviderSpawnSurfaces,
   providerStateVolumePath,
+  syncSharedSkillLinks,
   type ProviderSpawnRealization,
 } from './provider-contracts/realize.js';
 import { getProviderHostContract, hasProviderMountSurface } from './provider-contracts/registry.js';
@@ -1237,54 +1238,16 @@ export function parsePidsLimit(value: string): number | undefined {
 export function syncSkillSymlinks(
   claudeDir: string,
   containerConfig: import('./container-config.js').ContainerConfig,
-): void {
-  const skillsDir = path.join(claudeDir, 'skills');
-  if (!fs.existsSync(skillsDir)) {
-    fs.mkdirSync(skillsDir, { recursive: true });
-  }
-
-  const desired = selectedSkillNames(containerConfig);
-  const desiredSet = new Set(desired);
-
-  // Remove symlinks not in the desired set
-  for (const entry of fs.readdirSync(skillsDir)) {
-    const entryPath = path.join(skillsDir, entry);
-    let isSymlink = false;
-    try {
-      isSymlink = fs.lstatSync(entryPath).isSymbolicLink();
-    } catch {
-      continue;
-    }
-    if (isSymlink && !desiredSet.has(entry)) {
-      fs.unlinkSync(entryPath);
-    }
-  }
-
-  // Create symlinks for desired skills (container path targets)
-  for (const skill of desired) {
-    const linkPath = path.join(skillsDir, skill);
-    let entry: fs.Stats | undefined;
-    try {
-      entry = fs.lstatSync(linkPath);
-    } catch {
-      /* missing */
-    }
-    if (!entry) {
-      fs.symlinkSync(`/app/skills/${skill}`, linkPath);
-    } else if (!entry.isSymbolicLink()) {
-      // A real entry here is either a template overlay (intentional; see
-      // src/group-skills.ts) or a stale pre-refactor skill copy that shadows
-      // the shared skill (#3001). No marker distinguishes them yet, so
-      // surface the skip instead of staying silent.
-      log.warn(
-        'Shared skill not symlinked: real entry occupies the path (template overlay or stale pre-refactor copy)',
-        {
-          skill,
-          path: linkPath,
-        },
-      );
-    }
-  }
+): string[] {
+  // Same body as the declared-contract path; real (non-symlink) entries are
+  // either a template overlay (intentional; see src/group-skills.ts) or a
+  // stale pre-refactor skill copy that shadows the shared skill (#3001), so
+  // the skip is surfaced as a warning. syncSharedSkillLinks opens
+  // claudeDir/skills through an AnchoredDir — a symlink swapped in for
+  // .claude-shared/skills, or any entry below it, is refused, not followed.
+  const selected = selectedSkillNames(containerConfig);
+  syncSharedSkillLinks(claudeDir, ['skills'], selected, true);
+  return selected;
 }
 
 /**
