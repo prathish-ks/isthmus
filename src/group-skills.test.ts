@@ -143,6 +143,12 @@ describe('materializeTemplateSkills', () => {
       const out: string[] = [];
       const walk = (d: string, prefix: string) => {
         for (const entry of fs.readdirSync(d).sort()) {
+          // False positive: test-only directory walker asserting on a tree
+          // this same test created; `entry` comes from reading `d` itself,
+          // never external input. Same disposition as this project's other
+          // path-join-resolve-traversal false positives (see
+          // .github/workflows/ci.yml's semgrep-scope comment).
+          // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
           const full = path.join(d, entry);
           const st = fs.lstatSync(full);
           const kind = st.isSymbolicLink() ? 'link' : st.isDirectory() ? 'dir' : 'file';

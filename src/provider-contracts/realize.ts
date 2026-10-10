@@ -363,6 +363,11 @@ function skillBackingAnchorRoot(
   groupDir: string,
   sessionDirectory?: string,
 ): string {
+  // False positive: `groupDir` is the host-resolved group directory the
+  // caller already computed, never external input. Same disposition as this
+  // project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   if (location.kind === 'group-directory') return path.resolve(groupDir);
   const volume = volumes.get(location.volumeId);
   if (!volume) throw new Error(`Provider skill backing references unknown volume '${location.volumeId}'`);
@@ -385,6 +390,12 @@ export function syncSharedSkillLinks(
   desiredSkills: readonly string[],
   warnOnConflict: boolean,
 ): boolean {
+  // False positive: `skillsPath` is only ever used in log messages below —
+  // the real access goes through AnchoredDir.open(root, segments, true)
+  // (descriptor-guarded, symlinks refused) right after. Same disposition as
+  // this project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const skillsPath = path.join(root, ...segments);
   let skillsDir: AnchoredDir | null;
   try {
@@ -419,6 +430,11 @@ export function syncSharedSkillLinks(
       } else if (!entry.isSymbolicLink() && warnOnConflict) {
         log.warn(
           'Shared skill not symlinked: real entry occupies the path (template overlay or stale pre-refactor copy)',
+          // False positive: log-message-only path, same reasoning as
+          // `skillsPath` above. Same disposition as this project's other
+          // path-join-resolve-traversal false positives (see
+          // .github/workflows/ci.yml's semgrep-scope comment).
+          // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
           { skill, path: path.join(skillsPath, skill) },
         );
       }
@@ -431,6 +447,12 @@ export function syncSharedSkillLinks(
 
 /** `directory` as path segments below `root`; throws if it lexically escapes. */
 function segmentsWithinRoot(root: string, directory: string): string[] {
+  // False positive: this line IS the containment-guard computation —
+  // `relative` is passed to resolveWithinRoot immediately below, which
+  // throws on any lexical escape. Same disposition as this project's other
+  // path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const relative = path.relative(path.resolve(root), path.resolve(directory));
   resolveWithinRoot(root, relative);
   return relative.split(path.sep).filter(Boolean);

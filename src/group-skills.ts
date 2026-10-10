@@ -30,8 +30,18 @@ import { log } from './log.js';
 /** Bounds the recursion so a concurrent rename cannot spin it (and leak fds) forever. */
 const MAX_SKILL_TREE_DEPTH = 64;
 
-/** The group-private store templates stamp skills into (Claude's read plane). */
+/**
+ * The group-private store templates stamp skills into (Claude's read plane).
+ *
+ * False positive: `agentGroupId` is always a DB primary key resolved by the
+ * caller (provider-contracts/realize.ts), never external input, and the
+ * returned root/segments are only ever consumed through an {@link AnchoredDir}
+ * (descriptor-guarded, symlinks refused) — never a raw fs call. Same
+ * disposition as this project's other path-join-resolve-traversal false
+ * positives (see .github/workflows/ci.yml's semgrep-scope comment).
+ */
 function templateSkillsSourceRoot(agentGroupId: string): { root: string; segments: readonly string[] } {
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return { root: path.join(DATA_DIR, 'v2-sessions', agentGroupId), segments: ['.claude-shared', 'skills'] };
 }
 
@@ -62,7 +72,16 @@ export function materializeTemplateSkills(
   destSegments?: readonly string[],
 ): void {
   const source = templateSkillsSourceRoot(agentGroupId);
+  // False positive, both lines: this is a same-destination-as-source early
+  // return, not a filesystem access — the actual read/write path below goes
+  // through AnchoredDir.open() (descriptor-guarded, symlinks refused) on
+  // `dest`, computed separately via anchorWithinGroupFolder's own containment
+  // guard. Same disposition as this project's other path-join-resolve-
+  // traversal false positives (see .github/workflows/ci.yml's semgrep-scope
+  // comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const destPath = destSegments ? path.resolve(destRoot, ...destSegments) : path.resolve(destRoot);
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   if (path.resolve(source.root, ...source.segments) === destPath) return;
 
   let srcDir: AnchoredDir | null = null;
@@ -120,6 +139,12 @@ export function materializeTemplateSkills(
  */
 function anchorWithinGroupFolder(skillsPath: string): { root: string; segments: readonly string[] } {
   const base = path.resolve(GROUPS_DIR);
+  // False positive: this line IS the containment-guard computation the rule
+  // is looking for elsewhere — `relative` is checked for `..`/absolute escape
+  // immediately below, before anything is returned. Same disposition as this
+  // project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const relative = path.relative(base, path.resolve(skillsPath));
   const [folder, ...segments] = relative.split(path.sep);
   if (
@@ -133,6 +158,11 @@ function anchorWithinGroupFolder(skillsPath: string): { root: string; segments: 
   ) {
     throw new Error(`refusing skills directory outside a group folder: '${skillsPath}'`);
   }
+  // False positive: reached only after the containment guard above has
+  // already thrown on any escape attempt. Same disposition as this project's
+  // other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return { root: path.join(base, folder), segments };
 }
 

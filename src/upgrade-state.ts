@@ -129,8 +129,17 @@ export function isUpgradeCurrent(projectRoot?: string): boolean {
   }
 }
 
-/** Absolute path to the marker file. */
+/**
+ * Absolute path to the marker file.
+ *
+ * False positive: `projectRoot` is only ever the default install root
+ * (omitted) or an override this project's own setup/update/migrate scripts
+ * and tests pass, never derived from chat, network, or any external actor.
+ * Same disposition as this project's other path-join-resolve-traversal false
+ * positives (see .github/workflows/ci.yml's semgrep-scope comment).
+ */
 export function markerPath(projectRoot?: string): string {
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return projectRoot === undefined ? MARKER_PATH : path.join(projectRoot, 'data', 'upgrade-state.json');
 }
 

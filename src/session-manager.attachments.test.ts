@@ -92,6 +92,11 @@ function swapBeforeCreate(leaf: string, swap: () => void): void {
 /** Replace inbox/<messageId> with a symlink to `target`, as a container could. */
 function swapInboxDir(messageId: string, target: string): () => void {
   return () => {
+    // False positive: test-only helper, always called with this file's own
+    // literal fixture ids/message ids, never external input. Same
+    // disposition as this project's other path-join-resolve-traversal false
+    // positives (see .github/workflows/ci.yml's semgrep-scope comment).
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
     const dir = path.join(sessionDir(AG, SESS), 'inbox', messageId);
     fs.renameSync(dir, `${dir}-moved`);
     fs.symlinkSync(target, dir);

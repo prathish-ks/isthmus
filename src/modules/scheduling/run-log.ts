@@ -34,6 +34,12 @@ export async function appendRunLog(
   if (!ag) throw new Error(`agent group not found: ${agentGroupId}`);
 
   const timestamp = formatLocalStamp(new Date(), await resolveGroupTimezone(agentGroupId));
+  // False positive, both lines below: `ag.folder` is a DB-resolved field
+  // (getAgentGroup above), and the real I/O goes through the AnchoredDir
+  // opened next, per this file's own header comment. Same disposition as
+  // this project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const groupDir = path.join(GROUPS_DIR, ag.folder);
   const tasks = AnchoredDir.open(groupDir, ['tasks'], true);
   if (!tasks) throw new Error(`could not open tasks dir for group ${ag.folder}`);
@@ -42,6 +48,7 @@ export async function appendRunLog(
   } finally {
     tasks.close();
   }
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return { series, timestamp, path: path.join(groupDir, 'tasks', `${series}.md`) };
 }
 
@@ -53,6 +60,11 @@ export async function readRunLogTail(agentGroupId: string, series: string, lines
 
   let tasks: AnchoredDir | null = null;
   try {
+    // False positive: `ag.folder` is a DB-resolved field (getAgentGroup
+    // above), and AnchoredDir.open itself refuses a symlinked `tasks` dir.
+    // Same disposition as this project's other path-join-resolve-traversal
+    // false positives (see .github/workflows/ci.yml's semgrep-scope comment).
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
     tasks = AnchoredDir.open(path.join(GROUPS_DIR, ag.folder), ['tasks']);
     if (!tasks) return [];
     // readFile refuses a symlinked leaf / non-regular file; a symlinked `tasks`
@@ -75,6 +87,11 @@ export async function deleteRunLog(agentGroupId: string, series: string): Promis
   // (symlinked) tasks dir leaves nothing to do rather than throwing.
   let tasks: AnchoredDir | null = null;
   try {
+    // False positive: `ag.folder` is a DB-resolved field (getAgentGroup
+    // above), and AnchoredDir.open itself refuses a symlinked `tasks` dir.
+    // Same disposition as this project's other path-join-resolve-traversal
+    // false positives (see .github/workflows/ci.yml's semgrep-scope comment).
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
     tasks = AnchoredDir.open(path.join(GROUPS_DIR, ag.folder), ['tasks']);
     tasks?.unlink(`${series}.md`);
   } catch (err) {

@@ -22,7 +22,13 @@ const SESS = 'sess-outbox';
 /** A host directory outside the session folder, shaped like `outbox/<msg>/secret.txt`. */
 function hostDirWithMessage(messageId: string): string {
   const hostDir = path.join(TEST_DIR, 'host-outside');
+  // False positive, both lines: test-only fixture builder, always called
+  // with this file's own literal message ids, never external input. Same
+  // disposition as this project's other path-join-resolve-traversal false
+  // positives (see .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   fs.mkdirSync(path.join(hostDir, messageId), { recursive: true });
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   fs.writeFileSync(path.join(hostDir, messageId, 'secret.txt'), 'host-secret');
   return hostDir;
 }

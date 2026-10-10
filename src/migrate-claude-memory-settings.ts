@@ -114,6 +114,13 @@ export function reconcileClaudeSettingsContent(current: string): ClaudeSettingsR
  * and the settings are left alone. Returns what was done.
  */
 export function prepareClaudeMemorySettings(claudeDir: string): 'created' | 'reconciled' | 'unchanged' {
+  // False positive: `CLAUDE_SETTINGS_FILE` is a module-level literal
+  // ('settings.json'); `settingsFile` below is only used in a log message —
+  // the actual read/write goes through AnchoredDir.open(claudeDir, ...)
+  // (descriptor-guarded, symlinks refused). Same disposition as this
+  // project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   const settingsFile = path.join(claudeDir, CLAUDE_SETTINGS_FILE);
   let dir: AnchoredDir | null = null;
   try {
