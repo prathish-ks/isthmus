@@ -98,7 +98,12 @@ func TestEvaluateWithGrant_CLIScopeLookupErrorPropagates(t *testing.T) {
 func TestEvaluateWithGrant_ApprovalLookupErrorPropagates(t *testing.T) {
 	wantErr := errors.New("disk I/O error reading pending_approvals")
 	grant := &Grant{ApprovalID: "appr-1", Action: "cli_command"}
-	_, err := EvaluateWithGrant(context.Background(), groupScopeLookup{}, errApprovalLookup{err: wantErr}, restartLikeCmd, agentActor("g1"), map[string]string{}, grant)
+	// Filled scope args: groupScopeLookup's own doc comment says it exists to
+	// "get past the cli_scope check cleanly" to isolate what's under test —
+	// an empty args map no longer does that now that the scope check denies
+	// on an absent key too, which would return before ever reaching the
+	// approval lookup this test means to exercise.
+	_, err := EvaluateWithGrant(context.Background(), groupScopeLookup{}, errApprovalLookup{err: wantErr}, restartLikeCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1", "id": "g1"}, grant)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected the approval lookup error to propagate, got %v", err)
 	}
@@ -153,7 +158,10 @@ func (l fixedScopeLookup) CLIScope(ctx context.Context, agentGroupID string) (st
 // needing (or trusting the absence of) a corresponding DB row.
 func TestGrantSatisfies_WrongGrantActionNeverConsultsApprovalLookup(t *testing.T) {
 	grant := &Grant{ApprovalID: "appr-1", Action: "self_mod.install_packages"} // wrong action class for the CLI-restart guard
-	got, err := EvaluateWithGrant(context.Background(), groupScopeLookup{}, panicIfCalledApprovalLookup{t: t}, restartLikeCmd, agentActor("g1"), map[string]string{}, grant)
+	// Filled scope args, same reasoning as TestEvaluateWithGrant_ApprovalLookupErrorPropagates
+	// above — an empty args map would now deny at the scope check first,
+	// never reaching grantSatisfies's own short-circuit this test exists to prove.
+	got, err := EvaluateWithGrant(context.Background(), groupScopeLookup{}, panicIfCalledApprovalLookup{t: t}, restartLikeCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1", "id": "g1"}, grant)
 	if err != nil {
 		t.Fatalf("EvaluateWithGrant: %v", err)
 	}

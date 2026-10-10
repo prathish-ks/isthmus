@@ -2,17 +2,17 @@
  * Coverage-uplift tests for migrate-claude-memory-settings.ts (no sibling
  * test file previously existed for this module — baseline coverage was
  * ~4%). Covers: a settings file with everything already reconciled
- * (no-op, returns false), a fully-legacy file needing every fix, the
+ * (no-op, returns 'unchanged'), a fully-legacy file needing every fix, the
  * non-object-root guard, malformed JSON, the legacy-hook removal
  * (both "hooks empties out" and "hooks partially survive" shapes), and
- * writeAtomic's real file write.
+ * creating settings.json from scratch when it's missing.
  */
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { migrateClaudeMemorySettings } from './migrate-claude-memory-settings.js';
+import { prepareClaudeMemorySettings } from './migrate-claude-memory-settings.js';
 import { log } from './log.js';
 
 let dir: string;
@@ -20,7 +20,11 @@ let settingsFile: string;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-claude-settings-cov-'));
-  settingsFile = path.join(dir, 'settings.json');
+  // `dir` stands in for the session base dir (DATA_DIR/v2-sessions/<group.id>)
+  // prepareClaudeMemorySettings now takes — `.claude-shared` is a segment it
+  // walks itself via AnchoredDir, not something the caller pre-joins.
+  fs.mkdirSync(path.join(dir, '.claude-shared'), { recursive: true });
+  settingsFile = path.join(dir, '.claude-shared', 'settings.json');
 });
 
 afterEach(() => {
@@ -36,15 +40,15 @@ function read(): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
 }
 
-describe('migrateClaudeMemorySettings', () => {
-  it('is a no-op and returns false when everything is already reconciled', () => {
+describe('prepareClaudeMemorySettings', () => {
+  it('is a no-op and returns unchanged when everything is already reconciled', () => {
     write({
       autoMemoryEnabled: false,
       env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
       hooks: { PreCompact: [{ hooks: [{ type: 'command', command: 'bun /app/src/compact-instructions.ts' }] }] },
     });
     const before = fs.readFileSync(settingsFile, 'utf-8');
-    expect(migrateClaudeMemorySettings(settingsFile)).toBe(false);
+    expect(prepareClaudeMemorySettings(dir)).toBe('unchanged');
     expect(fs.readFileSync(settingsFile, 'utf-8')).toBe(before);
   });
 
@@ -56,8 +60,7 @@ describe('migrateClaudeMemorySettings', () => {
         SessionStart: [{ hooks: [{ type: 'command', command: 'bun /app/src/memory-hook.ts' }] }],
       },
     });
-    const changed = migrateClaudeMemorySettings(settingsFile);
-    expect(changed).toBe(true);
+    expect(prepareClaudeMemorySettings(dir)).toBe('reconciled');
     const result = read();
     expect(result.autoMemoryEnabled).toBe(false);
     expect((result.env as Record<string, unknown>).CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1');
@@ -80,7 +83,7 @@ describe('migrateClaudeMemorySettings', () => {
         ],
       },
     });
-    migrateClaudeMemorySettings(settingsFile);
+    prepareClaudeMemorySettings(dir);
     const result = read();
     const sessionStart = (result.hooks as Record<string, unknown>).SessionStart as Array<{ hooks: unknown[] }>;
     expect(sessionStart).toHaveLength(1);
@@ -96,39 +99,46 @@ describe('migrateClaudeMemorySettings', () => {
         PreCompact: [{ hooks: [{ type: 'command', command: 'bun /app/src/compact-instructions.ts' }] }],
       },
     });
-    expect(migrateClaudeMemorySettings(settingsFile)).toBe(false);
+    expect(prepareClaudeMemorySettings(dir)).toBe('unchanged');
   });
 
-  it('returns false and warns when the settings root is not an object', () => {
+  it('returns unchanged and warns when the settings root is not an object', () => {
     write(['not', 'an', 'object']);
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    expect(migrateClaudeMemorySettings(settingsFile)).toBe(false);
+    expect(prepareClaudeMemorySettings(dir)).toBe('unchanged');
     expect(warnSpy).toHaveBeenCalledWith(
       'Claude settings root is not an object; leaving it unchanged',
       expect.objectContaining({ settingsFile }),
     );
   });
 
-  it('returns false and warns when the file is malformed JSON', () => {
+  it('returns unchanged and warns when the file is malformed JSON', () => {
     fs.writeFileSync(settingsFile, '{ not valid json');
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    expect(migrateClaudeMemorySettings(settingsFile)).toBe(false);
+    expect(prepareClaudeMemorySettings(dir)).toBe('unchanged');
     expect(warnSpy).toHaveBeenCalledWith(
       'Failed to reconcile Claude settings; leaving them unchanged',
       expect.objectContaining({ settingsFile }),
     );
   });
 
-  it('returns false and warns when the file does not exist', () => {
-    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    expect(migrateClaudeMemorySettings(path.join(dir, 'does-not-exist.json'))).toBe(false);
-    expect(warnSpy).toHaveBeenCalled();
+  it('creates settings.json from the default content when the directory has none yet', () => {
+    expect(fs.existsSync(settingsFile)).toBe(false);
+    expect(prepareClaudeMemorySettings(dir)).toBe('created');
+    const result = read();
+    expect(result.autoMemoryEnabled).toBe(false);
+    expect((result.hooks as Record<string, unknown>).PreCompact).toBeDefined();
+  });
+
+  it('creates the .claude-shared dir itself (and settings.json) when neither exists yet', () => {
+    const freshBaseDir = path.join(dir, 'not-yet-created');
+    expect(prepareClaudeMemorySettings(freshBaseDir)).toBe('created');
+    expect(fs.existsSync(path.join(freshBaseDir, '.claude-shared', 'settings.json'))).toBe(true);
   });
 
   it('starts from an empty object and builds env/hooks structures from scratch', () => {
     write({});
-    const changed = migrateClaudeMemorySettings(settingsFile);
-    expect(changed).toBe(true);
+    expect(prepareClaudeMemorySettings(dir)).toBe('reconciled');
     const result = read();
     expect(result.autoMemoryEnabled).toBe(false);
     expect(result.env).toEqual({ CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' });

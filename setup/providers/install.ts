@@ -28,8 +28,10 @@
  * failed: a provider install is fully deterministic with no prompts).
  */
 import { execSync } from 'node:child_process';
+import path from 'node:path';
 
 import { applySkill, type ApplyResult } from '../../scripts/skill-apply.js';
+import { warnSetupCommit, withSetupCommit } from '../lib/setup-commit.js';
 
 /** Commands the directive engine emits that the surrounding setup flow owns. */
 function isFlowOwnedCommand(cmd: string): boolean {
@@ -57,21 +59,27 @@ export async function applyProviderSkill(skillDir: string, projectRoot: string):
   // A provider SKILL.md has no prompt directives (vault-only auth runs
   // separately). No resolveInput is passed: absent ⇒ any prompt defers, which
   // is exactly the old defer-all stub's semantics with no stub to maintain.
-  const result = await applySkill(skillDir, projectRoot, {
-    exec: (cmd) => {
-      if (isFlowOwnedCommand(cmd)) return; // build/test/auth are the flow's job
-      execSync(cmd, { cwd: projectRoot, stdio: 'pipe' });
-    },
-    // Fork-aware: reuse the existing resolver (handles upstream/fork remotes and
-    // the auto-add-upstream fallback) instead of assuming `origin` — same call
-    // setup/channels/slack.ts makes for the `channels` branch.
-    resolveRemote: () =>
-      execSync('source setup/lib/channels-remote.sh; resolve_channels_remote', {
-        cwd: projectRoot,
-        shell: '/bin/bash',
-        encoding: 'utf8',
-      }).trim(),
-  });
+  const result = await withSetupCommit(
+    projectRoot,
+    path.basename(skillDir),
+    () =>
+      applySkill(skillDir, projectRoot, {
+        exec: (cmd) => {
+          if (isFlowOwnedCommand(cmd)) return; // build/test/auth are the flow's job
+          execSync(cmd, { cwd: projectRoot, stdio: 'pipe' });
+        },
+        // Fork-aware: reuse the existing resolver (handles upstream/fork remotes and
+        // the auto-add-upstream fallback) instead of assuming `origin` — same call
+        // setup/channels/slack.ts makes for the `channels` branch.
+        resolveRemote: () =>
+          execSync('source setup/lib/channels-remote.sh; resolve_channels_remote', {
+            cwd: projectRoot,
+            shell: '/bin/bash',
+            encoding: 'utf8',
+          }).trim(),
+      }),
+    warnSetupCommit,
+  );
 
   const blockers = [...result.agentTasks.map((t) => t.reason), ...result.deferred];
   return {

@@ -253,6 +253,97 @@ describe('realizeProviderSpawnSurfaces', () => {
     expect(fs.readFileSync(filePath, 'utf-8')).toBe('PRESERVED\n');
   });
 
+  it('creates an append-open-close file under a nested relativePath, creating intermediate directories', async () => {
+    const contract: ProviderHostContract = {
+      seamVersion: PROVIDER_HOST_CONTRACT_SEAM_VERSION,
+      projectDocument: { fileName: 'X.md', containerPath: '/app/X.md', mountClass: 'group-state' },
+      stateVolumes: [SESSION_VOLUME],
+      files: [
+        {
+          id: 'log',
+          volumeId: 'session-scratch',
+          relativePath: 'logs/activity.log',
+          prepare: { operation: 'append-open-close', when: 'every-spawn' },
+        },
+      ],
+    };
+    const legacyOverlay = vi.fn().mockResolvedValue({});
+    const composeProjectDocument = vi.fn().mockResolvedValue(undefined);
+
+    await realizeProviderSpawnSurfaces(PROVIDER, contract, AG, groupDir, sessionDir, [], {
+      legacyOverlay,
+      composeProjectDocument,
+    });
+
+    expect(fs.existsSync(path.join(sessionDir, '.test-session', 'logs', 'activity.log'))).toBe(true);
+  });
+
+  it('refuses an append-open-close file when an intermediate directory is a symlink, rather than following it', async () => {
+    const volumeRoot = path.join(sessionDir, '.test-session');
+    fs.mkdirSync(volumeRoot, { recursive: true });
+    const escapeTarget = path.join(root, 'escape');
+    fs.mkdirSync(escapeTarget, { recursive: true });
+    fs.symlinkSync(escapeTarget, path.join(volumeRoot, 'logs'));
+
+    const contract: ProviderHostContract = {
+      seamVersion: PROVIDER_HOST_CONTRACT_SEAM_VERSION,
+      projectDocument: { fileName: 'X.md', containerPath: '/app/X.md', mountClass: 'group-state' },
+      stateVolumes: [SESSION_VOLUME],
+      files: [
+        {
+          id: 'log',
+          volumeId: 'session-scratch',
+          relativePath: 'logs/activity.log',
+          prepare: { operation: 'append-open-close', when: 'every-spawn' },
+        },
+      ],
+    };
+    const legacyOverlay = vi.fn().mockResolvedValue({});
+    const composeProjectDocument = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      realizeProviderSpawnSurfaces(PROVIDER, contract, AG, groupDir, sessionDir, [], {
+        legacyOverlay,
+        composeProjectDocument,
+      }),
+    ).rejects.toThrow();
+    expect(fs.existsSync(path.join(escapeTarget, 'activity.log'))).toBe(false);
+  });
+
+  it('refuses an append-open-close file when the volume directory itself is a symlink, rather than following it', async () => {
+    const escapeTarget = path.join(root, 'escape-volume-dir');
+    fs.mkdirSync(escapeTarget, { recursive: true });
+    // The volume directory ('.test-session') sits inside the agent-writable
+    // session mount, so the container could have swapped it for a symlink
+    // before this ever runs -- unlike `logs/` above (an intermediate segment
+    // below the volume directory), this replaces the volume directory itself.
+    fs.symlinkSync(escapeTarget, path.join(sessionDir, '.test-session'));
+
+    const contract: ProviderHostContract = {
+      seamVersion: PROVIDER_HOST_CONTRACT_SEAM_VERSION,
+      projectDocument: { fileName: 'X.md', containerPath: '/app/X.md', mountClass: 'group-state' },
+      stateVolumes: [SESSION_VOLUME],
+      files: [
+        {
+          id: 'log',
+          volumeId: 'session-scratch',
+          relativePath: 'activity.log',
+          prepare: { operation: 'append-open-close', when: 'every-spawn' },
+        },
+      ],
+    };
+    const legacyOverlay = vi.fn().mockResolvedValue({});
+    const composeProjectDocument = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      realizeProviderSpawnSurfaces(PROVIDER, contract, AG, groupDir, sessionDir, [], {
+        legacyOverlay,
+        composeProjectDocument,
+      }),
+    ).rejects.toThrow();
+    expect(fs.existsSync(path.join(escapeTarget, 'activity.log'))).toBe(false);
+  });
+
   it('calls composeProjectDocument with the contract-derived spec', async () => {
     const contract: ProviderHostContract = {
       seamVersion: PROVIDER_HOST_CONTRACT_SEAM_VERSION,
@@ -354,7 +445,7 @@ describe('syncSharedSkillLinks', () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.symlinkSync('/app/skills/stale', path.join(dir, 'stale'));
 
-    syncSharedSkillLinks(dir, ['keep'], true);
+    syncSharedSkillLinks(dir, [], ['keep'], true);
 
     expect(fs.existsSync(path.join(dir, 'stale'))).toBe(false);
     expect(fs.lstatSync(path.join(dir, 'keep')).isSymbolicLink()).toBe(true);
@@ -366,12 +457,12 @@ describe('syncSharedSkillLinks', () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.mkdirSync(path.join(dir, 'real-dir'));
 
-    syncSharedSkillLinks(dir, ['real-dir'], true);
+    syncSharedSkillLinks(dir, [], ['real-dir'], true);
     expect(log.warn).toHaveBeenCalledOnce();
     expect(fs.lstatSync(path.join(dir, 'real-dir')).isSymbolicLink()).toBe(false);
 
     vi.clearAllMocks();
-    syncSharedSkillLinks(dir, ['real-dir'], false);
+    syncSharedSkillLinks(dir, [], ['real-dir'], false);
     expect(log.warn).not.toHaveBeenCalled();
   });
 });

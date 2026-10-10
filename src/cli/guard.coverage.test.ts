@@ -97,9 +97,13 @@ describe('commandGuardSpec', () => {
     beforeEach(() => mockGetContainerConfig.mockResolvedValue({ cli_scope: 'group' }));
 
     it('allows general (resource-less) commands', async () => {
+      // agent_group_id/group filled as dispatch's own auto-fill always would
+      // — #4061 made the per-key scope check unconditional, so a direct
+      // decide() call must supply the same values dispatch guarantees in
+      // production.
       const d = await commandGuardSpec(cmd({ name: 'help', resource: undefined })).decide({
         actor: agent,
-        payload: {},
+        payload: { agent_group_id: 'g1', group: 'g1' },
       });
       expect(d).toEqual({ effect: 'allow', reason: 'open command' });
     });
@@ -115,7 +119,7 @@ describe('commandGuardSpec', () => {
     it('does not treat --id as the group id on non-group resources', async () => {
       const d = await commandGuardSpec(cmd({ name: 'sessions-get', resource: 'sessions' })).decide({
         actor: agent,
-        payload: { id: 'some-session' },
+        payload: { agent_group_id: 'g1', group: 'g1', id: 'some-session' },
       });
       expect(d.effect).toBe('allow');
     });
@@ -123,16 +127,22 @@ describe('commandGuardSpec', () => {
     it('lets wirings-get / wirings-update through the resource whitelist', async () => {
       const get = await commandGuardSpec(cmd({ name: 'wirings-get', resource: 'wirings' })).decide({
         actor: agent,
-        payload: { id: 'w1' },
+        payload: { agent_group_id: 'g1', group: 'g1', id: 'w1' },
       });
       expect(get.effect).toBe('allow');
     });
 
     it('restricts group-scoped wiring updates to engage_mode / engage_pattern', async () => {
       const spec = commandGuardSpec(cmd({ name: 'wirings-update', resource: 'wirings', access: 'approval' }));
-      const ok = await spec.decide({ actor: agent, payload: { id: 'w1', 'engage-mode': 'mention', group: 'g1' } });
+      const ok = await spec.decide({
+        actor: agent,
+        payload: { agent_group_id: 'g1', id: 'w1', 'engage-mode': 'mention', group: 'g1' },
+      });
       expect(ok.effect).toBe('hold');
-      const bad = await spec.decide({ actor: agent, payload: { id: 'w1', session_mode: 'shared' } });
+      const bad = await spec.decide({
+        actor: agent,
+        payload: { agent_group_id: 'g1', group: 'g1', id: 'w1', session_mode: 'shared' },
+      });
       expect(bad).toEqual({
         effect: 'deny',
         reason: 'Group-scoped wiring updates may only change engage_mode or engage_pattern.',
@@ -141,7 +151,10 @@ describe('commandGuardSpec', () => {
 
     it('blocks cli_scope escalation in either spelling', async () => {
       const spec = commandGuardSpec(cmd({ name: 'groups-config-update' }));
-      for (const payload of [{ cli_scope: 'global' }, { 'cli-scope': 'global' }]) {
+      for (const payload of [
+        { agent_group_id: 'g1', group: 'g1', id: 'g1', cli_scope: 'global' },
+        { agent_group_id: 'g1', group: 'g1', id: 'g1', 'cli-scope': 'global' },
+      ]) {
         const d = await spec.decide({ actor: agent, payload });
         expect(d).toEqual({ effect: 'deny', reason: 'Cannot change cli_scope from a group-scoped agent.' });
       }
@@ -150,7 +163,7 @@ describe('commandGuardSpec', () => {
     it('holds approval-gated commands for the admin chain', async () => {
       const d = await commandGuardSpec(cmd({ name: 'groups-update', access: 'approval' })).decide({
         actor: agent,
-        payload: { id: 'g1' },
+        payload: { agent_group_id: 'g1', group: 'g1', id: 'g1' },
       });
       expect(d).toEqual({ effect: 'hold', reason: 'agent-initiated "groups-update" requires admin approval' });
     });

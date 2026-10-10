@@ -24,7 +24,7 @@ describe('claude provider container config', () => {
     mocks.readEnvFile.mockReturnValueOnce({});
     const contribution = await getProviderContainerConfig('claude')!(ctx);
     expect(contribution).toEqual({ env: {} });
-    expect(mocks.readEnvFile).toHaveBeenCalledWith(['ANTHROPIC_BASE_URL']);
+    expect(mocks.readEnvFile).toHaveBeenCalledWith(['ANTHROPIC_BASE_URL', 'CLAUDE_CODE_AUTO_COMPACT_WINDOW']);
   });
 
   it('points the SDK at the custom endpoint with a placeholder token for OneCLI to overwrite', async () => {
@@ -43,5 +43,23 @@ describe('claude provider container config', () => {
     const fn = getProviderContainerConfig('claude')!;
     expect((await fn(ctx)).env?.ANTHROPIC_BASE_URL).toBe('https://a.test');
     expect((await fn(ctx)).env?.ANTHROPIC_BASE_URL).toBeUndefined();
+  });
+
+  it('prefers the host service env over .env for CLAUDE_CODE_AUTO_COMPACT_WINDOW', async () => {
+    mocks.readEnvFile.mockReturnValueOnce({ CLAUDE_CODE_AUTO_COMPACT_WINDOW: '500000' });
+    const contribution = await getProviderContainerConfig('claude')!({
+      ...ctx,
+      hostEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '900000' },
+    });
+    expect(contribution.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('900000');
+  });
+
+  it('drops a non-numeric CLAUDE_CODE_AUTO_COMPACT_WINDOW instead of passing it through', async () => {
+    mocks.readEnvFile.mockReturnValueOnce({});
+    const contribution = await getProviderContainerConfig('claude')!({
+      ...ctx,
+      hostEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1m' },
+    });
+    expect(contribution.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
   });
 });

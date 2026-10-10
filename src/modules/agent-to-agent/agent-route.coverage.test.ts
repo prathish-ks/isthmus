@@ -177,11 +177,14 @@ describe('forwardAttachedFiles — guard rails', () => {
     );
   });
 
-  it('skips when the source dir cannot be inspected', () => {
+  it('skips when the source dir cannot be inspected (a non-ENOENT open failure)', () => {
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
     outbox('m-stat', { 'a.txt': 'x' });
-    vi.spyOn(fs, 'lstatSync').mockImplementationOnce(() => {
-      throw new Error('EACCES');
+    // AnchoredDir.open no longer lstats a path string — it opens by
+    // descriptor. A non-ENOENT failure from that open (forced here via
+    // openSync) is treated the same as a symlinked source dir: unsafe.
+    vi.spyOn(fs, 'openSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
     });
     expect(
       forwardAttachedFiles(
@@ -190,19 +193,22 @@ describe('forwardAttachedFiles — guard rails', () => {
       ),
     ).toEqual([]);
     expect(warnSpy).toHaveBeenCalledWith(
-      'agent-route: failed to inspect source outbox dir',
+      'agent-route: rejecting unsafe source outbox dir',
       expect.objectContaining({ sourceMsgId: 'm-stat' }),
     );
   });
 
-  it('skips unsafe filenames, missing files, and files resolving outside the outbox; forwards the rest', () => {
+  it('skips unsafe filenames, missing files, and a symlinked source file; forwards the rest', () => {
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    const dir = outbox('m-mix', { 'ok.txt': 'fine', 'escapee.txt': 'nope' });
-    const realpath = fs.realpathSync;
-    vi.spyOn(fs, 'realpathSync').mockImplementation(((p: fs.PathLike) =>
-      String(p).endsWith('escapee.txt')
-        ? path.join(state.root, 'outside', 'escapee.txt')
-        : realpath(p)) as typeof fs.realpathSync);
+    const dir = outbox('m-mix', { 'ok.txt': 'fine' });
+    // A symlinked source entry, not a real file redirected by a mocked
+    // realpath: copyRegularFile opens by descriptor with O_NOFOLLOW, so
+    // there is no path-resolution step left to intercept — the rejection
+    // has to come from the symlink itself.
+    const outsideTarget = path.join(state.root, 'outside', 'escapee.txt');
+    fs.mkdirSync(path.dirname(outsideTarget), { recursive: true });
+    fs.writeFileSync(outsideTarget, 'nope');
+    fs.symlinkSync(outsideTarget, path.join(dir, 'escapee.txt'));
 
     const out = forwardAttachedFiles(
       {
@@ -219,8 +225,7 @@ describe('forwardAttachedFiles — guard rails', () => {
     expect(fs.existsSync(path.join(dir, 'ok.txt'))).toBe(true); // copied, not moved
     const warned = warnSpy.mock.calls.map((c) => c[0]);
     expect(warned).toContain('agent-route: rejecting unsafe attachment filename (path traversal attempt?)');
-    expect(warned).toContain('agent-route: referenced file missing in source outbox, skipped');
-    expect(warned).toContain('agent-route: rejecting source file outside source outbox dir');
+    expect(warned).toContain('agent-route: skipped forwarding file (missing, unsafe, or already present)');
   });
 });
 

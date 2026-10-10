@@ -4,11 +4,12 @@
  *
  * Fixes: Root→system systemd, WSL nohup fallback, no `|| true` swallowing errors.
  */
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { readEnvFile } from '../src/env.js';
 import { log } from '../src/log.js';
 import { getLaunchdLabel, getSystemdUnit } from '../src/install-slug.js';
 import { writeUpgradeState } from '../src/upgrade-state.js';
@@ -71,6 +72,8 @@ export async function run(_args: string[]): Promise<void> {
     });
   }
 
+  proxyStatusFields = proxyStatus(projectRoot, nodePath);
+
   if (platform === 'macos') {
     setupLaunchd(projectRoot, nodePath, homeDir);
   } else if (platform === 'linux') {
@@ -88,6 +91,99 @@ export async function run(_args: string[]): Promise<void> {
   }
 
   installCliSymlink(projectRoot, homeDir);
+}
+
+const PROXY_KEYS = ['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY'];
+// Node's fetch only matches IPv6 NO_PROXY entries written in brackets; http.get matches the bare form.
+const DEFAULT_NO_PROXY = 'localhost,127.0.0.1,::1,[::1]';
+
+/**
+ * Environment the host needs to reach the internet through an outbound proxy.
+ * Node ignores HTTPS_PROXY unless NODE_USE_ENV_PROXY is set when the process
+ * boots, so it has to come from the service definition, not from the host's
+ * own startup code. Each key resolves on its own, setup shell over .env, and
+ * falls back to ALL_PROXY and then to the other key. NO_PROXY entries (from
+ * the user or written to .env by a gateway skill) are added to the loopback
+ * defaults. Returns an empty object when no proxy is configured.
+ */
+export function hostProxyEnv(projectRoot: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const fromFile = readEnvFile([...PROXY_KEYS, 'NO_PROXY'], projectRoot);
+  const pick = (key: string): string | undefined =>
+    (env[key] || env[key.toLowerCase()] || fromFile[key])?.trim() || undefined;
+  // Node's built-in proxy support only speaks to http(s) proxies.
+  const proxy = (key: string): string | undefined => {
+    const url = pick(key);
+    return url && /^https?:\/\//i.test(url) ? url : undefined;
+  };
+  const httpsProxy = proxy('HTTPS_PROXY') ?? proxy('ALL_PROXY') ?? proxy('HTTP_PROXY');
+  const httpProxy = proxy('HTTP_PROXY') ?? proxy('ALL_PROXY') ?? proxy('HTTPS_PROXY');
+  if (!httpsProxy || !httpProxy) return {};
+
+  const bypass = [DEFAULT_NO_PROXY, env.NO_PROXY, env.no_proxy, fromFile.NO_PROXY]
+    .flatMap((list) => (list ?? '').split(','))
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return {
+    NODE_USE_ENV_PROXY: '1',
+    HTTPS_PROXY: httpsProxy,
+    HTTP_PROXY: httpProxy,
+    NO_PROXY: [...new Set(bypass)].join(','),
+  };
+}
+
+/**
+ * Whether a Node version (e.g. "22.20.0") honors NODE_USE_ENV_PROXY for both
+ * fetch and http(s). 22.21+ does; 23.x ignores it; 24.0-24.4 only proxies fetch.
+ */
+export function nodeHonorsEnvProxy(version: string): boolean {
+  const [major, minor] = version.split('.').map(Number);
+  if (major === 22) return minor >= 21;
+  if (major === 24) return minor >= 5;
+  return major >= 25;
+}
+
+/**
+ * Status fields for SETUP_SERVICE: PROXY=ignored_by_node when a proxy is
+ * configured but the service's Node won't use it, so the wizard can say so.
+ */
+function proxyStatus(projectRoot: string, nodePath: string): Record<string, string> {
+  if (Object.keys(hostProxyEnv(projectRoot)).length === 0) return {};
+  let version: string;
+  try {
+    version = execFileSync(nodePath, ['-p', 'process.versions.node'], { encoding: 'utf8' }).trim();
+  } catch {
+    return {};
+  }
+  if (nodeHonorsEnvProxy(version)) return {};
+  log.warn('An outbound proxy is configured but this Node ignores NODE_USE_ENV_PROXY; the host will go direct', {
+    nodePath,
+    version,
+  });
+  return { PROXY: 'ignored_by_node', PROXY_NODE_VERSION: version };
+}
+
+// Set once per run so every service type reports it in SETUP_SERVICE.
+let proxyStatusFields: Record<string, string> = {};
+
+/**
+ * hostProxyEnv() as [name, value] pairs, with each proxy key also under its
+ * lowercase name: Node reads the lowercase name first, so an inherited
+ * no_proxy would otherwise override the merged NO_PROXY.
+ */
+function hostProxyEnvEntries(projectRoot: string): [string, string][] {
+  return Object.entries(hostProxyEnv(projectRoot)).flatMap(([key, value]): [string, string][] =>
+    key === 'NODE_USE_ENV_PROXY'
+      ? [[key, value]]
+      : [
+          [key, value],
+          [key.toLowerCase(), value],
+        ],
+  );
+}
+
+function xmlEscape(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**
@@ -130,6 +226,10 @@ function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): v
   const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', `${label}.plist`);
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 
+  const proxyEntries = hostProxyEnvEntries(projectRoot)
+    .map(([key, value]) => `\n        <key>${key}</key>\n        <string>${xmlEscape(value)}</string>`)
+    .join('');
+
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -152,7 +252,7 @@ function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): v
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
         <key>HOME</key>
-        <string>${homeDir}</string>
+        <string>${homeDir}</string>${proxyEntries}
     </dict>
     <key>StandardOutPath</key>
     <string>${projectRoot}/logs/nanoclaw.log</string>
@@ -217,6 +317,7 @@ function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): v
     PLIST_PATH: plistPath,
     SERVICE_LOADED: serviceLoaded,
     STATUS: 'success',
+    ...proxyStatusFields,
     LOG: 'logs/setup.log',
   });
 }
@@ -274,6 +375,37 @@ function checkDockerGroupStale(): boolean {
   }
 }
 
+export function renderSystemdUnit(
+  projectRoot: string,
+  nodePath: string,
+  homeDir: string,
+  runningAsRoot: boolean,
+): string {
+  // systemd expands % specifiers and splits unquoted values on spaces.
+  const proxyLines = hostProxyEnvEntries(projectRoot)
+    .map(([key, value]) => `\nEnvironment="${key}=${value.replace(/%/g, '%%').replace(/["\\]/g, '\\$&')}"`)
+    .join('');
+
+  return `[Unit]
+Description=NanoClaw Personal Assistant
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${nodePath} ${projectRoot}/dist/index.js
+WorkingDirectory=${projectRoot}
+Restart=always
+RestartSec=5
+KillMode=process
+Environment=HOME=${homeDir}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin${proxyLines}
+StandardOutput=append:${projectRoot}/logs/nanoclaw.log
+StandardError=append:${projectRoot}/logs/nanoclaw.error.log
+
+[Install]
+WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
+}
+
 function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): void {
   const runningAsRoot = isRoot();
   const unitName = getSystemdUnit(projectRoot);
@@ -302,24 +434,7 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
     systemctlPrefix = 'systemctl --user';
   }
 
-  const unit = `[Unit]
-Description=NanoClaw Personal Assistant
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=${nodePath} ${projectRoot}/dist/index.js
-WorkingDirectory=${projectRoot}
-Restart=always
-RestartSec=5
-KillMode=process
-Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
-StandardOutput=append:${projectRoot}/logs/nanoclaw.log
-StandardError=append:${projectRoot}/logs/nanoclaw.error.log
-
-[Install]
-WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
+  const unit = renderSystemdUnit(projectRoot, nodePath, homeDir, runningAsRoot);
 
   fs.writeFileSync(unitPath, unit);
   log.info('Wrote systemd unit', { unitPath });
@@ -405,6 +520,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     UNIT_PATH: unitPath,
     SERVICE_LOADED: serviceLoaded,
     ...(dockerGroupStale ? { DOCKER_GROUP_STALE: true } : {}),
+    ...proxyStatusFields,
     LINGER_ENABLED: !runningAsRoot,
     STATUS: 'success',
     LOG: 'logs/setup.log',
@@ -436,6 +552,7 @@ function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: stri
     '  fi',
     'fi',
     '',
+    ...hostProxyEnvEntries(projectRoot).map(([name, value]) => `export ${name}=${JSON.stringify(value)}`),
     'echo "Starting NanoClaw..."',
     `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')} \\`,
     `  >> ${JSON.stringify(projectRoot + '/logs/nanoclaw.log')} \\`,
@@ -457,6 +574,7 @@ function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: stri
     WRAPPER_PATH: wrapperPath,
     SERVICE_LOADED: false,
     FALLBACK: 'wsl_no_systemd',
+    ...proxyStatusFields,
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });

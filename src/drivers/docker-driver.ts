@@ -26,6 +26,7 @@ import { KernelClient, KernelError, type KernelClientLike } from '../kernel/clie
 import { realCli, validateRuntimeName, type Cli, type SupervisedProcess } from './cli.js';
 import { JsonDocumentStream } from './json-stream.js';
 import {
+  GATEWAY_ROLE,
   LABELS,
   asFailureError,
   deniedByPolicy,
@@ -316,6 +317,11 @@ export class DockerSessionDriver implements SessionDriver {
    * Residue a stopped session cannot clean up itself: install-labeled networks
    * whose containers are already gone. `stop()` is full teardown for a live
    * session; this covers a host that died between the two.
+   *
+   * Gateway-role containers (e.g. Iron Proxy's front proxy) are never swept
+   * here, running or not: they are not session-scoped, are managed by their
+   * own skill's own lifecycle, and carry no session label by design — the
+   * exact shape the pre-seam pass below would otherwise mistake for residue.
    */
   async reapResidue(installSlug: string): Promise<void> {
     // Containers first: an auxiliary container whose host died has no owner left
@@ -333,9 +339,15 @@ export class DockerSessionDriver implements SessionDriver {
         '--filter',
         'status=dead',
         '--format',
-        '{{.Names}}',
+        `{{.Names}}|{{.Label "${LABELS.role}"}}`,
       ]);
-      const stale = out.trim().split('\n').filter(Boolean);
+      const stale = out
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.split('|'))
+        .filter(([, role]) => role !== GATEWAY_ROLE)
+        .map(([name]) => name);
       for (const name of stale) {
         try {
           this.#cli.run(['rm', '--force', validateRuntimeName(name, 'container')]);
@@ -360,14 +372,14 @@ export class DockerSessionDriver implements SessionDriver {
         '--filter',
         `label=${LABELS.install}=${installSlug}`,
         '--format',
-        `{{.Names}}|{{.Label "${LABELS.session}"}}`,
+        `{{.Names}}|{{.Label "${LABELS.session}"}}|{{.Label "${LABELS.role}"}}`,
       ]);
       const preSeam = out
         .trim()
         .split('\n')
         .filter(Boolean)
         .map((line) => line.split('|'))
-        .filter(([, sessionId]) => !sessionId)
+        .filter(([, sessionId, role]) => !sessionId && role !== GATEWAY_ROLE)
         .map(([name]) => name);
       for (const name of preSeam) {
         try {

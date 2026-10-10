@@ -690,6 +690,19 @@ export async function processQuery(
             // not the nudge text.
             if (!willRetryWrapping && !willRetryTaskBlocks) archivePrompts.shift();
           }
+        } else if (event.isError === true && event.error && !routing.taskRun) {
+          // No result text at all (errors[] with no `result` field, or a
+          // provider-recognized SDK notice that deliberately nulls text to
+          // keep it out of model-output handling) — still deliver the
+          // actionable notice instead of silently dropping the turn.
+          await deliverErrorResult(event.error, routing);
+          notifyExchangeComplete(onExchangeComplete, {
+            prompt: archivePrompts[0] ?? initialPrompt,
+            result: event.error,
+            continuation: queryContinuation ?? initialContinuation,
+            status: 'error',
+          });
+          archivePrompts.shift();
         } else archivePrompts.shift();
         // Turn boundary: reset the per-turn sent count after the result's
         // nudge decision has used it. A nudge retry re-counts via its own

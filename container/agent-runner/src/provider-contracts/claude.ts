@@ -49,7 +49,11 @@ import {
 } from './registry.js';
 
 const provider = 'claude';
-const tone = { default: 'Concise', toSettings: (tone: string) => ({ outputStyle: tone }) };
+// Claude Code's own default output style. With a named style (such as Concise) Claude Code adds a style message to
+// every request, and the conversation is then not read back from the prompt cache: each request writes it to the
+// cache again. The concise instruction is in the agent's CLAUDE.md (container/CLAUDE.md, Communication), in the
+// cached prefix.
+const tone = { default: 'default', toSettings: (tone: string) => ({ outputStyle: tone }) };
 
 export const claudeRuntimeContract: ProviderRuntimeContract = {
   seamVersion: PROVIDER_RUNTIME_CONTRACT_SEAM_VERSION,
@@ -69,10 +73,25 @@ export const claudeRuntimeContract: ProviderRuntimeContract = {
   // (providers/claude-history.ts); core only needs the trace lookup.
   history: { readTrace: newestClaudeTranscript },
   textDelivery: 'mid-turn-complete',
+  // Aliases are listed with their command: /usage and /stats are /cost,
+  // /reset and /new are the SDK's own /clear, /checkup is /doctor, /settings
+  // is /config. /remote-control and its alias /rc stay filtered, not admin,
+  // per this file's own divergence note above (point 1).
   commands: {
     formatting: 'native',
-    nativeAdmin: ['/compact', '/context', '/cost', '/files'],
-    nativeFiltered: ['/help', '/login', '/logout', '/doctor', '/config', '/start', '/remote-control'],
+    nativeAdmin: ['/compact', '/context', '/cost', '/usage', '/stats', '/files', '/reset', '/new'],
+    nativeFiltered: [
+      '/help',
+      '/login',
+      '/logout',
+      '/doctor',
+      '/checkup',
+      '/config',
+      '/settings',
+      '/start',
+      '/remote-control',
+      '/rc',
+    ],
   },
 };
 

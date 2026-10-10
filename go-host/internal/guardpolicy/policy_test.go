@@ -171,6 +171,39 @@ func TestDecide_CLI_ScopeGroupDeniesCrossGroupID(t *testing.T) {
 	}
 }
 
+// Not one of the 13 upstream-golden fixtures: this is Isthmus's own
+// addition, closing the same falsy-bypass bug upstream's #4061 fixed in
+// src/cli/guard.ts's commandDecide (this function's TS original). Before
+// the fix, `v != "" && ...` exempted a present-but-empty value from the
+// cross-group check entirely, so `{"agent_group_id": ""}` fell through to
+// "allow"/"hold" instead of being denied. The one real call site
+// (src/cli/resources/groups.ts's restart handler) never actually sends an
+// empty value — it hardcodes agent_group_id/group/id to the caller's own
+// AgentGroupID — so this was not exploitable in production, but the bug
+// was real and this function's own doc comment claims full parity with the
+// TypeScript original, which no longer has it.
+func TestDecide_CLI_ScopeGroupDeniesEmptyScopeArg(t *testing.T) {
+	db := openTestDB(t)
+	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, openGroupsCmd, agentActor("g1"), map[string]string{"agent_group_id": ""})
+	if err != nil {
+		t.Fatalf("DecideRestartLike: %v", err)
+	}
+	if got.Effect != "deny" {
+		t.Fatalf("effect = %q, want deny (present-but-empty must not be exempted)", got.Effect)
+	}
+}
+
+func TestDecide_CLI_ScopeGroupDeniesEmptyIDArg(t *testing.T) {
+	db := openTestDB(t)
+	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, openGroupsCmd, agentActor("g1"), map[string]string{"id": ""})
+	if err != nil {
+		t.Fatalf("DecideRestartLike: %v", err)
+	}
+	if got.Effect != "deny" {
+		t.Fatalf("effect = %q, want deny (present-but-empty must not be exempted)", got.Effect)
+	}
+}
+
 func TestDecide_CLI_ScopeGroupDeniesWiringUpdateArgsOutsideAllowedSet(t *testing.T) {
 	// guard-cli-scope-wiring-update-args
 	db := openTestDB(t)
@@ -198,7 +231,7 @@ func TestDecide_CLI_ScopeGroupDeniesCLIScopeMutation(t *testing.T) {
 func TestDecide_CLI_ApprovalRequiredHolds(t *testing.T) {
 	// guard-cli-approval-required-hold
 	db := openTestDB(t)
-	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{})
+	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1", "id": "g1"})
 	if err != nil {
 		t.Fatalf("DecideRestartLike: %v", err)
 	}
@@ -208,9 +241,13 @@ func TestDecide_CLI_ApprovalRequiredHolds(t *testing.T) {
 }
 
 func TestDecide_CLI_OpenCommandAllowed(t *testing.T) {
-	// guard-cli-open-command
+	// guard-cli-open-command: TS's own fixture of the same name passes every
+	// scope arg (agent_group_id/group/id all "g1"), not an empty payload —
+	// this is "an access=open command that PASSES every scope check", not a
+	// test of what happens with no args at all (that's covered separately by
+	// TestDecide_CLI_ScopeGroupDeniesAbsentScopeArgs below).
 	db := openTestDB(t)
-	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, openGroupsCmd, agentActor("g1"), map[string]string{})
+	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, openGroupsCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1", "id": "g1"})
 	if err != nil {
 		t.Fatalf("DecideRestartLike: %v", err)
 	}
@@ -219,12 +256,51 @@ func TestDecide_CLI_OpenCommandAllowed(t *testing.T) {
 	}
 }
 
+// TestDecide_CLI_ScopeGroupDeniesAbsentScopeArgs proves the fix this file's
+// own history got wrong once already: an absent agent_group_id/group/id must
+// deny, the same as a present-but-mismatched or present-but-empty one — not
+// be treated as "no filter" the way a merely-absent map key reads in Go.
+// Mirrors src/cli/guard.ts's unconditional `args[key] !== actor.agentGroupId`
+// (no presence check there either). Before this fix, DecideRestartLike's
+// per-key loop used `v, present := args[key]; present && v != ...`, so a
+// caller supplying NO scope args at all slipped through as if every check
+// had matched — exactly the shape of the original #4061 bug, reintroduced in
+// this package's own port of its fix, and masked by every test below having
+// used an empty args map instead of the filled one each one's real TS
+// fixture counterpart actually uses.
+func TestDecide_CLI_ScopeGroupDeniesAbsentScopeArgs(t *testing.T) {
+	db := openTestDB(t)
+	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, openGroupsCmd, agentActor("g1"), map[string]string{})
+	if err != nil {
+		t.Fatalf("DecideRestartLike: %v", err)
+	}
+	if got.Effect != "deny" {
+		t.Fatalf("effect = %q, want deny (absent scope args must not be exempted)", got.Effect)
+	}
+}
+
+// TestDecide_CLI_ScopeGroupDeniesAbsentIDArg is the --id-specific half of the
+// same proof, for a Resource ("groups"/"destinations") where --id IS the
+// agent group ID.
+func TestDecide_CLI_ScopeGroupDeniesAbsentIDArg(t *testing.T) {
+	db := openTestDB(t)
+	got, err := DecideRestartLike(context.Background(), SQLCLIScopeLookup{DB: db}, openGroupsCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1"})
+	if err != nil {
+		t.Fatalf("DecideRestartLike: %v", err)
+	}
+	if got.Effect != "deny" {
+		t.Fatalf("effect = %q, want deny (absent --id must not be exempted)", got.Effect)
+	}
+}
+
 func TestEvaluateWithGrant_CLI_GrantSatisfiesHold(t *testing.T) {
-	// guard-cli-grant-satisfied
+	// guard-cli-grant-satisfied: TS's own fixture passes every scope arg
+	// ("g1" throughout) to isolate the grant-satisfaction decision, not an
+	// empty payload.
 	db := openTestDB(t)
 	insertApproval(t, db, "appr-cli-1", "cli_command", `{"frame":{"command":"test-restart"}}`)
 	grant := &Grant{ApprovalID: "appr-cli-1", Action: "cli_command"}
-	got, err := EvaluateWithGrant(context.Background(), SQLCLIScopeLookup{DB: db}, SQLApprovalLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{}, grant)
+	got, err := EvaluateWithGrant(context.Background(), SQLCLIScopeLookup{DB: db}, SQLApprovalLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1", "id": "g1"}, grant)
 	if err != nil {
 		t.Fatalf("EvaluateWithGrant: %v", err)
 	}
@@ -234,11 +310,14 @@ func TestEvaluateWithGrant_CLI_GrantSatisfiesHold(t *testing.T) {
 }
 
 func TestEvaluateWithGrant_CLI_GrantMismatchDenied(t *testing.T) {
-	// guard-cli-grant-mismatch
+	// guard-cli-grant-mismatch: filled scope args, same reasoning as
+	// GrantSatisfiesHold above — an empty args map would deny at the scope
+	// check before ever reaching the grant-mismatch logic this test exists
+	// to isolate, silently testing the wrong thing while still "passing".
 	db := openTestDB(t)
 	insertApproval(t, db, "appr-cli-2", "cli_command", `{"frame":{"command":"some-other-command"}}`)
 	grant := &Grant{ApprovalID: "appr-cli-2", Action: "cli_command"}
-	got, err := EvaluateWithGrant(context.Background(), SQLCLIScopeLookup{DB: db}, SQLApprovalLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{}, grant)
+	got, err := EvaluateWithGrant(context.Background(), SQLCLIScopeLookup{DB: db}, SQLApprovalLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1", "id": "g1"}, grant)
 	if err != nil {
 		t.Fatalf("EvaluateWithGrant: %v", err)
 	}
@@ -255,10 +334,11 @@ func TestEvaluateWithGrant_CLI_GrantForDeletedApprovalDenied(t *testing.T) {
 	// A caller presents a Grant referencing an approval_id that does not
 	// (or no longer) exist in pending_approvals — mirroring "resolution
 	// deletes it, so a grant can only execute once". Never trust the
-	// caller's claim that it's still valid.
+	// caller's claim that it's still valid. Filled scope args so this
+	// actually isolates the deleted-approval path, not the scope check.
 	db := openTestDB(t)
 	grant := &Grant{ApprovalID: "appr-never-existed", Action: "cli_command"}
-	got, err := EvaluateWithGrant(context.Background(), SQLCLIScopeLookup{DB: db}, SQLApprovalLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{}, grant)
+	got, err := EvaluateWithGrant(context.Background(), SQLCLIScopeLookup{DB: db}, SQLApprovalLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1", "id": "g1"}, grant)
 	if err != nil {
 		t.Fatalf("EvaluateWithGrant: %v", err)
 	}
@@ -268,10 +348,11 @@ func TestEvaluateWithGrant_CLI_GrantForDeletedApprovalDenied(t *testing.T) {
 }
 
 func TestEvaluateWithGrant_CLI_MalformedApprovalPayloadFailsClosed(t *testing.T) {
+	// Filled scope args — see GrantForDeletedApprovalDenied above for why.
 	db := openTestDB(t)
 	insertApproval(t, db, "appr-cli-bad", "cli_command", `not json`)
 	grant := &Grant{ApprovalID: "appr-cli-bad", Action: "cli_command"}
-	got, err := EvaluateWithGrant(context.Background(), SQLCLIScopeLookup{DB: db}, SQLApprovalLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{}, grant)
+	got, err := EvaluateWithGrant(context.Background(), SQLCLIScopeLookup{DB: db}, SQLApprovalLookup{DB: db}, restartLikeCmd, agentActor("g1"), map[string]string{"agent_group_id": "g1", "group": "g1", "id": "g1"}, grant)
 	if err != nil {
 		t.Fatalf("EvaluateWithGrant: %v", err)
 	}

@@ -68,6 +68,7 @@ import './provider-contracts/index.js';
 import {
   realizeProviderSpawnSurfaces,
   providerStateVolumePath,
+  syncSharedSkillLinks,
   type ProviderSpawnRealization,
 } from './provider-contracts/realize.js';
 import { getProviderHostContract, hasProviderMountSurface } from './provider-contracts/registry.js';
@@ -247,14 +248,12 @@ async function ensureGatewaySession(sessionId: string, input: GatewaySessionInpu
  * is skipped; adopted sessions have a lease like any other and are
  * released the same way.
  *
- * Known, named gap, not fixed here: Iron Proxy declares no `release()`
- * method at all (cleanup is entirely abort-signal-driven), so a
- * `'host-detached'` release has the same effect on it as
- * `'session-ended'` today — it revokes the session's live identity via
- * `cancelIdentity()` immediately, rather than preserving it for a
- * successor host. Closing that fully needs a real, provider-specific
- * `release()` on Iron Proxy that treats the two kinds differently —
- * genuinely security-sensitive work, out of scope here.
+ * Iron Proxy's own `release()` (`attachLeaseLifecycle`,
+ * gateway-providers/iron-proxy.ts) already gates `cancelIdentity()` on
+ * `event.kind === 'session-ended'`, so a `'host-detached'` release here
+ * detaches this host's local lease tracking without revoking the
+ * session's live identity — the resource is preserved for a successor
+ * host's `adoptRunningSessions` to re-`ensure()`, as intended.
  */
 export async function releaseAllGatewaySessions(reason = 'host-shutdown'): Promise<void> {
   await Promise.all(
@@ -655,6 +654,34 @@ export async function adoptRunningSessions(): Promise<{ adopted: number; stopped
   return { adopted, stopped };
 }
 
+/**
+ * Stop the sessions this process supervises whose session row or agent group
+ * no longer exists. The per-session reconcile only visits live rows, so a
+ * delete (setup cleanup, `ncl groups delete`) would otherwise leave the
+ * container up until the next host restart, where adoption stops it the same
+ * way. Containers no process supervises are adoption's job, not this sweep's.
+ *
+ * Not racy against a legitimate spawn: a runtime is registered only after its
+ * session row was read (`spawnContainer`) or checked (adoption), and the rows
+ * are read after that, so a missing row was deleted. A spawn still in flight
+ * is left for the next tick, once `start()` has returned.
+ */
+export async function stopOrphanedSessions(): Promise<number> {
+  let stopped = 0;
+  for (const [sessionId, runtime] of [...activeContainers]) {
+    if (wakePromises.has(sessionId) || runtime.stopReason) continue;
+    const session = await getSession(sessionId);
+    if (session && (await getAgentGroup(session.agent_group_id))) continue;
+    log.warn('Stopping container whose session or agent group was deleted', {
+      sessionId,
+      containerName: runtime.containerName,
+    });
+    killContainer(sessionId, 'orphaned');
+    stopped += 1;
+  }
+  return stopped;
+}
+
 type AdoptionOutcome = 'adopted' | 'stopped' | 'left-untracked';
 
 /** One snapshot's worth of `adoptRunningSessions`' reconciliation. */
@@ -808,7 +835,18 @@ export async function buildMounts(
   const defaultSurfaces = !contract && !providerProvidesAgentSurfaces(provider);
 
   const groupDir = path.resolve(GROUPS_DIR, agentGroup.folder);
-  const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
+  // False positive: `agentGroup.id` is always a DB primary key resolved by
+  // the caller, never external input. `groupSessionBaseDir` is the
+  // host-owned anchor syncSkillSymlinks walks `.claude-shared` through
+  // (rather than baking it into the root it opens — see that function's own
+  // doc comment for why this split matters); `claudeDir` below is used only
+  // for the Docker mount's hostPath, not a raw fs call. Same disposition as
+  // this project's other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+  const groupSessionBaseDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id);
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+  const claudeDir = path.join(groupSessionBaseDir, '.claude-shared');
   const sessDir = sessionDir(agentGroup.id, session.id);
   const projectDocument = contract?.projectDocument;
   let lateProjectDocumentMount: VolumeMount | undefined;
@@ -831,7 +869,7 @@ export async function buildMounts(
     );
     skillBackingPaths = providerSurfaces.skillBackingPaths;
   } else if (defaultSurfaces) {
-    syncSkillSymlinks(claudeDir, containerConfig);
+    syncSkillSymlinks(groupSessionBaseDir, containerConfig);
 
     // Compose CLAUDE.md fresh every spawn: every instruction source inlined
     // into one flat file. See `project-doc-compose.ts`.
@@ -1205,58 +1243,31 @@ export function parsePidsLimit(value: string): number | undefined {
  * Not the mechanism the composer stopped using: skill discovery is a directory
  * scan that follows a link wherever it lands, and only `@` imports are gated on
  * resolving inside the project directory.
+ *
+ * `groupBaseDir` must be the trusted session-base root
+ * (`DATA_DIR/v2-sessions/<group.id>`), NOT `.claude-shared` itself —
+ * AnchoredDir.open's root argument is opened without O_NOFOLLOW by design
+ * (host-owned by assumption), so `.claude-shared` has to be one of the
+ * segments it walks, not baked into the root string, or a container that
+ * swapped its own `.claude-shared` for a symlink (agent-writable, same mount
+ * this function's whole job is to protect) would have it followed on the
+ * very next respawn. Same bug class as `provider-contracts/realize.ts`'s
+ * `prepareSpawnFile`, fixed there first.
  */
 export function syncSkillSymlinks(
-  claudeDir: string,
+  groupBaseDir: string,
   containerConfig: import('./container-config.js').ContainerConfig,
-): void {
-  const skillsDir = path.join(claudeDir, 'skills');
-  if (!fs.existsSync(skillsDir)) {
-    fs.mkdirSync(skillsDir, { recursive: true });
-  }
-
-  const desired = selectedSkillNames(containerConfig);
-  const desiredSet = new Set(desired);
-
-  // Remove symlinks not in the desired set
-  for (const entry of fs.readdirSync(skillsDir)) {
-    const entryPath = path.join(skillsDir, entry);
-    let isSymlink = false;
-    try {
-      isSymlink = fs.lstatSync(entryPath).isSymbolicLink();
-    } catch {
-      continue;
-    }
-    if (isSymlink && !desiredSet.has(entry)) {
-      fs.unlinkSync(entryPath);
-    }
-  }
-
-  // Create symlinks for desired skills (container path targets)
-  for (const skill of desired) {
-    const linkPath = path.join(skillsDir, skill);
-    let entry: fs.Stats | undefined;
-    try {
-      entry = fs.lstatSync(linkPath);
-    } catch {
-      /* missing */
-    }
-    if (!entry) {
-      fs.symlinkSync(`/app/skills/${skill}`, linkPath);
-    } else if (!entry.isSymbolicLink()) {
-      // A real entry here is either a template overlay (intentional; see
-      // src/group-skills.ts) or a stale pre-refactor skill copy that shadows
-      // the shared skill (#3001). No marker distinguishes them yet, so
-      // surface the skip instead of staying silent.
-      log.warn(
-        'Shared skill not symlinked: real entry occupies the path (template overlay or stale pre-refactor copy)',
-        {
-          skill,
-          path: linkPath,
-        },
-      );
-    }
-  }
+): string[] {
+  // Same body as the declared-contract path; real (non-symlink) entries are
+  // either a template overlay (intentional; see src/group-skills.ts) or a
+  // stale pre-refactor skill copy that shadows the shared skill (#3001), so
+  // the skip is surfaced as a warning. syncSharedSkillLinks opens
+  // groupBaseDir/.claude-shared/skills through an AnchoredDir — a symlink
+  // swapped in for .claude-shared itself, .claude-shared/skills, or any
+  // entry below it, is refused, not followed.
+  const selected = selectedSkillNames(containerConfig);
+  syncSharedSkillLinks(groupBaseDir, ['.claude-shared', 'skills'], selected, true);
+  return selected;
 }
 
 /**

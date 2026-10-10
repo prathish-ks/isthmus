@@ -6,11 +6,11 @@ import { AsyncLocalStorage } from 'async_hooks';
 import fs from 'fs';
 import path from 'path';
 
+import { AnchoredDir } from './anchored-dir.js';
 import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
 import type { OutboundFile } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
-import { ensureContainedInboxDir, isPathInside } from './inbox-safety.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import { isUniqueViolation } from './db/errors.js';
 import {
@@ -325,9 +325,11 @@ export async function writeSessionMessage(
  *
  * Defenses, mirrored from the outbound side:
  *   1. basename check on `messageId` and `filename`.
- *   2. lstat of the inbox dir to refuse pre-placed symlinks.
- *   3. realpath-based containment under the session inbox root.
- *   4. `wx` flag on writeFileSync to refuse following a pre-existing symlink
+ *   2. AnchoredDir.open on the inbox dir, refusing a pre-placed symlink at
+ *      open time rather than re-checking the path before each write.
+ *   3. every attachment written through that one descriptor, so a symlink
+ *      swapped in afterward is never followed (immune, not just re-checked).
+ *   4. `writeNewFile`'s `O_EXCL` to refuse following a pre-existing symlink
  *      at the target file path or overwriting any existing file.
  */
 function extractAttachmentFiles(
@@ -351,57 +353,63 @@ function extractAttachmentFiles(
     return contentStr;
   }
 
-  const inboxRoot = path.join(sessionDir(agentGroupId, sessionId), 'inbox');
-  // Re-validated on EVERY attachment that carries bytes, not just once before
-  // the loop (code review finding): the session dir is RW-mounted into the
-  // container, so a co-resident process could swap `inboxDir` itself for a
-  // symlink between one attachment's write and the next — the `wx` flag below
-  // only refuses an existing symlink/file at the FINAL path component, not a
-  // symlinked intermediate directory. ensureContainedInboxDir is idempotent
-  // (mkdir on an already-valid dir is a no-op) and cheap, so re-running it
-  // per write shrinks the exposure window back down to a single operation
-  // instead of the whole attachment batch.
+  // Opened lazily on the first attachment that actually carries bytes, so a
+  // message whose attachments have no inline `data` never creates an inbox dir.
+  // The session dir is RW-mounted into the container, so the agent owns the
+  // `inbox` and `inbox/<messageId>` names and can turn either into a symlink
+  // at any time — AnchoredDir refuses that at open time, and every attachment
+  // is then written through the one descriptor, immune to any swap afterward
+  // (unlike a path re-check before each write, which only shrinks the window).
+  let inbox: AnchoredDir | null | undefined;
+
   let changed = false;
-  for (const att of attachments) {
-    if (typeof att.data !== 'string') continue;
+  try {
+    for (const att of attachments) {
+      if (typeof att.data !== 'string') continue;
 
-    const rawName = deriveAttachmentName(att);
-    const filename = isSafeAttachmentName(rawName) ? rawName : `attachment-${Date.now()}`;
-    if (filename !== rawName) {
-      log.warn('Refused unsafe attachment filename, would escape inbox', {
-        messageId,
-        rawName,
-        replacement: filename,
-      });
-    }
-
-    const inboxDir = ensureContainedInboxDir(inboxRoot, messageId, { messageId });
-    // Unsafe inbox (symlink / escape) — no attachment can be written safely.
-    if (!inboxDir) break;
-
-    const filePath = path.join(inboxDir, filename);
-    try {
-      // wx = exclusive create. Refuses to follow a pre existing symlink or
-      // overwrite any existing file. The host expects to be the sole writer
-      // of these attachments.
-      fs.writeFileSync(filePath, Buffer.from(att.data as string, 'base64'), { flag: 'wx' });
-    } catch (err: unknown) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.code === 'EEXIST') {
-        log.warn('Inbox attachment target already exists, refusing to overwrite', {
+      const rawName = deriveAttachmentName(att);
+      const filename = isSafeAttachmentName(rawName) ? rawName : `attachment-${Date.now()}`;
+      if (filename !== rawName) {
+        log.warn('Refused unsafe attachment filename, would escape inbox', {
           messageId,
-          filename,
+          rawName,
+          replacement: filename,
         });
-        continue;
       }
-      throw err;
-    }
 
-    att.name = filename;
-    att.localPath = `inbox/${messageId}/${filename}`;
-    delete att.data;
-    changed = true;
-    log.debug('Saved attachment to inbox', { messageId, filename, size: att.size });
+      if (inbox === undefined) {
+        try {
+          inbox = AnchoredDir.open(sessionDir(agentGroupId, sessionId), ['inbox', messageId], true);
+        } catch (err) {
+          log.warn('Rejecting unsafe inbox directory', { messageId, err });
+          inbox = null;
+        }
+      }
+      // Unsafe inbox — no attachment can be written safely.
+      if (!inbox) break;
+
+      try {
+        inbox.writeNewFile(filename, Buffer.from(att.data as string, 'base64'));
+      } catch (err: unknown) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code === 'EEXIST') {
+          log.warn('Inbox attachment target already exists, refusing to overwrite', {
+            messageId,
+            filename,
+          });
+          continue;
+        }
+        throw err;
+      }
+
+      att.name = filename;
+      att.localPath = `inbox/${messageId}/${filename}`;
+      delete att.data;
+      changed = true;
+      log.debug('Saved attachment to inbox', { messageId, filename, size: att.size });
+    }
+  } finally {
+    inbox?.close();
   }
 
   return changed ? JSON.stringify(parsed) : contentStr;
@@ -499,45 +507,32 @@ export function readOutboxFiles(
     return undefined;
   }
 
-  const outboxDir = path.join(sessionDir(agentGroupId, sessionId), 'outbox', messageId);
-  if (!fs.existsSync(outboxDir)) return undefined;
-
-  let realOutboxDir: string;
+  // The container owns `outbox` and everything below it: read only through
+  // descriptors, refusing symlinks at every level.
+  let outbox: AnchoredDir | null;
   try {
-    const stat = fs.lstatSync(outboxDir);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      log.warn('Rejecting unsafe outbox directory', { messageId, outboxDir });
-      return undefined;
-    }
-    realOutboxDir = fs.realpathSync(outboxDir);
+    outbox = AnchoredDir.open(sessionDir(agentGroupId, sessionId), ['outbox', messageId]);
   } catch (err) {
-    log.warn('Failed to inspect outbox directory', { messageId, err });
+    log.warn('Rejecting unsafe outbox directory', { messageId, err });
     return undefined;
   }
+  if (!outbox) return undefined;
 
   const files: OutboundFile[] = [];
-  for (const filename of filenames) {
-    if (!isSafeAttachmentName(filename)) {
-      log.warn('Refused unsafe outbox filename, would escape outbox', { messageId, filename });
-      continue;
-    }
-
-    const filePath = path.join(outboxDir, filename);
-    try {
-      const stat = fs.lstatSync(filePath);
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        log.warn('Rejecting unsafe outbox file', { messageId, filename });
+  try {
+    for (const filename of filenames) {
+      if (!isSafeAttachmentName(filename)) {
+        log.warn('Refused unsafe outbox filename, would escape outbox', { messageId, filename });
         continue;
       }
-      const realFilePath = fs.realpathSync(filePath);
-      if (!isPathInside(realOutboxDir, realFilePath)) {
-        log.warn('Rejecting outbox file outside message directory', { messageId, filename });
-        continue;
+      try {
+        files.push({ filename, data: outbox.readFile(filename) });
+      } catch (err) {
+        log.warn('Outbox file missing or not a regular file', { messageId, filename, err });
       }
-      files.push({ filename, data: fs.readFileSync(realFilePath) });
-    } catch {
-      log.warn('Outbox file not found', { messageId, filename });
     }
+  } finally {
+    outbox.close();
   }
   return files.length > 0 ? files : undefined;
 }
@@ -554,23 +549,23 @@ export function clearOutbox(agentGroupId: string, sessionId: string, messageId: 
     return;
   }
 
-  const outboxDir = path.join(sessionDir(agentGroupId, sessionId), 'outbox', messageId);
-  if (!fs.existsSync(outboxDir)) return;
+  let outbox: AnchoredDir | null = null;
   try {
-    const stat = fs.lstatSync(outboxDir);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      log.warn('Rejecting unsafe outbox cleanup directory', { messageId, outboxDir });
-      return;
+    outbox = AnchoredDir.open(sessionDir(agentGroupId, sessionId), ['outbox']);
+    const dir = outbox?.openDir(messageId);
+    if (!outbox || !dir) return;
+    // One level, no recursion: a message outbox holds the files it delivered.
+    // Anything else surfaces as an error below instead of being walked.
+    try {
+      for (const entry of dir.entries()) dir.unlink(entry);
+    } finally {
+      dir.close();
     }
-    const realOutboxBase = fs.realpathSync(path.join(sessionDir(agentGroupId, sessionId), 'outbox'));
-    const realOutboxDir = fs.realpathSync(outboxDir);
-    if (!isPathInside(realOutboxBase, realOutboxDir)) {
-      log.warn('Rejecting outbox cleanup outside session outbox', { messageId, outboxDir });
-      return;
-    }
-    fs.rmSync(realOutboxDir, { recursive: true, force: true });
+    outbox.rmdir(messageId);
   } catch (err) {
     log.warn('Outbox cleanup failed (message already delivered)', { messageId, err });
+  } finally {
+    outbox?.close();
   }
 }
 

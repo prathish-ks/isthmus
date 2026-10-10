@@ -86,7 +86,7 @@ describe('createCommandRunner (real execFileSync)', () => {
   it('tryRun reports ok:true with the trimmed stdout on success', () => {
     const runner = createCommandRunner();
     const result = runner.tryRun('node', ['-e', "process.stdout.write('fine')"]);
-    expect(result).toEqual({ ok: true, stdout: 'fine' });
+    expect(result).toEqual({ ok: true, stdout: 'fine', status: 0 });
   });
 
   it('tryRun reports ok:false and joins stdout+stderr on failure', () => {
@@ -193,15 +193,43 @@ describe('detectService fallthrough and edge branches', () => {
   it('detects a live nohup process from its recorded pid', () => {
     const root = temp();
     const { env } = makeEnv('linux');
+    const pid = 424242;
     fs.writeFileSync(path.join(root, 'start-nanoclaw.sh'), '#!/bin/sh\n');
-    fs.writeFileSync(path.join(root, 'nanoclaw.pid'), String(process.pid));
+    fs.writeFileSync(path.join(root, 'nanoclaw.pid'), String(pid));
+    // isNohupHost identifies the host by its procfs cmdline, not just any
+    // live pid — a reused pid belonging to an unrelated process must not
+    // read as "this install's host, still running".
+    const procRoot = temp();
+    env.procRoot = procRoot;
+    fs.mkdirSync(path.join(procRoot, String(pid)), { recursive: true });
+    fs.writeFileSync(path.join(procRoot, String(pid), 'cmdline'), `node\0${path.join(root, 'dist', 'index.js')}\0`);
 
     const handle = detectService(root, env);
     expect(handle).toEqual({
       mode: 'nohup',
       definition: path.join(root, 'start-nanoclaw.sh'),
-      pid: process.pid,
+      pid,
       active: true,
+    });
+  });
+
+  it('reports a recorded pid as inactive when it belongs to an unrelated process (reused pid)', () => {
+    const root = temp();
+    const { env } = makeEnv('linux');
+    const pid = 424243;
+    fs.writeFileSync(path.join(root, 'start-nanoclaw.sh'), '#!/bin/sh\n');
+    fs.writeFileSync(path.join(root, 'nanoclaw.pid'), String(pid));
+    const procRoot = temp();
+    env.procRoot = procRoot;
+    fs.mkdirSync(path.join(procRoot, String(pid)), { recursive: true });
+    fs.writeFileSync(path.join(procRoot, String(pid), 'cmdline'), 'bash\0/some/unrelated/script.sh\0');
+
+    const handle = detectService(root, env);
+    expect(handle).toEqual({
+      mode: 'nohup',
+      definition: path.join(root, 'start-nanoclaw.sh'),
+      pid,
+      active: false,
     });
   });
 
@@ -244,9 +272,22 @@ describe('stopService branch coverage', () => {
   });
 
   it('boots out an active launchd job', async () => {
-    const { env, calls } = makeEnv('darwin');
+    // Not loaded before or after bootout: stopService's own poll (print
+    // before bootout to seed any pid, bootout, print again to confirm the
+    // job actually left the domain) sees no job at any point and returns
+    // without sleeping.
+    const { env, calls } = makeEnv('darwin', {
+      'launchctl print gui/1000/com.nanoclaw-v2-x': { ok: false },
+    });
     await stopService({ mode: 'launchd', active: true, name: 'com.nanoclaw-v2-x' }, env);
-    expect(calls).toEqual(['launchctl bootout gui/1000/com.nanoclaw-v2-x']);
+    // print (seed, before bootout) -> bootout -> print (loop condition) ->
+    // print (post-loop confirmation) -- three checks around one bootout.
+    expect(calls).toEqual([
+      'launchctl print gui/1000/com.nanoclaw-v2-x',
+      'launchctl bootout gui/1000/com.nanoclaw-v2-x',
+      'launchctl print gui/1000/com.nanoclaw-v2-x',
+      'launchctl print gui/1000/com.nanoclaw-v2-x',
+    ]);
   });
 
   it('does nothing for a nohup handle with no pid recorded', async () => {

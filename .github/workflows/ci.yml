@@ -25,13 +25,13 @@ jobs:
       matrix:
         node-version: [22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.12
       - run: pnpm install --frozen-lockfile
@@ -111,8 +111,8 @@ jobs:
       run:
         working-directory: go-host
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
 
@@ -203,16 +203,16 @@ jobs:
   performance-gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.12
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       - run: pnpm install --frozen-lockfile
@@ -356,6 +356,24 @@ jobs:
           echo >> "$GITHUB_STEP_SUMMARY"
           echo "Budgets are fixed ceilings tuned against real GitHub Actions runner measurements, not a %-vs-baseline comparison — see each test file's own comment for the baseline this was set against." >> "$GITHUB_STEP_SUMMARY"
 
+  # Skill pins sit outside the lockfile; .github/skill-pins mirrors them so
+  # Dependabot and audit tools can see them. Red when the mirror is stale.
+  skill-pins:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run skill-pins:check
+
   # Repository rules require exact `ci`; always run it so matrix, go-host,
   # pnpm-audit, coverage-gate, performance-gate, and live-egress-lockdown
   # failures all remain blocking. bun-audit is deliberately NOT in this list
@@ -367,7 +385,7 @@ jobs:
   ci:
     if: always()
     needs:
-      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test, go-multi-container-live-docker]
+      [test, go-host, pnpm-audit, coverage-gate, performance-gate, live-egress-lockdown, wiring-registry-check, sync-sibling-branch-script-test, go-multi-container-live-docker, skill-pins]
     permissions: {}
     runs-on: ubuntu-latest
     steps:
@@ -381,6 +399,7 @@ jobs:
           test "${{ needs.wiring-registry-check.result }}" = success
           test "${{ needs.sync-sibling-branch-script-test.result }}" = success
           test "${{ needs.go-multi-container-live-docker.result }}" = success
+          test "${{ needs.skill-pins.result }}" = success
 
   # ---------------------------------------------------------------------
   # Report-only jobs (P9-01 / release-readiness.md §2, §6): these run on
@@ -445,8 +464,8 @@ jobs:
       - name: Preserve LF line endings on checkout (Windows only needs this, harmless elsewhere)
         working-directory: .
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
 
@@ -488,8 +507,8 @@ jobs:
       run:
         working-directory: go-host
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       # golangci-lint-action v6 only knows how to run golangci-lint v1.x —
@@ -501,7 +520,7 @@ jobs:
       # go1.25 modules lint fine) — .golangci.yml already targets the v2
       # config schema (`version: "2"`), so no config migration is needed.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: latest
           working-directory: go-host
@@ -514,8 +533,8 @@ jobs:
       run:
         working-directory: go-host
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       # Pinned, not @latest: golang.org/x/vuln@v1.8.0 (2026-09-08) requires
@@ -559,9 +578,9 @@ jobs:
   pnpm-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -596,8 +615,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.12
       - name: bun audit (new findings only — see comment above)
@@ -631,9 +650,9 @@ jobs:
   coverage-gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -653,9 +672,9 @@ jobs:
   wiring-registry-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -704,7 +723,7 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: semgrep scan (go-host, full)
@@ -749,8 +768,8 @@ jobs:
           - { pkg: "./internal/guardpolicy/", name: "FuzzDecideRestartLike" }
           - { pkg: "./internal/kernel/", name: "FuzzDispatch" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       - name: fuzz ${{ matrix.target.name }} for 20s
@@ -794,8 +813,8 @@ jobs:
       run:
         working-directory: go-host
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       - name: EC-05 live-Docker adversarial tests
@@ -832,8 +851,8 @@ jobs:
       run:
         working-directory: go-host
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       - name: Multi-container/network gateway live-Docker tests
@@ -865,8 +884,8 @@ jobs:
       run:
         working-directory: go-host
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       # Diagnostic-only (never fails the job on its own — every command is
@@ -949,13 +968,13 @@ jobs:
     continue-on-error: true
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       - run: pnpm install --frozen-lockfile
@@ -1011,13 +1030,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go-host/go.mod
       - run: pnpm install --frozen-lockfile
@@ -1079,7 +1098,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Compare latest nanocoai/nanoclaw release against the pinned baseline
         run: |
           set -euo pipefail
@@ -1120,7 +1139,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Compare the live alpine:3.20 digest against the pinned helper-image digest
         run: |
           set -euo pipefail
@@ -1162,7 +1181,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: bash scripts/sync-sibling-branch.test.sh
 
   # sync-sibling-branches-{check,push}: keeps this project's own `channels`
@@ -1218,12 +1237,12 @@ jobs:
       providers_should_push: ${{ steps.providers.outputs.should_push }}
       providers_target_sha: ${{ steps.providers.outputs.target_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -1243,7 +1262,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Push channels
         if: needs.sync-sibling-branches-check.outputs.channels_should_push == 'true'
         run: bash scripts/sync-sibling-branch.sh push channels "${{ needs.sync-sibling-branches-check.outputs.channels_target_sha }}"

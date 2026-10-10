@@ -2,7 +2,6 @@
 /go-host/ @prathish-ks
 /.github/workflows/ci.yml @prathish-ks
 /.github/workflows/nanogo-release.yml @prathish-ks
-/.github/workflows/approve-agent-image.yml @prathish-ks
 /.github/workflows/verify-agent-image.yml @prathish-ks
 
 # Everything below is NanoClaw's own inherited TypeScript ecosystem,

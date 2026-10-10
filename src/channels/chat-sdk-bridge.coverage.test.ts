@@ -210,13 +210,21 @@ async function dispatch(fire: (options: { waitUntil: (p: Promise<unknown>) => vo
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-function postJson(url: string, body: string): Promise<{ status: number; body: string }> {
+function postJson(
+  url: string,
+  body: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    const req = http.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on('data', (c: Buffer) => chunks.push(c));
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
-    });
+    const req = http.request(
+      url,
+      { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
+      },
+    );
     req.on('error', reject);
     req.end(body);
   });
@@ -886,8 +894,8 @@ describe('gateway adapter', () => {
     }
 
     it('answers 200 to unparseable bodies without touching the adapter', async () => {
-      const g = await gatewayBridge();
-      const res = await postJson(g.url, '{not json');
+      const g = await gatewayBridge({ botToken: 'tok' });
+      const res = await postJson(g.url, '{not json', { 'x-discord-gateway-token': 'tok' });
       expect(res).toEqual({ status: 200, body: '{"ok":true}' });
       expect(g.calls.webhooks).toEqual([]);
       await g.bridge.teardown();
@@ -908,6 +916,7 @@ describe('gateway adapter', () => {
           member: { user: { id: 'U1', username: 'glob', global_name: 'Glob Al' } },
           message: { embeds: [{ title: 'old title', description: 'original body' }] },
         }),
+        { 'x-discord-gateway-token': 'tok' },
       );
       expect(res.status).toBe(200);
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -931,7 +940,7 @@ describe('gateway adapter', () => {
     it('falls back to the embed title / question and DM-style user when no render row exists', async () => {
       const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
       vi.stubGlobal('fetch', fetchMock);
-      const g = await gatewayBridge();
+      const g = await gatewayBridge({ botToken: 'tok' });
 
       await postJson(
         g.url,
@@ -943,6 +952,7 @@ describe('gateway adapter', () => {
           user: { username: 'uname' }, // no id — dispatched with an empty userId
           message: { embeds: [] },
         }),
+        { 'x-discord-gateway-token': 'tok' },
       );
       const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, { body: string }])[1].body);
       expect(body.data.embeds).toEqual([
@@ -961,18 +971,21 @@ describe('gateway adapter', () => {
           throw boom;
         }),
       );
-      const g = await gatewayBridge();
+      const g = await gatewayBridge({ botToken: 'tok' });
 
       const res = await postJson(
         g.url,
         interaction({ type: 3, id: 'int-3', token: 't3', data: { custom_id: 'ncq:nocolon' } }),
+        { 'x-discord-gateway-token': 'tok' },
       );
       expect(res.status).toBe(200);
       expect(error).toHaveBeenCalledWith('Failed to update interaction', { err: boom });
       expect(g.actions).toEqual([]);
 
       // No `data` block at all — custom_id undefined.
-      const res2 = await postJson(g.url, interaction({ type: 3, id: 'int-4', token: 't4' }));
+      const res2 = await postJson(g.url, interaction({ type: 3, id: 'int-4', token: 't4' }), {
+        'x-discord-gateway-token': 'tok',
+      });
       expect(res2.status).toBe(200);
       expect(g.actions).toEqual([]);
       await g.bridge.teardown();
@@ -980,9 +993,10 @@ describe('gateway adapter', () => {
 
     it('forwards non-component interactions and other gateway events to adapter.handleWebhook with the bot token', async () => {
       const g = await gatewayBridge({ botToken: 'secret-token' });
-      await postJson(g.url, interaction({ type: 2, id: 'slash' }));
-      await postJson(g.url, JSON.stringify({ type: 'GATEWAY_MESSAGE_CREATE', data: { content: 'hi' } }));
-      await postJson(g.url, JSON.stringify({ type: 'GATEWAY_INTERACTION_CREATE', data: null }));
+      const auth = { 'x-discord-gateway-token': 'secret-token' };
+      await postJson(g.url, interaction({ type: 2, id: 'slash' }), auth);
+      await postJson(g.url, JSON.stringify({ type: 'GATEWAY_MESSAGE_CREATE', data: { content: 'hi' } }), auth);
+      await postJson(g.url, JSON.stringify({ type: 'GATEWAY_INTERACTION_CREATE', data: null }), auth);
       expect(g.calls.webhooks).toHaveLength(3);
       for (const w of g.calls.webhooks) {
         expect(w.headers['x-discord-gateway-token']).toBe('secret-token');
@@ -993,13 +1007,15 @@ describe('gateway adapter', () => {
       await g.bridge.teardown();
     });
 
-    it('sends an empty token header when no botToken is configured and answers 500 when the adapter throws', async () => {
+    it('answers 500 when the adapter throws, forwarding the configured bot token', async () => {
       const error = vi.spyOn(log, 'error').mockImplementation(() => {});
       const boom = new Error('bad signature');
-      const g = await gatewayBridge({ webhookThrows: boom });
-      const res = await postJson(g.url, JSON.stringify({ type: 'GATEWAY_GUILD_CREATE', data: {} }));
+      const g = await gatewayBridge({ botToken: 'tok', webhookThrows: boom });
+      const res = await postJson(g.url, JSON.stringify({ type: 'GATEWAY_GUILD_CREATE', data: {} }), {
+        'x-discord-gateway-token': 'tok',
+      });
       expect(res).toEqual({ status: 500, body: '{"error":"internal"}' });
-      expect(g.calls.webhooks[0].headers['x-discord-gateway-token']).toBe('');
+      expect(g.calls.webhooks[0].headers['x-discord-gateway-token']).toBe('tok');
       expect(error).toHaveBeenCalledWith('Webhook server error', { err: boom });
       await g.bridge.teardown();
     });

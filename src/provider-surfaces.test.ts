@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -169,6 +170,71 @@ describe('initGroupFilesystem agent surfaces', () => {
     const groupDir = path.join(GROUPS_DIR, ag.folder);
     expect(fs.existsSync(path.join(groupDir, 'CLAUDE.local.md'))).toBe(false);
     expect(fs.existsSync(path.join(groupDir, 'memory'))).toBe(false);
+  });
+
+  describe('declared settings.json planted by the container', () => {
+    // `.claude-shared` is the container's read-write mount: any name under it
+    // may be a symlink or FIFO by the time the host prepares the next spawn.
+    const hostile = JSON.stringify({ autoMemoryEnabled: true, env: {}, hooks: {} }, null, 2) + '\n';
+
+    it('refuses a symlink to a host file: nothing read, nothing written through it', async () => {
+      const ag = group('ag-settings-link', 'settings-link-group');
+      await createAgentGroup(ag);
+      await initGroupFilesystem(ag, {});
+      const claudeDir = path.join(DATA_DIR, 'v2-sessions', ag.id, '.claude-shared');
+      const settingsFile = path.join(claudeDir, 'settings.json');
+      const hostFile = path.join(TEST_ROOT, 'host-settings.json');
+      fs.writeFileSync(hostFile, hostile);
+      fs.rmSync(settingsFile);
+      fs.symlinkSync(hostFile, settingsFile);
+
+      await initGroupFilesystem(ag, {}); // next spawn
+
+      expect(fs.readFileSync(hostFile, 'utf-8')).toBe(hostile);
+      expect(fs.lstatSync(settingsFile).isSymbolicLink()).toBe(true);
+      // This file's groups resolve through claude's registered host contract
+      // (buildMounts's own side-effect import registers it), so the warning
+      // comes from realize.ts's initializeFile + the claude-settings
+      // transformer's mapIoFailure — its field is `filePath`, not
+      // `settingsFile` (group-init.ts's own unregistered-provider fallback,
+      // exercised instead in group-init.settings.test.ts, uses that name).
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Claude settings'),
+        expect.objectContaining({ filePath: settingsFile }),
+      );
+    });
+
+    it('does not create a host file through a dangling symlink', async () => {
+      const ag = group('ag-settings-dangling', 'settings-dangling-group');
+      await createAgentGroup(ag);
+      await initGroupFilesystem(ag, {});
+      const settingsFile = path.join(DATA_DIR, 'v2-sessions', ag.id, '.claude-shared', 'settings.json');
+      const hostFile = path.join(TEST_ROOT, 'never-created.json');
+      fs.rmSync(settingsFile);
+      fs.symlinkSync(hostFile, settingsFile);
+
+      await initGroupFilesystem(ag, {});
+
+      expect(fs.existsSync(hostFile)).toBe(false);
+      expect(fs.lstatSync(settingsFile).isSymbolicLink()).toBe(true);
+    });
+
+    it('refuses a FIFO without blocking the spawn', async () => {
+      const ag = group('ag-settings-fifo', 'settings-fifo-group');
+      await createAgentGroup(ag);
+      await initGroupFilesystem(ag, {});
+      const settingsFile = path.join(DATA_DIR, 'v2-sessions', ag.id, '.claude-shared', 'settings.json');
+      fs.rmSync(settingsFile);
+      execFileSync('mkfifo', [settingsFile]);
+
+      await initGroupFilesystem(ag, {});
+
+      expect(fs.lstatSync(settingsFile).isFIFO()).toBe(true);
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Claude settings'),
+        expect.objectContaining({ filePath: settingsFile }),
+      );
+    });
   });
 });
 

@@ -36,7 +36,11 @@ vi.mock('../log.js', () => ({
 
 // The driver re-checks mount sources exist; fixture paths are not real files
 // on the test host. A vi.fn so single tests can flip it to "missing".
-vi.mock('fs', () => ({ default: { existsSync: vi.fn(() => true) } }));
+// `constants` stays real: anchored-dir reads open flags at load time.
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { default: { constants: actual.constants, existsSync: vi.fn(() => true) } };
+});
 
 import fs from 'fs';
 
@@ -472,6 +476,24 @@ describe('idempotency and adoption', () => {
 
     expect(cli.joined()).toContain('rm --force nanoclaw-v2-agent-one-1700000000000');
     expect(cli.joined().some((c) => c === 'rm --force ncl-spike-s1')).toBe(false);
+  });
+
+  it('never sweeps a gateway-role container as pre-seam residue, even with no session label', async () => {
+    cli.responses = [{ match: /^ps --filter/, output: 'nanoclaw-iron-proxy||gateway\nncl-spike-s1|s1|\n' }];
+
+    await driver().reapResidue('spike');
+
+    expect(cli.joined().some((c) => c === 'rm --force nanoclaw-iron-proxy')).toBe(false);
+    expect(cli.joined().some((c) => c === 'rm --force ncl-spike-s1')).toBe(false);
+  });
+
+  it('never sweeps a gateway-role container as stale/exited residue', async () => {
+    cli.responses = [{ match: /^ps -a --filter/, output: 'nanoclaw-iron-proxy|gateway\nncl-spike-s1|\n' }];
+
+    await driver().reapResidue('spike');
+
+    expect(cli.joined()).toContain('rm --force ncl-spike-s1');
+    expect(cli.joined().some((c) => c === 'rm --force nanoclaw-iron-proxy')).toBe(false);
   });
 
   it('reaps install-owned networks whose containers are gone', async () => {

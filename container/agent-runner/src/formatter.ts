@@ -1,5 +1,6 @@
 import { findByRouting } from './destinations.js';
 import type { MessageInRow } from './db/messages-in.js';
+import { commandText, slashCommandName, withoutBotSuffix } from './slash-command.generated.js';
 import { TIMEZONE, formatLocalTime, formatLocalStamp } from './timezone.js';
 
 /**
@@ -29,13 +30,35 @@ export function isSessionEcho(msg: MessageInRow): boolean {
  */
 export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
 
-const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/files', '/upload-trace']);
-const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/start', '/remote-control']);
+const ADMIN_COMMANDS = new Set([
+  '/clear',
+  '/compact',
+  '/context',
+  '/cost',
+  '/usage',
+  '/stats',
+  '/files',
+  '/upload-trace',
+  '/reset',
+  '/new',
+]);
+const FILTERED_COMMANDS = new Set([
+  '/help',
+  '/login',
+  '/logout',
+  '/doctor',
+  '/checkup',
+  '/config',
+  '/settings',
+  '/start',
+  '/remote-control',
+  '/rc',
+]);
 
 export interface CommandInfo {
   category: CommandCategory;
   command: string; // the command name (e.g., '/clear')
-  text: string; // full original text
+  text: string; // full text; a command's `@botname` suffix is dropped
   senderId: string | null;
 }
 
@@ -60,28 +83,27 @@ export interface CommandInfo {
  * directly) and left alone.
  */
 export function categorizeMessage(msg: MessageInRow): CommandInfo {
-  const content = parseContent(msg.content);
-  const text = (content.text || '').trim();
-  const senderId = extractSenderId(msg, content);
+  const text = commandText(msg.content);
+  const senderId = extractSenderId(msg, parseContent(msg.content));
 
   // Cross-session echo rows are ambient copies of another conversation —
-  // a copied "/clear" etc. must never execute here.
-  if (isSessionEcho(msg) || !text.startsWith('/')) {
+  // a copied "/clear" etc. must never execute here. The host gate names
+  // commands with the same parse (slash-command.generated.ts).
+  const command = isSessionEcho(msg) ? null : slashCommandName(text);
+  if (command === null) {
     return { category: 'none', command: '', text, senderId };
   }
 
-  // Extract the command name (e.g., '/clear' from '/clear some args')
-  const command = text.split(/\s/)[0].toLowerCase();
-
+  const dispatchText = withoutBotSuffix(text);
   if (ADMIN_COMMANDS.has(command)) {
-    return { category: 'admin', command, text, senderId };
+    return { category: 'admin', command, text: dispatchText, senderId };
   }
 
   if (FILTERED_COMMANDS.has(command)) {
-    return { category: 'filtered', command, text, senderId };
+    return { category: 'filtered', command, text: dispatchText, senderId };
   }
 
-  return { category: 'passthrough', command, text, senderId };
+  return { category: 'passthrough', command, text: dispatchText, senderId };
 }
 
 /**
@@ -91,9 +113,8 @@ export function categorizeMessage(msg: MessageInRow): CommandInfo {
  */
 export function isClearCommand(msg: MessageInRow): boolean {
   if (isSessionEcho(msg)) return false;
-  const content = parseContent(msg.content);
-  const text = (content.text || '').trim();
-  return text.toLowerCase().startsWith('/clear');
+  // Exact name, never a prefix: the host gate only admin-checks '/clear'.
+  return slashCommandName(commandText(msg.content)) === '/clear';
 }
 
 /**

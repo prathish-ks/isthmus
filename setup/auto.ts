@@ -44,7 +44,7 @@ import {
   type ChannelChoice,
 } from './channels/initial-setup.js';
 import { runInheritScript } from './lib/inherit-script.js';
-import { pingCliAgent, PING_AGENT_FOLDER, type PingResult } from './lib/agent-ping.js';
+import { logFirstChat, pingCliAgent, PING_AGENT_FOLDER, type PingResult } from './lib/agent-ping.js';
 import { getSetupProvider, listSetupProviders } from './providers/registry.js';
 import { applyProviderSkill } from './providers/install.js';
 // Provider payloads self-register their picker entry + auth on import.
@@ -525,6 +525,14 @@ async function main(): Promise<void> {
     if (!res.ok) {
       await fail('service', "Couldn't start NanoClaw.", 'See logs/nanoclaw.error.log for details.');
     }
+    if (res.terminal?.fields.PROXY === 'ignored_by_node') {
+      p.log.warn(
+        brandBody(
+          `Node ${res.terminal.fields.PROXY_NODE_VERSION} ignores the outbound proxy, so NanoClaw will connect directly. ` +
+            'Upgrade to Node 22.21+ or 24.5+ to use it.',
+        ),
+      );
+    }
     if (res.terminal?.fields.DOCKER_GROUP_STALE === 'true') {
       p.log.warn(brandBody("NanoClaw's permissions need a tweak before it can reach Docker."));
       p.log.message(
@@ -576,7 +584,9 @@ async function main(): Promise<void> {
           ),
         ),
       );
+      const pingStart = Date.now();
       const ping = await confirmAssistantResponds();
+      logFirstChat(ping, Date.now() - pingStart);
       if (ping === 'ok') {
         phEmit('first_chat_ready');
         const cleanupRawLog = setupLog.stepRawLog('cleanup-cli-agent');
@@ -1663,14 +1673,9 @@ async function runCustomEndpointAuth(baseUrl: string, token: string): Promise<vo
 
   // ANTHROPIC_BASE_URL has to be in .env so the runtime provider config
   // reads it when building container env. The token is *not* written —
-  // OneCLI holds it.
+  // OneCLI holds it. src/providers/claude.ts is always loaded (providers/
+  // index.ts imports it unconditionally), so nothing else to register here.
   writeEnvLine('ANTHROPIC_BASE_URL', baseUrl);
-
-  // Register the claude provider so the runtime passes ANTHROPIC_BASE_URL
-  // and the placeholder bearer into the container. Only appended when the
-  // user has configured a custom endpoint; standard installs don't load
-  // the file at all.
-  appendProviderImport('./claude.js');
 }
 
 function writeEnvLine(key: string, value: string): void {
@@ -1681,15 +1686,6 @@ function writeEnvLine(key: string, value: string): void {
     ? content.replace(re, `${key}=${value}`)
     : content.trimEnd() + (content ? '\n' : '') + `${key}=${value}\n`;
   fs.writeFileSync(envFile, next);
-}
-
-function appendProviderImport(modulePath: string): void {
-  const file = path.join(process.cwd(), 'src', 'providers', 'index.ts');
-  const content = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
-  const line = `import '${modulePath}';`;
-  if (content.includes(line)) return;
-  const sep = content && !content.endsWith('\n') ? '\n' : '';
-  fs.writeFileSync(file, content + sep + line + '\n');
 }
 
 // ─── timezone step ─────────────────────────────────────────────────────

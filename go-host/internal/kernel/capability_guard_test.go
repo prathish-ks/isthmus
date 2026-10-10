@@ -118,9 +118,13 @@ func TestCapabilityRequest_Wake_AgentActorApprovalHold_DeniedWithoutGrant(t *tes
 	resp := dispatch(t, k, OpCapabilityRequest, CapabilityRequestPayload{
 		Capability: CapabilityContainerWake,
 		Session:    ptrSession(validSession()),
+		// Filled scope args: otherwise this denies at the scope check before
+		// ever reaching the "approval required, no grant" path this test
+		// means to isolate, same reasoning as the sibling test below.
 		Guard: &GuardContext{CLIRestart: &CLIRestartGuardContext{
 			ActorKind:    "agent",
 			AgentGroupID: "ag-1",
+			Args:         map[string]string{"agent_group_id": "ag-1", "group": "ag-1", "id": "ag-1"},
 		}},
 	})
 	if resp.OK {
@@ -145,9 +149,13 @@ func TestCapabilityRequest_Wake_AgentActorApprovalHold_AllowedWithLiveMatchingGr
 	resp := dispatch(t, k, OpCapabilityRequest, CapabilityRequestPayload{
 		Capability: CapabilityContainerWake,
 		Session:    ptrSession(validSession()),
+		// Filled scope args, same reasoning as DeniedWithoutGrant above —
+		// otherwise this denies at the scope check before ever reaching the
+		// grant-satisfaction path this test means to isolate.
 		Guard: &GuardContext{CLIRestart: &CLIRestartGuardContext{
 			ActorKind:    "agent",
 			AgentGroupID: "ag-1",
+			Args:         map[string]string{"agent_group_id": "ag-1", "group": "ag-1", "id": "ag-1"},
 			Grant:        &GuardGrant{ApprovalID: "appr-1", Action: "cli_command"},
 		}},
 	})
@@ -170,9 +178,13 @@ func TestCapabilityRequest_Wake_AgentActorGrantForDeletedApproval_Denied(t *test
 	resp := dispatch(t, k, OpCapabilityRequest, CapabilityRequestPayload{
 		Capability: CapabilityContainerWake,
 		Session:    ptrSession(validSession()),
+		// Filled scope args, same reasoning as the two tests above — otherwise
+		// this denies at the scope check before ever reaching the
+		// deleted-approval path this test means to isolate.
 		Guard: &GuardContext{CLIRestart: &CLIRestartGuardContext{
 			ActorKind:    "agent",
 			AgentGroupID: "ag-1",
+			Args:         map[string]string{"agent_group_id": "ag-1", "group": "ag-1", "id": "ag-1"},
 			Grant:        &GuardGrant{ApprovalID: "appr-never-existed", Action: "cli_command"},
 		}},
 	})

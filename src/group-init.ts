@@ -1,11 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 
+import { AnchoredDir } from './anchored-dir.js';
 import { DATA_DIR, DEFAULT_AGENT_PROVIDER, GROUPS_DIR } from './config.js';
 import { ensureContainerConfig } from './db/container-configs.js';
 import { stageGroupPersona } from './group-persona.js';
 import { log } from './log.js';
-import { DEFAULT_SETTINGS_JSON, migrateClaudeMemorySettings } from './migrate-claude-memory-settings.js';
+import { prepareClaudeMemorySettings } from './migrate-claude-memory-settings.js';
 import { initializeProviderGroupSurfaces } from './provider-contracts/realize.js';
 import { getProviderHostContract, hasProviderMountSurface } from './provider-contracts/registry.js';
 import { providerProvidesAgentSurfaces } from './providers/provider-container-registry.js';
@@ -78,26 +79,42 @@ export async function initGroupFilesystem(
   if (contract) {
     initialized.push(...initializeProviderGroupSurfaces(providerHint, contract, group.id, groupDir));
   } else if (defaultSurfaces) {
-    const claudeDir = path.join(DATA_DIR, 'v2-sessions', group.id, '.claude-shared');
-    if (!fs.existsSync(claudeDir)) {
-      fs.mkdirSync(claudeDir, { recursive: true });
-      initialized.push('.claude-shared');
-    }
+    // This runs on every spawn (buildMounts' defensive re-init for groups
+    // that pre-date the contract system), against a session dir the group's
+    // own container already has read-write access to — so `.claude-shared`
+    // itself must be walked through AnchoredDir's protected traversal, not
+    // baked into a root string checked with plain fs calls. Same bug class
+    // as `provider-contracts/realize.ts`'s `prepareSpawnFile`, fixed there
+    // first.
+    //
+    // False positive: `group.id` is always a DB primary key resolved by the
+    // caller, never external input. The `existsSync` below is a bookkeeping
+    // presence check only (for the "was this newly created" log signal), not
+    // the actual access — that goes through AnchoredDir.open() immediately
+    // after (descriptor-guarded, symlinks refused). Same disposition as this
+    // project's other path-join-resolve-traversal false positives (see
+    // .github/workflows/ci.yml's semgrep-scope comment).
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+    const groupSessionBaseDir = path.join(DATA_DIR, 'v2-sessions', group.id);
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+    const claudeSharedExisted = fs.existsSync(path.join(groupSessionBaseDir, '.claude-shared'));
+    const claudeShared = AnchoredDir.open(groupSessionBaseDir, ['.claude-shared'], true);
+    if (!claudeShared) throw new Error(`Claude state directory is missing: '${groupSessionBaseDir}'`);
+    try {
+      if (!claudeSharedExisted) initialized.push('.claude-shared');
 
-    const settingsFile = path.join(claudeDir, 'settings.json');
-    if (!fs.existsSync(settingsFile)) {
-      fs.writeFileSync(settingsFile, DEFAULT_SETTINGS_JSON);
-      initialized.push('settings.json');
-    } else if (migrateClaudeMemorySettings(settingsFile)) {
-      initialized.push('settings.json (reconciled Claude settings)');
-    }
+      const settings = prepareClaudeMemorySettings(groupSessionBaseDir);
+      if (settings === 'created') initialized.push('settings.json');
+      else if (settings === 'reconciled') initialized.push('settings.json (reconciled Claude settings)');
 
-    // Skills directory — created empty here; symlinks are synced at spawn
-    // time by container-runner.ts based on container.json skills selection.
-    const skillsDst = path.join(claudeDir, 'skills');
-    if (!fs.existsSync(skillsDst)) {
-      fs.mkdirSync(skillsDst, { recursive: true });
-      initialized.push('skills/');
+      // Skills directory — created empty here; symlinks are synced at spawn
+      // time by container-runner.ts based on container.json skills selection.
+      const skillsExisted = claudeShared.entries().includes('skills');
+      const skillsDir = claudeShared.openDir('skills', true);
+      skillsDir?.close();
+      if (!skillsExisted) initialized.push('skills/');
+    } finally {
+      claudeShared.close();
     }
   }
 

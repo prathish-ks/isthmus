@@ -156,13 +156,24 @@ func DecideRestartLike(ctx context.Context, scopes CLIScopeLookup, cmd CommandSp
 			return deny(fmt.Sprintf("CLI access is scoped to this agent group. Cannot access %q.", cmd.Resource)), nil
 		}
 
+		// Unconditional, matching upstream's own commandDecide (src/cli/guard.ts)
+		// exactly: a missing key denies the same as a present-but-mismatched or
+		// present-but-empty one. Go's map access already returns "" for an
+		// absent key, which can never equal a real AgentGroupID, so dropping
+		// the old `present &&` gate reproduces TS's `args[key] !== actor.agentGroupId`
+		// (undefined !== 'g1' denies too) without a separate presence check.
+		// The old gated version was a real divergence from the TS fix it
+		// claimed to mirror, caught only because this package's own test for
+		// the "passes every scope check" fixture used an empty args map
+		// instead of the filled one the TS fixture it's named after actually
+		// uses — see TestDecide_CLI_OpenCommandAllowed's history.
 		for _, key := range [...]string{"agent_group_id", "group"} {
-			if v, present := args[key]; present && v != "" && v != actor.AgentGroupID {
+			if args[key] != actor.AgentGroupID {
 				return deny("CLI access is scoped to this agent group."), nil
 			}
 		}
 		if cmd.Resource == "groups" || cmd.Resource == "destinations" {
-			if v, present := args["id"]; present && v != "" && v != actor.AgentGroupID {
+			if args["id"] != actor.AgentGroupID {
 				return deny("CLI access is scoped to this agent group."), nil
 			}
 		}
