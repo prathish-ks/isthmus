@@ -253,6 +253,63 @@ describe('realizeProviderSpawnSurfaces', () => {
     expect(fs.readFileSync(filePath, 'utf-8')).toBe('PRESERVED\n');
   });
 
+  it('creates an append-open-close file under a nested relativePath, creating intermediate directories', async () => {
+    const contract: ProviderHostContract = {
+      seamVersion: PROVIDER_HOST_CONTRACT_SEAM_VERSION,
+      projectDocument: { fileName: 'X.md', containerPath: '/app/X.md', mountClass: 'group-state' },
+      stateVolumes: [SESSION_VOLUME],
+      files: [
+        {
+          id: 'log',
+          volumeId: 'session-scratch',
+          relativePath: 'logs/activity.log',
+          prepare: { operation: 'append-open-close', when: 'every-spawn' },
+        },
+      ],
+    };
+    const legacyOverlay = vi.fn().mockResolvedValue({});
+    const composeProjectDocument = vi.fn().mockResolvedValue(undefined);
+
+    await realizeProviderSpawnSurfaces(PROVIDER, contract, AG, groupDir, sessionDir, [], {
+      legacyOverlay,
+      composeProjectDocument,
+    });
+
+    expect(fs.existsSync(path.join(sessionDir, '.test-session', 'logs', 'activity.log'))).toBe(true);
+  });
+
+  it('refuses an append-open-close file when an intermediate directory is a symlink, rather than following it', async () => {
+    const volumeRoot = path.join(sessionDir, '.test-session');
+    fs.mkdirSync(volumeRoot, { recursive: true });
+    const escapeTarget = path.join(root, 'escape');
+    fs.mkdirSync(escapeTarget, { recursive: true });
+    fs.symlinkSync(escapeTarget, path.join(volumeRoot, 'logs'));
+
+    const contract: ProviderHostContract = {
+      seamVersion: PROVIDER_HOST_CONTRACT_SEAM_VERSION,
+      projectDocument: { fileName: 'X.md', containerPath: '/app/X.md', mountClass: 'group-state' },
+      stateVolumes: [SESSION_VOLUME],
+      files: [
+        {
+          id: 'log',
+          volumeId: 'session-scratch',
+          relativePath: 'logs/activity.log',
+          prepare: { operation: 'append-open-close', when: 'every-spawn' },
+        },
+      ],
+    };
+    const legacyOverlay = vi.fn().mockResolvedValue({});
+    const composeProjectDocument = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      realizeProviderSpawnSurfaces(PROVIDER, contract, AG, groupDir, sessionDir, [], {
+        legacyOverlay,
+        composeProjectDocument,
+      }),
+    ).rejects.toThrow();
+    expect(fs.existsSync(path.join(escapeTarget, 'activity.log'))).toBe(false);
+  });
+
   it('calls composeProjectDocument with the contract-derived spec', async () => {
     const contract: ProviderHostContract = {
       seamVersion: PROVIDER_HOST_CONTRACT_SEAM_VERSION,

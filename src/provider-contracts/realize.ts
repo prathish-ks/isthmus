@@ -294,10 +294,21 @@ function prepareSpawnFile(
   const volume = volumes.get(file.volumeId);
   if (!volume) throw new Error(`Provider prepared file references unknown volume '${file.volumeId}'`);
   const volumePath = providerStateVolumePath(volume, agentGroupId, sessionDirectory);
-  const filePath = resolveWithinRoot(volumePath, file.relativePath);
+  // Lexically validated at contract-registration time (assertRelativePath),
+  // but the volume is agent-writable, so an intermediate segment could be
+  // swapped for a symlink between that check and this call — resolve it by
+  // descriptor, not by path string, same as every other agent-writable mount
+  // in this file.
   if (file.prepare.operation === 'append-open-close') {
-    const flags = fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW;
-    fs.closeSync(fs.openSync(filePath, flags));
+    const segments = file.relativePath.split('/');
+    const name = segments.pop()!;
+    const dir = AnchoredDir.open(volumePath, segments, true);
+    if (!dir) throw new Error(`Provider prepared file volume is missing: '${volumePath}'`);
+    try {
+      dir.appendFile(name, new Uint8Array(0));
+    } finally {
+      dir.close();
+    }
   }
 }
 

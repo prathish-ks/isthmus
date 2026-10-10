@@ -325,9 +325,11 @@ export async function writeSessionMessage(
  *
  * Defenses, mirrored from the outbound side:
  *   1. basename check on `messageId` and `filename`.
- *   2. lstat of the inbox dir to refuse pre-placed symlinks.
- *   3. realpath-based containment under the session inbox root.
- *   4. `wx` flag on writeFileSync to refuse following a pre-existing symlink
+ *   2. AnchoredDir.open on the inbox dir, refusing a pre-placed symlink at
+ *      open time rather than re-checking the path before each write.
+ *   3. every attachment written through that one descriptor, so a symlink
+ *      swapped in afterward is never followed (immune, not just re-checked).
+ *   4. `writeNewFile`'s `O_EXCL` to refuse following a pre-existing symlink
  *      at the target file path or overwriting any existing file.
  */
 function extractAttachmentFiles(
