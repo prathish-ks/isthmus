@@ -293,19 +293,28 @@ function prepareSpawnFile(
 ): void {
   const volume = volumes.get(file.volumeId);
   if (!volume) throw new Error(`Provider prepared file references unknown volume '${file.volumeId}'`);
-  const volumePath = providerStateVolumePath(volume, agentGroupId, sessionDirectory);
   // Lexically validated at contract-registration time (assertRelativePath),
   // but the volume is agent-writable, so an intermediate segment could be
   // swapped for a symlink between that check and this call — resolve it by
   // descriptor, not by path string, same as every other agent-writable mount
-  // in this file.
+  // in this file. `root` must be `providerStateVolumeRoot`, not
+  // `providerStateVolumePath`: the latter already has `volume.directory`
+  // baked in, and AnchoredDir.open's own root argument is host-owned by
+  // design (opened without O_NOFOLLOW) — passing a volume path there would
+  // leave `volume.directory` itself unprotected, exactly the segment this
+  // comment above says is agent-writable. Every untrusted segment, including
+  // `volume.directory`, must instead be walked through AnchoredDir's
+  // protected traversal, matching initializeFile's own pattern above.
   if (file.prepare.operation === 'append-open-close') {
-    const segments = file.relativePath.split('/');
-    const name = segments.pop()!;
-    const dir = AnchoredDir.open(volumePath, segments, true);
-    if (!dir) throw new Error(`Provider prepared file volume is missing: '${volumePath}'`);
+    const root = providerStateVolumeRoot(volume, agentGroupId, sessionDirectory);
+    const filePath = resolveWithinRoot(
+      providerStateVolumePath(volume, agentGroupId, sessionDirectory),
+      file.relativePath,
+    );
+    const dir = AnchoredDir.open(root, segmentsWithinRoot(root, path.dirname(filePath)), true);
+    if (!dir) throw new Error(`Provider prepared file directory is missing: '${filePath}'`);
     try {
-      dir.appendFile(name, new Uint8Array(0));
+      dir.appendFile(path.basename(filePath), new Uint8Array(0));
     } finally {
       dir.close();
     }
