@@ -19,6 +19,8 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
     })(),
 }));
 
+await import('./index.js');
+await import('../provider-contracts/index.js');
 const { createProvider } = await import('./factory.js');
 const { MEMORY_SESSION_HOOK } = await import('../memory/session-hook.js');
 const { claudeRuntimeContract } = await import('../provider-contracts/claude.js');
