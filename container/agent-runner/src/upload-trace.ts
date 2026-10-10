@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { MessageInRow } from './db/messages-in.js';
+import { commandText, slashCommandName } from './slash-command.generated.js';
 
 /**
  * `/upload-trace` command: upload this session's Claude Code transcript to the user's
@@ -22,13 +23,8 @@ import type { MessageInRow } from './db/messages-in.js';
  * (no LLM turn). Admin-gated by the host router before it reaches the container.
  */
 export function isUploadTraceCommand(msg: MessageInRow): boolean {
-  let text = '';
-  try {
-    text = (JSON.parse(msg.content)?.text ?? '').trim();
-  } catch {
-    return false; // non-JSON content is never a command
-  }
-  return text.toLowerCase().startsWith('/upload-trace');
+  // Exact name, never a prefix: the host gate only admin-checks '/upload-trace'.
+  return slashCommandName(commandText(msg.content)) === '/upload-trace';
 }
 
 /** Newest Claude Code transcript jsonl (the current session). */

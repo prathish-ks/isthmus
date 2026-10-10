@@ -73,10 +73,25 @@ export const claudeRuntimeContract: ProviderRuntimeContract = {
   // (providers/claude-history.ts); core only needs the trace lookup.
   history: { readTrace: newestClaudeTranscript },
   textDelivery: 'mid-turn-complete',
+  // Aliases are listed with their command: /usage and /stats are /cost,
+  // /reset and /new are the SDK's own /clear, /checkup is /doctor, /settings
+  // is /config. /remote-control and its alias /rc stay filtered, not admin,
+  // per this file's own divergence note above (point 1).
   commands: {
     formatting: 'native',
-    nativeAdmin: ['/compact', '/context', '/cost', '/files'],
-    nativeFiltered: ['/help', '/login', '/logout', '/doctor', '/config', '/start', '/remote-control'],
+    nativeAdmin: ['/compact', '/context', '/cost', '/usage', '/stats', '/files', '/reset', '/new'],
+    nativeFiltered: [
+      '/help',
+      '/login',
+      '/logout',
+      '/doctor',
+      '/checkup',
+      '/config',
+      '/settings',
+      '/start',
+      '/remote-control',
+      '/rc',
+    ],
   },
 };
 

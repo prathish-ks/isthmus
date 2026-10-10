@@ -108,7 +108,21 @@ registerProviderHostContract('claude', {
     // contract instead of hardcoding them. `/clear`/`/upload-trace` are
     // NanoClaw's own commands, not Claude's, so command-gate.ts keeps
     // those two hardcoded rather than listing them here.
-    nativeFiltered: ['/start', '/help', '/login', '/logout', '/doctor', '/config', '/remote-control'],
-    nativeAdmin: ['/compact', '/context', '/cost', '/files'],
+    // Aliases are listed with their command: /usage and /stats are /cost,
+    // /reset and /new are the SDK's own /clear, /checkup is /doctor,
+    // /settings is /config, /rc is /remote-control.
+    nativeFiltered: [
+      '/start',
+      '/help',
+      '/login',
+      '/logout',
+      '/doctor',
+      '/checkup',
+      '/config',
+      '/settings',
+      '/remote-control',
+      '/rc',
+    ],
+    nativeAdmin: ['/compact', '/context', '/cost', '/usage', '/stats', '/files', '/reset', '/new'],
   },
 });
