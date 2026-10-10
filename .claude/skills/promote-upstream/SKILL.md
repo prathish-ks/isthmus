@@ -1,16 +1,17 @@
 ---
 name: promote-upstream
-description: Guides the human+Claude process of promoting a new nanocoai/nanoclaw release tag into Isthmus, following go-host/docs/upstream-promotion-playbook.md's 11 steps end to end. Also runs a lightweight daily-watch mode that tracks upstream PRs as they land, so Step 0 never starts cold. Human-in-the-loop at every judgment call — this skill gets a promotion ready for its final pin-move PR, it never merges, pushes, or tags anything itself.
+description: Guides the human+Claude process of promoting a new nanocoai/nanoclaw release tag into Isthmus, following go-host/docs/upstream-promotion-playbook.md's 11 steps end to end. A lightweight daily-watch mode tracks upstream PRs as they land; an optional Prep mode starts real, judgment-driven Steps 1-5 work incrementally in a standing worktree once there's enough accumulated upstream activity to justify it — before a stable tag exists, never merged into Isthmus's own main until one does. Human-in-the-loop at every judgment call — this skill gets a promotion ready for its final pin-move PR, it never merges, pushes, or tags anything itself.
 ---
 
 # Context
 
 This skill is the orchestration layer over `go-host/docs/upstream-promotion-playbook.md` — that document is the authoritative source for *what each step requires and why*; this skill is *how a session actually walks through it*, with checkpoints, state, and delegation. Read the playbook itself (not a summary of it) at the start of any real promotion — it is a living document and may have changed since this skill was last updated.
 
-Two modes:
+Three modes:
 
 - **Watch** (`/promote-upstream watch`, or just "check upstream") — cheap, read-only, safe to run daily. Tracks upstream `main` incrementally so a real promotion's Step 0 has a running picture instead of a cold start.
-- **Promote** (`/promote-upstream <tag>`, or "promote v2.5.0") — the real thing. Walks Steps 0–10 of the playbook for a specific, already-released tag.
+- **Prep** (`/promote-upstream prep`, or "let's start working through the PRs Watch has been flagging") — optional, for when Watch mode's accumulated picture shows enough real activity (a batch cluster, a keyword-sweep concentration, just a growing PR count) to justify starting the actual judgment work *before* a stable tag exists. Runs Steps 1–5 incrementally, in small batches, in a standing worktree — explicitly provisional, explicitly never merged into Isthmus's own `main` until a real tag lands and Step 8 re-validates.
+- **Promote** (`/promote-upstream <tag>`, or "promote v2.5.0") — the real thing, for an already-released stable tag. Walks Steps 0–10 of the playbook, folding in any Prep-mode work that's accumulated rather than starting cold.
 
 This skill is Isthmus-specific and stays on `main` — it is not something upstream NanoClaw ships or would ever need, since the whole premise is Isthmus's own fork relationship to it.
 
@@ -21,7 +22,7 @@ This skill is Isthmus-specific and stays on `main` — it is not something upstr
 - **Persist state — a real promotion spans days to weeks.** The playbook itself says so explicitly ("no deadline pressure baked into this process"). State lives in the dated `docs/promotion-vX.Y.Z.md` instance document the playbook already specifies, not in this skill's own memory. A later invocation reads that file to find out where things left off.
 - **Scale effort to what Step 0 actually finds.** A quiet, incremental release with no batch clusters and nothing in Bucket B doesn't need the same depth of Step 3 scrutiny as one that does. Decide this from Step 0's real data, not by default.
 - **Absolute paths in worktrees**, same reason as `migrate-nanoclaw`: the Bash tool resets cwd between calls. Store the worktree's absolute path once, use it throughout.
-- **Never push, merge, or tag.** This skill's job ends when Step 9's pin-move PR is open and ready for review. Creating that PR follows this project's standing PR-hygiene discipline (show the diff, wait for explicit approval) — and even then, only the human pushes/merges, matching every promotion this session actually ran.
+- **Never merge into Isthmus's own `main`, or tag a release, without a stable upstream tag behind it.** Pushing a Prep-mode worktree's branch for backup and visibility is fine and encouraged — it's not Isthmus's `main`, nobody's relying on it, and it's exactly the kind of durability a multi-week process needs. What never happens before a stable tag exists is opening that branch as a PR *against* `main`, or merging/tagging anything. Even once Step 9's pin-move PR is ready, only the human pushes/merges it — matching every promotion this session actually ran.
 - **A promotion closing is not a release being ready to cut.** Once Step 9's PR merges, this skill's job is done. Cutting `isthmus-vX.Y.Z` is a separate process against `docs/release-gate-checklist.md` — don't imply one is ready for the other.
 
 ---
@@ -45,6 +46,34 @@ State file: `docs/upstream-watch-log.md` — append-only, newest entry at the to
 6. Report a one-paragraph summary to the user. Don't create a PR, don't change anything outside that one log file.
 
 If the user wants this to run on a real schedule rather than being invoked ad hoc, pair it with the `schedule` skill — this skill doesn't need to know about cron itself.
+
+---
+
+# Mode: Prep
+
+Purpose: when Watch mode's accumulated picture shows real activity worth getting ahead of — a batch cluster, a keyword-sweep concentration, just a PR count that's grown large enough that Step 0 would otherwise face a wall of unclassified work the day a tag lands — start the actual Steps 1–5 judgment work now, incrementally, in a standing worktree. This is explicitly provisional: nothing here is "accepted," nothing merges into Isthmus's own `main`, until a real stable tag exists and Step 8 re-validates against it. The point is spreading genuinely judgment-heavy work (which the playbook itself says has "no deadline pressure," and which this project has repeatedly found takes real time to do right) across the weeks before a tag, instead of compressing it into the days after.
+
+**This is a deliberate choice to accept some rework risk in exchange for not starting cold.** Upstream can still change things before the stable tag cuts — a PR could be reverted, a late PR could land, the final tag could diverge from what `main` looked like when prep work was done against it. Step 8's re-validation exists precisely to catch this; Prep-mode work is a head start, not a guarantee.
+
+## Setup (once per prep cycle)
+
+- A dedicated, long-lived worktree — not deleted after one session, not treated like the typical single-task worktree this project otherwise uses. Name it for what it's prepping toward once a target is known (e.g. `<repo>-upstream-prep-v2026.10.0`), or generically if upstream hasn't settled on a version yet.
+- A long-lived branch in that worktree, based on Isthmus's own current `main` (not upstream's) — the prep work is Isthmus-side reconciliation output, built *against* a moving upstream target, not a mirror of upstream itself.
+- A provisional notes document distinct from the playbook's own per-promotion template (which requires a real tag) — e.g. `docs/promotion-prep-notes.md` in that worktree, clearly marked provisional, recording which upstream commit/PRs each entry was prepared against.
+- Push this branch for backup and visibility once real work exists on it (see Principles above) — but never open it as a PR against `main`.
+
+## Working in small batches
+
+Don't process 70 accumulated PRs as one unit — group them the way the watch log's own findings already suggest: batch clusters first (they're usually thematically related and often the most consequential), keyword-sweep hits next (Bucket B candidates cluster here), then the remaining trickle by directory or theme. For each batch:
+
+1. **Step 1 + Step 2** against that batch specifically: consumed-contracts check, bucket classification (A/B/C), written into the prep notes doc — same rigor as a real promotion's inventory, just scoped to a handful of PRs at a time instead of the whole range at once.
+2. **Where the call is already clear, do the actual reconciliation work** (Step 4 kernel port, Step 5 Bucket C port-or-decline, including `declined-independently-fixed` where that's the right call) and commit it — small, reviewable, one batch's worth at a time. "Small changes as we go" means the commit history on this branch should read as a series of digestible, individually-understandable changes, not a handful of giant ones.
+3. **Where the call isn't clear** (most Bucket B findings), don't force it — write up what Step 3 needs (the reachable paths, the open question) and leave the acceptance record genuinely open rather than guessing at a named approver or an expiry date that isn't real yet. A provisional finding written honestly is worth more than a premature decision.
+4. Commit after each batch, with a message naming exactly which upstream PRs/commit range it covers — this branch's log is itself evidence for Step 0 when the real promotion starts.
+
+## When a stable tag lands
+
+Switch to **Mode: Promote** for real. Step 0 pulls from both the watch log *and* this prep branch's accumulated work — reconciling, not starting over. Step 8's re-validation is where prep work either holds (most of it, if upstream didn't change much between prep and the final tag) or gets revisited (anything upstream actually altered). The formal `docs/promotion-vX.Y.Z.md` instance document gets created at that point per the playbook's own template, informed by — but not required to copy verbatim — the prep notes.
 
 ---
 
@@ -89,13 +118,13 @@ Check the promotion against `docs/design-laws.md`'s bar for a new law. Default e
 
 ---
 
-# Resuming a promotion already in progress
+# Resuming work already in progress
 
-Check for an existing `docs/promotion-vX.Y.Z.md` matching the target version before starting Step 0 fresh. If one exists, read it in full — its per-workstream status tables say which steps are done, which are in progress, and which haven't started. Resume from there; don't re-ask questions the document already answers, and don't silently re-decide something it already recorded.
+Check for an existing Prep-mode worktree and its `docs/promotion-prep-notes.md`, and for an existing `docs/promotion-vX.Y.Z.md` matching a real target version, before starting anything fresh. If either exists, read it in full — its own status recording says which batches or steps are done, in progress, or not started. Resume from there; don't re-ask questions the document already answers, and don't silently re-decide something it already recorded.
 
 # What this skill never does
 
-- Never merges, pushes to a protected branch, or creates a tag.
-- Never finalizes a Bucket A/B/C classification, an accept/decline call, or an acceptance record without an explicit human checkpoint.
-- Never treats a promotion's Step 6 testing as sufficient evidence that an Isthmus release is ready to cut — that's `docs/release-gate-checklist.md`'s separate job.
+- Never merges into Isthmus's own `main`, or creates a tag, without a stable upstream release behind it.
+- Never finalizes a Bucket A/B/C classification, an accept/decline call, or an acceptance record without an explicit human checkpoint — in Prep mode or Promote mode alike.
+- Never treats Prep-mode work, or a promotion's Step 6 testing, as sufficient evidence that an Isthmus release is ready to cut — that's `docs/release-gate-checklist.md`'s separate job.
 - Never lets a named, deferred follow-up go untracked — every one gets an owner and a path back to a closing ADR addendum.
