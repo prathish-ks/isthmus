@@ -84,6 +84,39 @@ skill-payload path) entirely, because it fell outside that scope. Both are
 now Step 0 and Step 2 items in the playbook specifically because they were
 missed once already.
 
+**Step 10 retrospective, v2026.10.0 promotion (2026-10-11)**: checked
+against this document's same bar. Nothing here rises to a new law, but
+one finding is a concrete, cross-subsystem reinforcement of LAW-07's
+already-sharpened reading, not LAW-09's — recorded here anyway, per this
+section's established role as the promotion-retrospective home.
+
+The #3966 port (Iron Proxy's keyless local-model admission) shipped,
+across its own review cycle, with the self-SSRF exclusion and the
+"which ports are actually declared" check both computed in TypeScript
+(`iron-proxy-local-model.ts`) while the Go process that actually decides
+whether to forward a request (`main.go`'s `forward()`) had no knowledge
+of either — a decision computed, with nothing physically enforcing the
+corresponding effect. That is exactly LAW-07's sharpened reading above
+("satisfied only when the real-world privileged effect... is physically
+impossible to trigger except through" the enforcing boundary) — found
+and closed twice, by two different reviewers, in the same promotion's
+follow-up PR. The reading itself needs no change; what this promotion
+adds is evidence that it generalizes past its original scope (the
+`go-host` kernel) to *any* privileged boundary a promotion introduces,
+including a skill-installed Go process this fork didn't write from
+scratch. Worth carrying forward as a standing question for every future
+promotion that ports a new admission/enforcement boundary of any kind,
+not just kernel work: "is the decision and the effect enforced in the
+*same* process, or does a TypeScript-side computation merely hope a
+separate process agrees?"
+
+Secondarily: this promotion's two-stage external review (an independent
+code-review pass, then a separate PR review round) each found and closed
+real gaps the prior pass missed or introduced while fixing something
+else — validating the playbook's own existing "show diff, get reviewed,
+close findings for real" discipline rather than motivating a change to
+it. No playbook or skill change follows from this promotion.
+
 ## Why there is no tenth law
 
 A second-opinion review of the project (2026-08-30) proposed adding a new "LAW-10 — security authority must be exclusive." The explicit decision, made and recorded at the time, was not to add it: the substance is already fully covered by LAW-07 and OBJ-04, sharpened above with the concrete evidence Phase 1 produced. Adding a numbered law for the same idea would duplicate the constitution rather than clarify it. A later, unverified "upstream monitoring" update referenced "LAW-10" as though it had been adopted — it had not, and this document is the durable record that it was considered and declined in favor of annotating the existing laws.

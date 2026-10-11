@@ -1,20 +1,26 @@
 # nanocoai/nanoclaw v2026.10.0 Promotion — Living Plan
 
-Status: **Promotion closed.** Steps 0–9 all genuinely done. PR `#73`
-(implementation) and PR `#76` (follow-ups: the three "must close" items
-fixed, Step 7's live test, two rounds of independent/external security
-review) both merged with CI green. Step 6's wiring-registry/ADR-028 check
-was run for real at Step 9's closing review (`13 entries OK`). Step 8
-re-validated twice: the tag SHA is unchanged both times; `upstream/main`
-had moved from "one trivial commit ahead" to 4 commits/2 PRs ahead by the
-second check — recorded honestly in
-`go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md` and
+Status: **Promotion closed — Steps 0–10, the full eleven-step process,
+all genuinely done.** PR `#73` (implementation) and PR `#76` (follow-ups:
+the three "must close" items fixed, Step 7's live test, two rounds of
+independent/external security review) both merged with CI green. Step
+6's wiring-registry/ADR-028 check was run for real at Step 9's closing
+review (`13 entries OK`). Step 8 re-validated twice: the tag SHA is
+unchanged both times; `upstream/main` had moved from "one trivial commit
+ahead" to 4 commits/2 PRs ahead by the second check — recorded honestly
+in `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md` and
 `docs/upstream-watch-log.md`, confirmed out of scope (both are past the
 tag), not silently reconciled. **Step 9's pin-move landed**:
 `docs/upstream-pin.json`, `docs/baseline.md`, and the closing ADR are
-updated together. This document is the source of truth for where the
-promotion actually stood at each point; update it in place if that ever
-changes — don't let the chat history that
+updated together. **Step 10's retrospective is also done**, not just
+implied by Step 9 closing: checked against `docs/design-laws.md`'s bar
+for a new law (none warranted), with a dated 2026-10-11 annotation added
+under LAW-09's section instead — these are two distinct steps, and an
+earlier version of this document's status line conflated them, which an
+external review of PR `#77` (the pin-move PR) correctly caught. This
+document is the source of truth for where the promotion actually stood
+at each point; update it in place if that ever changes — don't let the
+chat history that
 produced it become the only record, and don't let a status line get ahead
 of what was actually checked.
 
@@ -406,7 +412,7 @@ needs a live test), not just a bucket of "deferred":
     small fix, not security-critical (runs on the operator's own
     machine during setup).
 
-## Open before Step 8/9 — all closed
+## Open before Step 8/9/10 — all closed
 
 1. **Real CI evidence** — done. `#73`'s required `ci` gate shows
    `completed`/`success` on `dfee5d21` (the commit carrying the semgrep
@@ -446,6 +452,13 @@ needs a live test), not just a bucket of "deferred":
    (`README.md`, `go-host/README.md`, `docs/quickstart.md`) all updated
    together. Step 6's wiring-registry/ADR-028 check (left open above)
    was run for real as part of this closing step: `13 entries OK`.
+6. **Step 10's retrospective** — done, as its own distinct step, not
+   folded silently into Step 9's "done." Checked against
+   `docs/design-laws.md`'s bar for a new law; none warranted — a dated
+   2026-10-11 annotation added under LAW-09's section instead (a
+   cross-subsystem reinforcement of LAW-07's existing reading, found in
+   `#3966`'s Iron Proxy admission path by two different reviewers in the
+   same promotion; no playbook or skill change follows).
 
 ## Changelog
 
@@ -488,3 +501,16 @@ needs a live test), not just a bucket of "deferred":
   `docs/baseline.md`, `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md`,
   the compatibility docs, and the current-pin reference sweep all landed
   together. **Promotion closed — no step remains open.**
+- 2026-10-11 (same day, continued) — **Correction**, caught by an
+  external review of PR `#77` (the pin-move PR itself): the line above
+  was premature. Step 10 (the playbook's own required retrospective
+  against `docs/design-laws.md`) had not actually been done — closing
+  Step 9 is not the same step as Step 10, and the prior entry's "no step
+  remains open" conflated them. Also caught by the same review:
+  `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md` described
+  the `upstream-watch` job as weekly; `.github/workflows/ci.yml`'s
+  actual schedule is daily (`cron: "0 13 * * *"`) — fixed. Step 10 is
+  now actually done: checked against `docs/design-laws.md`'s bar for a
+  new law (none warranted), a dated 2026-10-11 annotation added under
+  LAW-09's section instead. **Promotion now genuinely closed, Steps
+  0–10 — this time including the step that was previously only implied.**
