@@ -250,7 +250,9 @@ export async function runUninstallFlow(opts: {
   } else {
     console.log(`\n✓ Done. NanoClaw copy ${inv.slug} has been uninstalled.`);
   }
-  process.exit(0);
+  // A nonzero exit is the only signal an unattended --yes caller gets;
+  // the console message alone is invisible to a script.
+  process.exit(stillBlocked ? 1 : 0);
 }
 
 /** Unwrap a confirm result; Ctrl-C / Esc cancels the whole uninstall — nothing deleted. */
