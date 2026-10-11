@@ -10,6 +10,7 @@ describe('uninstall data group disclosure', () => {
     containers: ['nanoclaw-iron-control-abcd1234-web-1', 'nanoclaw-iron-control-abcd1234-database-1'],
     volumes: ['nanoclaw-iron-control-abcd1234_database'],
     networks: ['nanoclaw-iron-control-abcd1234'],
+    incomplete: false,
   };
 
   it('lists the service containers the data group removes when the service group is kept', () => {

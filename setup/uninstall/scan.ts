@@ -91,6 +91,16 @@ export interface ProjectInventory {
   containers: string[];
   volumes: string[];
   networks: string[];
+  /**
+   * True when a Docker listing failed in a way that could be hiding a
+   * project or volume this copy's own keys unlock — Docker was briefly
+   * unavailable, or a specific project's listing (including Iron
+   * Control's deterministic one) errored. Never treated as "nothing
+   * found": the planner holds data/'s keys back exactly as it would for
+   * a real project that failed to remove, until a clean re-run either
+   * finds nothing or finishes removing what it finds.
+   */
+  incomplete: boolean;
 }
 
 /** The label Compose stamps on every container, volume and network of a project. */
@@ -346,23 +356,30 @@ function scanProjects(
     '--format',
     `{{.Label "${COMPOSE_PROJECT_LABEL}"}}`,
   ]);
+  const ironControl = ironControlProjectName(projectRoot, slug);
   if (!names) {
     notes.push(
       `Service volumes/networks: '${runtime}' unavailable; for each project of this copy's containers ` +
         `(${runtime} ps -a --filter label=nanoclaw-install=${slug} --format '{{.Label "${COMPOSE_PROJECT_LABEL}"}}') ` +
         `remove later with: ${projectCleanup(runtime, '<project>')}`,
     );
-    return undefined;
+    // Docker itself is unreachable: if this copy ever installed Iron
+    // Control, whether its volume survived is unknown — never return
+    // "nothing to protect" on an assumption. A copy that never installed
+    // it has nothing at risk, so this stays undefined for it.
+    return ironControl ? { names: [], containers: [], volumes: [], networks: [], incomplete: true } : undefined;
   }
-  const ironControl = ironControlProjectName(projectRoot, slug);
   const candidates = [...new Set([...names, ...(ironControl ? [ironControl] : [])])].sort();
-  const found: ProjectInventory = { names: [], containers: [], volumes: [], networks: [] };
+  const found: ProjectInventory = { names: [], containers: [], volumes: [], networks: [], incomplete: false };
   for (const project of candidates) {
     const listed = listProject(runCommand, runtime, project);
     if (!listed) {
       notes.push(
         `Project ${project}: '${runtime}' listing failed; remove later with: ${projectCleanup(runtime, project)}`,
       );
+      // Unlike "nothing found" below, a failed listing could be hiding a
+      // real volume — never silently treated as this project is gone.
+      found.incomplete = true;
       continue;
     }
     // The deterministic candidate may name a project that was never
@@ -374,7 +391,7 @@ function scanProjects(
     found.volumes.push(...listed.volumes);
     found.networks.push(...listed.networks);
   }
-  return found.names.length > 0 ? found : undefined;
+  return found.names.length > 0 || found.incomplete ? found : undefined;
 }
 
 function scanOnecli(projectRoot: string, runCommand: RunCommand, notes: string[]): OnecliInventory {

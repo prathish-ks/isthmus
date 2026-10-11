@@ -51,9 +51,12 @@ export type RemovalAction =
   /**
    * This copy's Compose projects, listed by project label at removal time
    * (the host was alive through the confirm phase): containers (they hold
-   * the volumes), then volumes, then networks.
+   * the volumes), then volumes, then networks. `incomplete` carries the
+   * scan's own uncertainty forward — set when a listing failure there
+   * could have been hiding a real project; it holds data/'s keys back
+   * even if every project actually found here gets fully removed.
    */
-  | { kind: 'rm-project-residue'; runtime: string; projects: string[] }
+  | { kind: 'rm-project-residue'; runtime: string; projects: string[]; incomplete: boolean }
   /**
    * `fromDataGroup` marks an action `executePlan` must skip once a
    * `rm-project-residue` in the same run fails to fully remove a project:
@@ -126,6 +129,7 @@ export function buildRemovalPlan(inv: Inventory, d: Decisions): RemovalAction[] 
         kind: 'rm-project-residue',
         runtime: inv.containerRuntime,
         projects: inv.projects.names,
+        incomplete: inv.projects.incomplete,
       });
     }
     const env = inv.data.find((i) => path.basename(i.path) === '.env');

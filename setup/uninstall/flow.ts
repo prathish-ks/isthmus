@@ -226,16 +226,30 @@ export async function runUninstallFlow(opts: {
     log: (line) => p.log.message(line),
     isRoot: process.getuid?.() === 0,
   };
-  const { notes: execNotes } = executePlan(head, deps);
+  const { notes: execNotes, dataGroupBlocked } = executePlan(head, deps);
 
   printLeftAlone([...inv.notes, ...keptNotes, ...execNotes]);
 
-  const { notes: tailNotes } = executePlan(tail, {
-    ...deps,
-    log: (line) => console.log(`  ${line}`),
-  });
+  // Threaded through so a block set in the head run (a Compose project
+  // that couldn't be fully removed) also holds back the tail's
+  // delete-runtime-path items — otherwise this second, independent
+  // executePlan call would start clean and remove node_modules/ anyway,
+  // leaving the operator without the runtime the uninstaller itself
+  // needs to be re-run.
+  const { notes: tailNotes, dataGroupBlocked: stillBlocked } = executePlan(
+    tail,
+    { ...deps, log: (line) => console.log(`  ${line}`) },
+    dataGroupBlocked,
+  );
   for (const n of tailNotes) console.log(`  • ${n}`);
-  console.log(`\n✓ Done. NanoClaw copy ${inv.slug} has been uninstalled.`);
+  if (stillBlocked) {
+    console.log(
+      `\n! Uninstall incomplete: data/ (and its Compose project) could not be fully removed — see above. ` +
+        `Fix the issue, then re-run the uninstaller to finish.`,
+    );
+  } else {
+    console.log(`\n✓ Done. NanoClaw copy ${inv.slug} has been uninstalled.`);
+  }
   process.exit(0);
 }
 

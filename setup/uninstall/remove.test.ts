@@ -213,7 +213,12 @@ describe('executePlan', () => {
   describe('rm-project-residue', () => {
     const project = 'nanoclaw-iron-control-abcd1234';
     const filter = `label=com.docker.compose.project=${project}`;
-    const action: RemovalAction = { kind: 'rm-project-residue', runtime: 'docker', projects: [project] };
+    const action: RemovalAction = {
+      kind: 'rm-project-residue',
+      runtime: 'docker',
+      projects: [project],
+      incomplete: false,
+    };
     /** Docker answering only label-filtered listings; removals are recorded. */
     const docker =
       (
@@ -293,7 +298,12 @@ describe('executePlan', () => {
     it('handles several projects and reports the removal counts', () => {
       const lines: string[] = [];
       const calls: string[][] = [];
-      const two: RemovalAction = { kind: 'rm-project-residue', runtime: 'docker', projects: ['a', 'b'] };
+      const two: RemovalAction = {
+        kind: 'rm-project-residue',
+        runtime: 'docker',
+        projects: ['a', 'b'],
+        incomplete: false,
+      };
       executePlan(
         [two],
         deps({
@@ -356,6 +366,64 @@ describe('executePlan', () => {
 
       expect(fs.existsSync(dataDir)).toBe(false);
       expect(notes).toEqual([]);
+    });
+
+    it('blocks data/ when the scan itself was incomplete, even with no projects to remove', () => {
+      const envPath = path.join(tempDir, '.env');
+      fs.writeFileSync(envPath, 'KEY=secret');
+      const incomplete: RemovalAction = {
+        kind: 'rm-project-residue',
+        runtime: 'docker',
+        projects: [],
+        incomplete: true,
+      };
+
+      const { notes, dataGroupBlocked } = executePlan([incomplete, { kind: 'backup-env', envPath }], deps());
+
+      expect(dataGroupBlocked).toBe(true);
+      expect(fs.existsSync(envPath)).toBe(true);
+      expect(notes.some((n) => n.startsWith('Project scan:'))).toBe(true);
+      expect(notes.some((n) => n.startsWith('backup-env: skipped'))).toBe(true);
+    });
+
+    it('blocks data/ when a removal command throws, not just when it returns a failing status', () => {
+      const throwing: RunCommand = (_cmd, args) => {
+        if (args[0] === 'ps') return { status: 0, stdout: 'id1|web1\n' };
+        if (args[0] === 'volume' && args[1] === 'ls') return { status: 0, stdout: `${project}_database\n` };
+        if (args[0] === 'network' && args[1] === 'ls') return { status: 0, stdout: '' };
+        if (args[0] === 'rm') return { status: 0, stdout: '' };
+        if (args[0] === 'volume' && args[1] === 'rm') throw new Error('docker daemon vanished mid-call');
+        return { status: 0, stdout: '' };
+      };
+      const envPath = path.join(tempDir, '.env');
+      fs.writeFileSync(envPath, 'KEY=secret');
+
+      const { notes, dataGroupBlocked } = executePlan(
+        [action, { kind: 'backup-env', envPath }],
+        deps({ runCommand: throwing }),
+      );
+
+      expect(dataGroupBlocked).toBe(true);
+      expect(fs.existsSync(envPath)).toBe(true);
+      expect(notes.some((n) => n.includes('rm-project-residue: failed'))).toBe(true);
+      expect(notes.some((n) => n.startsWith('backup-env: skipped'))).toBe(true);
+    });
+
+    it('threads an earlier block into a later executePlan call over the rest of the same plan', () => {
+      const dir = path.join(tempDir, 'node_modules');
+      fs.mkdirSync(dir);
+
+      const { notes, dataGroupBlocked } = executePlan(
+        [{ kind: 'delete-runtime-path', item: { what: 'Installed dependencies', where: dir, path: dir } }],
+        deps(),
+        /* initialDataGroupBlocked */ true,
+      );
+
+      // A fresh executePlan call would otherwise start clean and delete
+      // node_modules/ anyway, leaving nothing to re-run the uninstaller with.
+      expect(fs.existsSync(dir)).toBe(true);
+      expect(dataGroupBlocked).toBe(true);
+      expect(notes.some((n) => n.startsWith('delete-runtime-path: skipped'))).toBe(true);
     });
   });
 });

@@ -21,19 +21,38 @@ export interface ExecDeps {
   isRoot: boolean;
 }
 
-/** data/ holds the only keys that can ever make an orphaned volume's contents unreadable again. */
+/**
+ * data/ holds the only keys that can ever make an orphaned volume's
+ * contents unreadable again — never deleted once a project cleanup in
+ * this run is known incomplete. delete-runtime-path (dist/, node_modules/)
+ * carries no such risk, but is held back too so a blocked run still
+ * leaves node_modules/ in place to re-run the uninstaller with.
+ */
 function isDataGroupAction(action: RemovalAction): boolean {
-  return action.kind === 'backup-env' || (action.kind === 'delete-path' && action.fromDataGroup);
+  return (
+    action.kind === 'backup-env' ||
+    action.kind === 'delete-runtime-path' ||
+    (action.kind === 'delete-path' && action.fromDataGroup)
+  );
 }
 
-export function executePlan(actions: RemovalAction[], deps: ExecDeps): { notes: string[] } {
+export function executePlan(
+  actions: RemovalAction[],
+  deps: ExecDeps,
+  initialDataGroupBlocked = false,
+): { notes: string[]; dataGroupBlocked: boolean } {
   const notes: string[] = [];
   // Set when a rm-project-residue in this same run did not fully remove a
-  // project: deleting data/'s keys next would make that project's leftover
-  // volume permanently unreadable-but-undeletable-by-key, with no way back.
-  // Every other action keeps this file's general "log a note and continue"
-  // contract — only the data group is held back, and only by this.
-  let dataGroupBlocked = false;
+  // project (or the scan that found it couldn't be sure it found
+  // everything): deleting data/'s keys next would make that project's
+  // leftover volume permanently unreadable-but-undeletable-by-key, with
+  // no way back. Every other action keeps this file's general "log a
+  // note and continue" contract — only the data group is held back, and
+  // only by this. The caller threads this run's result into any later
+  // executePlan call over the rest of the same plan (see flow.ts's
+  // head/tail split) so a block set in one call is never forgotten in
+  // the next.
+  let dataGroupBlocked = initialDataGroupBlocked;
   for (const action of actions) {
     if (dataGroupBlocked && isDataGroupAction(action)) {
       notes.push(
@@ -48,9 +67,13 @@ export function executePlan(actions: RemovalAction[], deps: ExecDeps): { notes: 
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       notes.push(`${action.kind}: failed (${msg}) — re-run the uninstaller to retry.`);
+      // A thrown container/volume/network removal is exactly as unproven
+      // as one that returned a nonzero status — never let an exception
+      // quietly skip the same guard a handled failure would have set.
+      if (action.kind === 'rm-project-residue') dataGroupBlocked = true;
     }
   }
-  return { notes };
+  return { notes, dataGroupBlocked };
 }
 
 /**
@@ -159,7 +182,16 @@ function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): bool
       const { runtime } = action;
       let volumes = 0;
       let networks = 0;
-      let allClean = true;
+      // A scan that couldn't rule out a hidden project never gets to
+      // call this run clean, even if every project actually listed here
+      // is removed without issue.
+      let allClean = !action.incomplete;
+      if (action.incomplete) {
+        notes.push(
+          `Project scan: a Docker listing failed earlier and may have hidden a project, so data/ is being kept ` +
+            `intact. Re-run the uninstaller once Docker is reachable.`,
+        );
+      }
       for (const project of action.projects) {
         // data/'s keys are kept back when this isn't fully clean — see
         // executePlan's dataGroupBlocked — so the note points at the

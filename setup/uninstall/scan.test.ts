@@ -184,6 +184,7 @@ describe('scanInstall compose projects', () => {
       containers: [`gw-${slug}-web-1`, `gw-${slug}-database-1`],
       volumes: [`gw-${slug}_database`],
       networks: [`gw-${slug}`],
+      incomplete: false,
     });
     expect(inv.notes).toEqual([]);
   });
@@ -195,12 +196,14 @@ describe('scanInstall compose projects', () => {
     expect(scanInstall(deps({ runCommand: fakeDocker(fake) })).projects).toBeUndefined();
   });
 
-  it('never reads a failed volume listing as "no volumes" and gives the exact commands', () => {
+  it('never reads a failed volume listing as "no volumes" — marks the scan incomplete and gives the exact commands', () => {
     const slug = getInstallSlug(root);
     const fake = state();
     fake.fail = (args) => args[0] === 'volume';
     const inv = scanInstall(deps({ runCommand: fakeDocker(fake) }));
-    expect(inv.projects).toBeUndefined();
+    // A failed listing could be hiding a real volume — never "nothing found".
+    expect(inv.projects?.incomplete).toBe(true);
+    expect(inv.projects?.names).toEqual([]);
     expect(inv.notes).toEqual([
       expect.stringContaining(
         `docker ps -aq --filter label=${COMPOSE_PROJECT_LABEL}=gw-${slug} | xargs -r docker rm -f; ` +
@@ -227,6 +230,7 @@ describe('scanInstall compose projects', () => {
       containers: [`${project}-web-1`, `${project}-database-1`],
       volumes: [`${project}_database`],
       networks: [project],
+      incomplete: false,
     });
     expect(inv.notes).toEqual([]);
   });
@@ -246,6 +250,7 @@ describe('scanInstall compose projects', () => {
       containers: [],
       volumes: [`${project}_database`],
       networks: [project],
+      incomplete: false,
     });
     expect(inv.notes).toEqual([]);
   });

@@ -130,6 +130,7 @@ describe('buildRemovalPlan compose projects', () => {
     containers: ['nanoclaw-iron-control-abcd1234-web-1'],
     volumes: ['nanoclaw-iron-control-abcd1234_database'],
     networks: ['nanoclaw-iron-control-abcd1234'],
+    incomplete: false,
   };
 
   it('removes project volumes and networks with the data group, after containers and before the keys in data/', () => {
@@ -139,6 +140,7 @@ describe('buildRemovalPlan compose projects', () => {
       kind: 'rm-project-residue',
       runtime: 'docker',
       projects: ['nanoclaw-iron-control-abcd1234'],
+      incomplete: false,
     });
     expect(idx).toBeGreaterThan(actions.findIndex((a) => a.kind === 'rm-containers'));
     expect(idx).toBeLessThan(actions.findIndex((a) => a.kind === 'backup-env'));
@@ -164,6 +166,13 @@ describe('buildRemovalPlan compose projects', () => {
       onecliDelete: [],
     });
     expect(kinds(actions)).not.toContain('rm-project-residue');
+  });
+
+  it("carries the scan's own incomplete flag onto the action, even with zero projects found", () => {
+    const incomplete = { names: [], containers: [], volumes: [], networks: [], incomplete: true };
+    const actions = buildRemovalPlan(inventory({ projects: incomplete }), allYes());
+    const action = actions.find((a) => a.kind === 'rm-project-residue');
+    expect(action).toEqual({ kind: 'rm-project-residue', runtime: 'docker', projects: [], incomplete: true });
   });
 
   it('plans nothing extra when the copy has no projects', () => {
