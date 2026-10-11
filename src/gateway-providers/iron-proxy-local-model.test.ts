@@ -20,6 +20,11 @@ describe('localModelOrigins', () => {
     expect(origins).toEqual([]);
   });
 
+  it('excludes a zero-padded "080" the same as "80" (numeric, not string, comparison)', () => {
+    const origins = localModelOrigins(SETTINGS, [{ modelAuthorities: [`${LOCAL_MODEL_HOST}:080`] }]);
+    expect(origins).toEqual([]);
+  });
+
   it("excludes a port colliding with Iron's own front listener", () => {
     const origins = localModelOrigins({ port: 8080 }, [{ modelAuthorities: [`${LOCAL_MODEL_HOST}:8080`] }]);
     expect(origins).toEqual([]);

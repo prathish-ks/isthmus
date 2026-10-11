@@ -281,7 +281,18 @@ export function assertProviderHostContractShape(provider: string, contract: Prov
   if (contract.modelAuthorities !== undefined) {
     assertArray(contract.modelAuthorities, `${provider}.modelAuthorities`);
     for (const authority of contract.modelAuthorities) {
-      const match = typeof authority === 'string' ? /^([a-z0-9.-]+):(\d{1,5})$/.exec(authority) : null;
+      // Same DNS-label strictness as iron-proxy-allowlist.ts's HOST regex
+      // (minus the wildcard prefix — an authority is a concrete host, never
+      // a pattern): each label 1-63 chars, no leading/trailing hyphen. Kept
+      // as its own literal rather than a shared import — gateway-providers
+      // depends on provider-contracts, not the other way around, so
+      // importing that file's regex here would invert the layering.
+      const match =
+        typeof authority === 'string'
+          ? /^((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?):(\d{1,5})$/.exec(
+              authority,
+            )
+          : null;
       if (!match || Number(match[2]) < 1 || Number(match[2]) > 65535) {
         throw new Error(`${provider}.modelAuthorities must contain "host:port" entries`);
       }

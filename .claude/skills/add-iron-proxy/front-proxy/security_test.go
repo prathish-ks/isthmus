@@ -51,6 +51,15 @@ func (b *fixtureBridge) TransformResponse(c context.Context, r *pb.TransformResp
 	return &pb.TransformResponseResponse{Action: pb.TransformAction_TRANSFORM_ACTION_CONTINUE}, nil
 }
 func fixture(t *testing.T, b *fixtureBridge, handler http.Handler) (*gateway, *httptest.Server) {
+	return fixtureWithConfig(t, b, handler, config{})
+}
+
+// fixtureWithConfig is fixture with caller-supplied overrides merged in —
+// only non-zero fields on extra (e.g. Listen, ApprovalTarget) replace
+// fixture's own defaults. Used by tests exercising localModelPortRefused,
+// which needs a real Listen/ApprovalTarget to check a local-model request
+// against.
+func fixtureWithConfig(t *testing.T, b *fixtureBridge, handler http.Handler, extra config) (*gateway, *httptest.Server) {
 	t.Helper()
 	dir := t.TempDir()
 	key, e := rsa.GenerateKey(rand.Reader, 2048)
@@ -72,7 +81,14 @@ func fixture(t *testing.T, b *fixtureBridge, handler http.Handler) (*gateway, *h
 	os.WriteFile(helper, []byte("#!/bin/sh\ncat >/dev/null\nprintf '{}'\n"), 0700)
 	backend := httptest.NewServer(handler)
 	t.Cleanup(backend.Close)
-	g, e := newGateway(config{Backend: backend.URL, CACert: cert, CAKey: priv, IdentityKey: identity, AllowedHosts: []string{"api.example.test"}, SummaryCommand: helper, TimeoutMS: 2000}, b)
+	cfg := config{Backend: backend.URL, CACert: cert, CAKey: priv, IdentityKey: identity, AllowedHosts: []string{"api.example.test"}, SummaryCommand: helper, TimeoutMS: 2000}
+	if extra.Listen != "" {
+		cfg.Listen = extra.Listen
+	}
+	if extra.ApprovalTarget != "" {
+		cfg.ApprovalTarget = extra.ApprovalTarget
+	}
+	g, e := newGateway(cfg, b)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -690,7 +706,7 @@ func TestLocalModelRejections(t *testing.T) {
 	g, _ := fixture(t, &fixtureBridge{}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("rejected local-model request reached backend")
 	}))
-	for _, name := range []string{"default-port-empty", "default-port-80", "non-openai-path", "connect-tunnel"} {
+	for _, name := range []string{"default-port-empty", "default-port-80", "default-port-zero-padded", "non-openai-path", "connect-tunnel"} {
 		t.Run(name, func(t *testing.T) {
 			var r *http.Request
 			switch name {
@@ -698,6 +714,11 @@ func TestLocalModelRejections(t *testing.T) {
 				r = localModelRequest(g, "POST", "host.docker.internal", "/v1/chat/completions")
 			case "default-port-80":
 				r = localModelRequest(g, "POST", "host.docker.internal:80", "/v1/chat/completions")
+			case "default-port-zero-padded":
+				// url.URL.Port() never normalizes leading zeros — "080" must
+				// still be read as port 80, not as some other, distinct
+				// non-default port (the string-equality bug this guards).
+				r = localModelRequest(g, "POST", "host.docker.internal:080", "/v1/chat/completions")
 			case "non-openai-path":
 				r = localModelRequest(g, "POST", "host.docker.internal:11434", "/admin/shutdown")
 			case "connect-tunnel":
@@ -711,5 +732,22 @@ func TestLocalModelRejections(t *testing.T) {
 				t.Fatalf("accepted %s (status=%d)", name, w.Code)
 			}
 		})
+	}
+}
+
+// A local-model request aimed at this same process's own listen port must
+// be refused — otherwise a provider's modelAuthorities entry could point
+// "the local model" at Iron's own management surface instead of an actual
+// model server (a self-SSRF). This is the enforcement side of that guard:
+// gatewayPorts()/localModelOrigins() (TS) only ever affects an approval
+// card's display text, so this check has to live here, in forward() itself.
+func TestLocalModelRejectsOwnListenPort(t *testing.T) {
+	g, _ := fixtureWithConfig(t, &fixtureBridge{}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("self-SSRF local-model request reached backend")
+	}), config{Listen: ":9443"})
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, localModelRequest(g, "POST", "host.docker.internal:9443", "/v1/chat/completions"))
+	if w.Code < 400 {
+		t.Fatalf("accepted a local-model request aimed at Iron's own listen port (status=%d)", w.Code)
 	}
 }

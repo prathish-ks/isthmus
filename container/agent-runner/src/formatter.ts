@@ -28,11 +28,11 @@ export function isSessionEcho(msg: MessageInRow): boolean {
 export const FAILURE_NOTICE_FIELD = 'failureNotice';
 
 export function isFailureNotice(msg: MessageInRow): boolean {
-  try {
-    return (JSON.parse(msg.content) as Record<string, unknown>)?.[FAILURE_NOTICE_FIELD] === true;
-  } catch {
-    return false;
-  }
+  // parseContent, not an inline JSON.parse: one shared malformed-content
+  // fallback (defined below), not two independently-maintained catch
+  // branches that happen to agree today only because this field name
+  // doesn't collide with parseContent's own `{ text: json }` fallback shape.
+  return parseContent(msg.content)?.[FAILURE_NOTICE_FIELD] === true;
 }
 
 /**

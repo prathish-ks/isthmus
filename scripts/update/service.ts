@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { getInstallSlug, getRuntimeSocketDir } from '../../src/install-slug.js';
-import { LABELS, GATEWAY_ROLE } from '../../src/drivers/types.js';
+import { LABELS, parseNonGatewayRows } from '../../src/drivers/types.js';
 
 export interface CommandRunner {
   run(command: string, args: string[], cwd?: string): string;
@@ -346,13 +346,12 @@ export async function drainContainers(
   const started = Date.now();
   while (true) {
     // `docker ps` has no native "label != value" filter, so the gateway
-    // exclusion is a post-filter here — the same approach, for the same
-    // reason, as reapResidue's own gateway-role exclusion
-    // (src/drivers/docker-driver.ts): Iron Proxy's central container
-    // carries this same install label and is long-running by design
-    // (`--restart unless-stopped`), so draining must never wait on it —
-    // a cutover or rollback that did would hang the full timeout and
-    // fail every time Iron Proxy is installed.
+    // exclusion is a post-filter here — parseNonGatewayRows, shared with
+    // reapResidue's own gateway-role exclusion (src/drivers/docker-driver.ts):
+    // Iron Proxy's central container carries this same install label and is
+    // long-running by design (`--restart unless-stopped`), so draining must
+    // never wait on it — a cutover or rollback that did would hang the full
+    // timeout and fail every time Iron Proxy is installed.
     // `-q` and `--format` cannot be combined — docker silently drops the
     // format and falls back to bare IDs with a warning ("Ignoring custom
     // format, because both --format and --quiet are set"), which would
@@ -366,11 +365,7 @@ export async function drainContainers(
       `{{.ID}}|{{.Label "${LABELS.role}"}}`,
     ]);
     if (!listed.ok) throw new Error(`Cannot inspect active NanoClaw containers with ${runtime}`);
-    const stillRunning = listed.stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => line.split('|'))
-      .filter(([, role]) => role !== GATEWAY_ROLE);
+    const stillRunning = parseNonGatewayRows(listed.stdout);
     if (stillRunning.length === 0) return;
     if (Date.now() - started >= timeoutMs) {
       throw new Error(

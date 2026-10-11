@@ -410,6 +410,26 @@ export const LABELS = {
 export const GROUP_FOLDER_LABEL = 'nanoclaw-group-folder';
 
 /**
+ * Parses `docker ps --format '...|{{.Label "nanoclaw-role"}}'`-shaped output
+ * (one row per line, pipe-delimited, the role always the LAST field) into
+ * rows, excluding gateway-role containers. The one pipeline every caller
+ * that must never sweep/wait-on a gateway's own long-lived container
+ * (`docker-driver.ts`'s `reapResidue`, `scripts/update/service.ts`'s
+ * `drainContainers`) needs — shared so the Docker-CLI-flag correctness
+ * (`drainContainers`'s own history: `-q` silently drops `--format`,
+ * caught only by a live test) and the role exclusion are each proven once,
+ * not reimplemented per call site.
+ */
+export function parseNonGatewayRows(stdout: string): string[][] {
+  return stdout
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.split('|'))
+    .filter((fields) => fields[fields.length - 1] !== GATEWAY_ROLE);
+}
+
+/**
  * A label VALUE every driver can realize VERBATIM: <=63 bytes of
  * `[A-Za-z0-9._-]`, alphanumeric at both ends (empty is legal). This is the
  * strictest label grammar any driver realizes values onto, adopted as the

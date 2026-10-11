@@ -178,6 +178,15 @@ describe('model domains and endpoints', () => {
       /must contain "host:port" entries/,
     );
   });
+
+  it('rejects a modelAuthorities host that is not a valid DNS label (same strictness as the allowlist)', () => {
+    expect(() => register({ ...MODEL_ONLY, modelAuthorities: ['-bad.example.com:11434'] })).toThrow(
+      /must contain "host:port" entries/,
+    );
+    expect(() => register({ ...MODEL_ONLY, modelAuthorities: [`${'a'.repeat(64)}.example.com:11434`] })).toThrow(
+      /must contain "host:port" entries/,
+    );
+  });
 });
 
 // The Isthmus-specific relaxation this widening introduces: see registry.ts's

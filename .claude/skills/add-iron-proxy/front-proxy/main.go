@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -207,6 +208,42 @@ func openAIRequest(r *http.Request) bool {
 	return ok && r.Method == method
 }
 
+// parsePort parses a URL port component as a base-10 integer in [1,65535].
+// strconv.Atoi, not a string-equality check against "80" — a zero-padded
+// value like "080" is otherwise read as a distinct, non-default port
+// instead of the port 80 it actually is, letting it slip past a check meant
+// to refuse exactly that (url.URL.Port() never normalizes leading zeros).
+func parsePort(raw string) (int, bool) {
+	if raw == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > 65535 {
+		return 0, false
+	}
+	return n, true
+}
+
+// localModelPortRefused reports whether port is this same process's own
+// listen port or its (TCP) approval port — a "local model" config pointed
+// at either would be a self-SSRF onto Iron's own management surface rather
+// than an actual model server. Derived straight from this process's own
+// config rather than a separate field threaded in from setup, so there is
+// exactly one place this can drift out of sync with reality.
+func (g *gateway) localModelPortRefused(port int) bool {
+	if lp, ok := parsePort(strings.TrimPrefix(g.cfg.Listen, ":")); ok && lp == port {
+		return true
+	}
+	if !strings.HasPrefix(g.cfg.ApprovalTarget, "unix:") {
+		if _, p, err := net.SplitHostPort(g.cfg.ApprovalTarget); err == nil {
+			if ap, ok := parsePort(p); ok && ap == port {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (g *gateway) allowed(host string) bool {
 	host = strings.ToLower(host)
 	if host == localModelHost {
@@ -330,12 +367,17 @@ func (g *gateway) forward(r *http.Request, identity, tunnel string) *http.Respon
 		return deny(r, 403)
 	}
 	// A keyless local model (#3966): host.docker.internal only, plain HTTP,
-	// no CONNECT tunnel, an explicit non-default port (an empty or :80 port
-	// is ambiguous and refused rather than guessed), and an OpenAI-shaped
-	// inference route — never admitted via the normal allowed_hosts check.
+	// no CONNECT tunnel, an explicit non-default port that also isn't this
+	// process's own listen or approval port (an empty, :80, or self port is
+	// ambiguous or a self-SSRF and refused rather than guessed or trusted —
+	// see localModelPortRefused), and an OpenAI-shaped inference route —
+	// never admitted via the normal allowed_hosts check.
 	local := r.URL.Scheme == "http" && tunnel == "" && strings.EqualFold(r.URL.Hostname(), localModelHost)
-	if local && (r.URL.Port() == "" || r.URL.Port() == "80") {
-		return deny(r, 403)
+	if local {
+		port, ok := parsePort(r.URL.Port())
+		if !ok || port == 80 || g.localModelPortRefused(port) {
+			return deny(r, 403)
+		}
 	}
 	if !local && !g.allowed(r.URL.Hostname()) {
 		return deny(r, 403)

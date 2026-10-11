@@ -284,6 +284,14 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
           thread_id: routing.threadId,
           content: JSON.stringify({ text: `Error: ${errMsg}`, [FAILURE_NOTICE_FIELD]: true }),
         });
+      } else if (routing.taskRun) {
+        // A task run always fails `sendsFailureNotice` (it has its own
+        // one-door delivery — the run log, not chat), but a synchronous
+        // throw here never reaches the isError handler that normally calls
+        // this, so without it the run log would silently miss the failure
+        // entirely — the only trace left would be a console log line, lost
+        // once the container exits.
+        await autoAppendTaskLog(`Error: ${errMsg}`);
       } else {
         log('Suppressing failure notice — triggering message was itself a failure notice (#3908)');
       }

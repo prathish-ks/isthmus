@@ -197,6 +197,25 @@ describe('Iron Proxy provider', () => {
     }
   });
 
+  it('leaves a bare host.docker.internal out of the front config and warns it is reserved', async () => {
+    // Before this guard, a bare "host.docker.internal" entry (no port, so
+    // it passes the normal hostname check) was accepted into allowed_hosts
+    // but main.go's allowed() refuses that exact host unconditionally —
+    // every matching request would 403 with nothing here explaining why.
+    const { log } = await import('../log.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'iron-front-allowlist-'));
+    const allowedHostsFile = path.join(dir, 'allowed-hosts.json');
+    fs.writeFileSync(allowedHostsFile, JSON.stringify(['extra.example.com', 'host.docker.internal']));
+    try {
+      const front = JSON.parse(ironFrontConfig({ ...settings, allowedHostsFile }));
+      expect(front.allowed_hosts).toContain('extra.example.com');
+      expect(front.allowed_hosts).not.toContain('host.docker.internal');
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('reserved for the local-model path'));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('routes through the central proxy with a signed session identity', () => {
     fs.mkdirSync(path.dirname(settings.identityKey), { recursive: true });
     fs.writeFileSync(settings.identityKey, Buffer.alloc(32, 7));

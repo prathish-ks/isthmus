@@ -39,7 +39,11 @@ export function localModelOrigins(
   return [...new Set(contracts.flatMap((contract) => contract.modelAuthorities ?? []))]
     .filter((authority) => {
       const [host, port] = authority.split(':');
-      return host === LOCAL_MODEL_HOST && port !== '80' && !refused.has(Number(port));
+      // Number(), not a string comparison against '80' — a zero-padded
+      // value like "080" is otherwise read as a distinct, non-default port
+      // instead of the port 80 it actually is (registry.ts's own shape
+      // validation accepts "080" as a syntactically valid port already).
+      return host === LOCAL_MODEL_HOST && Number(port) !== 80 && !refused.has(Number(port));
     })
     .sort();
 }
