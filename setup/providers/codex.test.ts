@@ -20,7 +20,20 @@ vi.mock('child_process', () => ({
 // Keep the auth flow's structured logging out of logs/setup.log.
 vi.mock('../logs.js', () => ({ step: vi.fn(), userInput: vi.fn() }));
 
-import { buildCodexFailurePrompt, runCodexInstallCheck, runCodexLoginAuth, verifyCodexInstall } from './codex.js';
+// offerCodexFailureAssist confirms before handing off to the interactive TUI.
+const mockConfirm = vi.fn();
+vi.mock('@clack/prompts', async (importActual) => ({
+  ...(await importActual<typeof import('@clack/prompts')>()),
+  confirm: (...args: unknown[]) => mockConfirm(...args),
+}));
+
+import {
+  buildCodexFailurePrompt,
+  offerCodexFailureAssist,
+  runCodexInstallCheck,
+  runCodexLoginAuth,
+  verifyCodexInstall,
+} from './codex.js';
 
 // Structural guard for the codex payload wiring: provider files, both barrel
 // imports, and the pinned Dockerfile install. Goes red if any of them is
@@ -106,5 +119,44 @@ describe('runCodexLoginAuth', () => {
 
     // The isolated dir holds a live credential — gone once vaulted.
     expect(fs.existsSync(codexHome!)).toBe(false);
+  });
+});
+
+// Security: a bare `spawn('codex', [prompt], ...)` hands the operator's
+// failing setup run over to an unrestricted interactive agent — full
+// filesystem write and shell-exec with no per-action approval. This must
+// stay sandboxed and ask-first, matching the already-established
+// CLAUDE_READ_ONLY_ARGS precedent for Claude's own equivalent flow.
+describe('offerCodexFailureAssist', () => {
+  it('launches Codex read-only with approval on request', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-assist-home-'));
+    try {
+      fs.mkdirSync(path.join(home, '.codex'));
+      fs.writeFileSync(path.join(home, '.codex', 'auth.json'), '{}');
+      vi.stubEnv('HOME', home);
+      mockSpawn.mockReset();
+      mockSpawnSync.mockReset();
+      mockConfirm.mockReset();
+      mockSpawnSync.mockReturnValue({ status: 0, stdout: 'codex-cli 0.155.1' });
+      mockConfirm.mockResolvedValue(true);
+      mockSpawn.mockImplementation(() => {
+        const child = new EventEmitter();
+        setImmediate(() => child.emit('close', 0));
+        return child;
+      });
+
+      expect(await offerCodexFailureAssist({ stepName: 'gateway', msg: 'boom' }, '/repo')).toBe('launched');
+
+      const [binary, args] = mockSpawn.mock.calls[0] as [string, string[]];
+      expect(binary).toBe('codex');
+      expect(args.slice(0, 4)).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
+      expect(args).toHaveLength(5);
+    } finally {
+      vi.unstubAllEnvs();
+      mockSpawn.mockReset();
+      mockSpawnSync.mockReset();
+      mockConfirm.mockReset();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
