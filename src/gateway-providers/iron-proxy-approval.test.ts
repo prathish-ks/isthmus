@@ -304,3 +304,87 @@ it.each(compatibilityFixtures)('preserves OneCLI approval content: $name', async
   decision.resolve('deny');
   expect(await pending.result).toMatchObject({ action: 2 });
 });
+
+// `plaintextOrigins` (#3966) is documented as display-only — the proxy's own
+// forward() is the real admission gate for the local-model path, this bridge
+// only picks which scheme shows in the approval card's resource text. An
+// external review of a related change raised the concern that this contract
+// could silently become an (unintended) enforcement point, or could be
+// mistaken for one — these tests make the actual behavior explicit: an
+// authority NOT in plaintextOrigins still reaches the human-approval
+// decision (held, not auto-rejected); only the displayed scheme changes.
+describe('plaintextOrigins — display-only, not an admission gate', () => {
+  let localRoot: string;
+  let localBridge: IronProxyApprovalBridge;
+  let localClient: TransformClient;
+  let localController: AbortController;
+  let localSubscription: Promise<void>;
+  const localHeld = new Map<string, HeldDecision>();
+
+  beforeEach(async () => {
+    localHeld.clear();
+    localRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'iron-approval-local-'));
+    const protoPath = path.join(process.cwd(), 'src', 'gateway-providers', 'iron-proxy-transform.proto');
+    localBridge = new IronProxyApprovalBridge(
+      {
+        socketPath: path.join(localRoot, 'approval.sock'),
+        timeoutMs: 100,
+        maxPending: 4,
+        protoPath,
+        plaintextOrigins: ['host.docker.internal:11434'],
+      },
+      (runtimeIdentity) => (runtimeIdentity === identity.runtimeIdentity ? identity : undefined),
+    );
+    localController = new AbortController();
+    localSubscription = localBridge.subscribe(async (request) => {
+      return new Promise<GatewayApprovalDecision>((resolve) => localHeld.set(request.id, { request, resolve }));
+    }, localController.signal);
+    await localBridge.ready();
+    const definition = protoLoader.loadSync(protoPath, { defaults: true, enums: Number });
+    const loaded = grpc.loadPackageDefinition(definition) as unknown as {
+      transform: { v1: { TransformService: grpc.ServiceClientConstructor } };
+    };
+    localClient = new loaded.transform.v1.TransformService(
+      `unix:${path.join(localRoot, 'approval.sock')}`,
+      grpc.credentials.createInsecure(),
+    ) as unknown as TransformClient;
+  });
+
+  afterEach(async () => {
+    localClient.close();
+    localController.abort();
+    await localSubscription;
+    fs.rmSync(localRoot, { recursive: true, force: true });
+  });
+
+  function localTransform(host: string): Promise<{ action: number }> {
+    return new Promise((resolve, reject) => {
+      localClient.transformRequest(
+        { request: { method: 'POST', host, url: '/v1/chat/completions' } },
+        metadata(),
+        (error, response) => (error ? reject(error) : resolve(response)),
+      );
+    });
+  }
+
+  it('holds (does not reject) an authority not in plaintextOrigins — main.go is the real gate', async () => {
+    const pending = localTransform('host.docker.internal:9999');
+    await vi.waitFor(() => expect(localHeld.size).toBe(1));
+    const decision = [...localHeld.values()][0];
+    // Undeclared, so the display scheme falls back to https — but the
+    // request still reached the human-approval decision; it was not denied.
+    expect(decision.request.audit).toMatchObject({ host: 'host.docker.internal:9999' });
+    expect(decision.request.summary?.resource).toContain('host.docker.internal:9999');
+    decision.resolve('approve');
+    expect(await pending).toMatchObject({ action: 1 });
+  });
+
+  it('holds a declared authority the same way — plaintextOrigins only changes the displayed scheme', async () => {
+    const pending = localTransform('host.docker.internal:11434');
+    await vi.waitFor(() => expect(localHeld.size).toBe(1));
+    const decision = [...localHeld.values()][0];
+    expect(decision.request.audit).toMatchObject({ host: 'host.docker.internal:11434' });
+    decision.resolve('approve');
+    expect(await pending).toMatchObject({ action: 1 });
+  });
+});
