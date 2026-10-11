@@ -16,6 +16,26 @@ export function isSessionEcho(msg: MessageInRow): boolean {
 }
 
 /**
+ * Marks an outbound chat row as a failure notice (an error delivered back
+ * to the sender because the turn that answered it errored out) rather than
+ * a normal reply. Checked on the INBOUND side before replying, so a failure
+ * notice never gets answered with another one — the exact loop upstream's
+ * #3908 names (428 notices in 12 minutes in one real incident). Lives in
+ * the untyped `content` JSON blob; this key name is a duplicated contract
+ * with `deliverErrorResult`'s own write in poll-loop.ts (and with
+ * upstream's own naming, kept for re-sync legibility), not a schema column.
+ */
+export const FAILURE_NOTICE_FIELD = 'failureNotice';
+
+export function isFailureNotice(msg: MessageInRow): boolean {
+  // parseContent, not an inline JSON.parse: one shared malformed-content
+  // fallback (defined below), not two independently-maintained catch
+  // branches that happen to agree today only because this field name
+  // doesn't collide with parseContent's own `{ text: json }` fallback shape.
+  return parseContent(msg.content)?.[FAILURE_NOTICE_FIELD] === true;
+}
+
+/**
  * Command categories for messages starting with '/'.
  * - admin: known admin-only command name (no privilege check happens HERE —
  *   see below)
@@ -153,6 +173,12 @@ export interface RoutingContext {
    *  delivers from a task session; final-text `<message to>` blocks are inert
    *  and the final text auto-appends to the series run log. */
   taskRun: boolean;
+  /** True when every message that woke this turn was itself a failure
+   *  notice (see isFailureNotice) — an error reply must never answer one,
+   *  or a failure-notice exchange loops (#3908). Echo rows are excluded
+   *  the same way taskRun excludes them: riding along must not flip this
+   *  either way. */
+  failureNoticeWake: boolean;
 }
 
 /**
@@ -165,6 +191,7 @@ export interface RoutingContext {
  */
 export function extractRouting(messages: MessageInRow[]): RoutingContext {
   const first = messages.find((m) => !isSessionEcho(m)) ?? messages[0];
+  const waking = messages.filter((m) => !isSessionEcho(m));
   return {
     platformId: first?.platform_id ?? null,
     channelType: first?.channel_type ?? null,
@@ -175,6 +202,7 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
     taskRun:
       messages.some((m) => m.kind === 'task') &&
       messages.every((m) => m.kind === 'task' || isSessionEcho(m)),
+    failureNoticeWake: waking.length > 0 && waking.every(isFailureNotice),
   };
 }
 

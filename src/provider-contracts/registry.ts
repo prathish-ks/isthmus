@@ -141,6 +141,15 @@ export interface ProviderHostContract {
   modelDomains?: readonly string[];
   /** Provider-owned HTTPS URLs used by gateway credential adapters. */
   modelEndpoints?: Partial<Record<'api' | 'subscription' | 'token', string>>;
+  /**
+   * `host:port` pairs this provider talks to for a local, keyless model
+   * (e.g. a local Ollama instance). Only `host.docker.internal` on a
+   * non-default port is ever actually admitted by a gateway — see
+   * `iron-proxy-local-model.ts`'s `localModelOrigins()`; this field just
+   * carries the declaration, the same way `modelDomains` carries HTTPS
+   * domains for the credentialed case.
+   */
+  modelAuthorities?: readonly string[];
   /** Provider-declared inference vocabulary; absent means no speed tier is accepted. */
   inference?: ProviderInferenceDeclaration;
   /**
@@ -266,6 +275,26 @@ export function assertProviderHostContractShape(provider: string, contract: Prov
     for (const domain of contract.modelDomains) {
       if (typeof domain !== 'string' || !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(domain)) {
         throw new Error(`${provider}.modelDomains must contain lowercase DNS domains`);
+      }
+    }
+  }
+  if (contract.modelAuthorities !== undefined) {
+    assertArray(contract.modelAuthorities, `${provider}.modelAuthorities`);
+    for (const authority of contract.modelAuthorities) {
+      // Same DNS-label strictness as iron-proxy-allowlist.ts's HOST regex
+      // (minus the wildcard prefix — an authority is a concrete host, never
+      // a pattern): each label 1-63 chars, no leading/trailing hyphen. Kept
+      // as its own literal rather than a shared import — gateway-providers
+      // depends on provider-contracts, not the other way around, so
+      // importing that file's regex here would invert the layering.
+      const match =
+        typeof authority === 'string'
+          ? /^((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?):(\d{1,5})$/.exec(
+              authority,
+            )
+          : null;
+      if (!match || Number(match[2]) < 1 || Number(match[2]) > 65535) {
+        throw new Error(`${provider}.modelAuthorities must contain "host:port" entries`);
       }
     }
   }

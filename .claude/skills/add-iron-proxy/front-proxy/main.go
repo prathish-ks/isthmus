@@ -27,6 +27,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,17 +41,23 @@ import (
 )
 
 type config struct {
-	Listen         string   `json:"listen"`
-	Backend        string   `json:"backend"`
-	CACert         string   `json:"ca_cert"`
-	CAKey          string   `json:"ca_key"`
-	IdentityKey    string   `json:"identity_key"`
-	AllowedHosts   []string `json:"allowed_hosts"`
-	ApprovalTarget string   `json:"approval_target"`
-	ApprovalCert   string   `json:"approval_cert"`
-	ApprovalKey    string   `json:"approval_key"`
-	SummaryCommand string   `json:"summary_command"`
-	TimeoutMS      int      `json:"timeout_ms"`
+	Listen       string   `json:"listen"`
+	Backend      string   `json:"backend"`
+	CACert       string   `json:"ca_cert"`
+	CAKey        string   `json:"ca_key"`
+	IdentityKey  string   `json:"identity_key"`
+	AllowedHosts []string `json:"allowed_hosts"`
+	// Declared keyless local-model ports (#3966) — the only ports forward()
+	// will ever admit on the local-model path. Not derived from
+	// AllowedHosts: a local-model request is never checked against that
+	// list at all (see allowed()'s own carve-out), so this is the one place
+	// the declared set is actually enforced.
+	LocalModelPorts []int  `json:"local_model_ports"`
+	ApprovalTarget  string `json:"approval_target"`
+	ApprovalCert    string `json:"approval_cert"`
+	ApprovalKey     string `json:"approval_key"`
+	SummaryCommand  string `json:"summary_command"`
+	TimeoutMS       int    `json:"timeout_ms"`
 }
 
 type gateway struct {
@@ -174,8 +182,95 @@ func authority(raw, scheme string) (string, error) {
 	return net.JoinHostPort(strings.ToLower(u.Hostname()), port), nil
 }
 
+// Docker's own host-gateway alias, reachable only via the narrower
+// plain-HTTP, OpenAI-route-shaped rule forward() applies to it below — the
+// local-model path is deliberately never admitted by the normal
+// HTTPS/CONNECT allowlist, whatever an operator's allowed_hosts says.
+const localModelHost = "host.docker.internal"
+
+var openAIRoutes = map[string]string{
+	"/v1/models":           "GET",
+	"/v1/chat/completions": "POST",
+	"/v1/completions":      "POST",
+	"/v1/embeddings":       "POST",
+	"/v1/responses":        "POST",
+}
+
+// openAIRequest bounds the local-model path to recognized OpenAI inference
+// routes only — not an arbitrary request to whatever is listening on the
+// operator's machine. Rejects any path with raw-path/encoded-separator
+// tricks before matching, so a cleaned path can't be used to smuggle a
+// different route past the check than what the backend actually receives.
+func openAIRequest(r *http.Request) bool {
+	p := r.URL.Path
+	clean := path.Clean(p)
+	if r.URL.RawPath != "" || strings.ContainsAny(p, "\\%") || (clean != p && clean+"/" != p) {
+		return false
+	}
+	if strings.HasPrefix(clean, "/v1/models/") && !strings.Contains(clean[len("/v1/models/"):], "/") {
+		return r.Method == "GET"
+	}
+	method, ok := openAIRoutes[clean]
+	return ok && r.Method == method
+}
+
+// parsePort parses a URL port component as a base-10 integer in [1,65535].
+// strconv.Atoi, not a string-equality check against "80" — a zero-padded
+// value like "080" is otherwise read as a distinct, non-default port
+// instead of the port 80 it actually is, letting it slip past a check meant
+// to refuse exactly that (url.URL.Port() never normalizes leading zeros).
+func parsePort(raw string) (int, bool) {
+	if raw == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > 65535 {
+		return 0, false
+	}
+	return n, true
+}
+
+// localModelPortRefused reports whether port is this same process's own
+// listen port or its (TCP) approval port — a "local model" config pointed
+// at either would be a self-SSRF onto Iron's own management surface rather
+// than an actual model server. Derived straight from this process's own
+// config rather than a separate field threaded in from setup, so there is
+// exactly one place this can drift out of sync with reality.
+func (g *gateway) localModelPortRefused(port int) bool {
+	if lp, ok := parsePort(strings.TrimPrefix(g.cfg.Listen, ":")); ok && lp == port {
+		return true
+	}
+	if !strings.HasPrefix(g.cfg.ApprovalTarget, "unix:") {
+		if _, p, err := net.SplitHostPort(g.cfg.ApprovalTarget); err == nil {
+			if ap, ok := parsePort(p); ok && ap == port {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// localModelPortDeclared reports whether port is one a provider actually
+// declared via modelAuthorities (ironFrontConfig's local_model_ports). This
+// is the real admission gate for the keyless local-model path — a request
+// for host.docker.internal is never checked against AllowedHosts at all
+// (see allowed()'s own carve-out below), so without this check ANY
+// non-default, non-self port on that host would be forwarded, not just the
+// ones a provider actually declared.
+func (g *gateway) localModelPortDeclared(port int) bool {
+	for _, p := range g.cfg.LocalModelPorts {
+		if p == port {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *gateway) allowed(host string) bool {
 	host = strings.ToLower(host)
+	if host == localModelHost {
+		return false
+	}
 	for _, pattern := range g.cfg.AllowedHosts {
 		pattern = strings.ToLower(pattern)
 		if host == pattern {
@@ -293,7 +388,24 @@ func (g *gateway) forward(r *http.Request, identity, tunnel string) *http.Respon
 	if err != nil || requested != target || (tunnel != "" && (target != tunnel || r.URL.Scheme != "https")) {
 		return deny(r, 403)
 	}
-	if !g.allowed(r.URL.Hostname()) {
+	// A keyless local model (#3966): host.docker.internal only, plain HTTP,
+	// no CONNECT tunnel, a port a provider actually declared via
+	// modelAuthorities (localModelPortDeclared — not just "any non-default
+	// port", and not this process's own listen/approval port either, a
+	// self-SSRF localModelPortRefused still catches as a second check), and
+	// an OpenAI-shaped inference route — never admitted via the normal
+	// allowed_hosts check.
+	local := r.URL.Scheme == "http" && tunnel == "" && strings.EqualFold(r.URL.Hostname(), localModelHost)
+	if local {
+		port, ok := parsePort(r.URL.Port())
+		if !ok || port == 80 || !g.localModelPortDeclared(port) || g.localModelPortRefused(port) {
+			return deny(r, 403)
+		}
+	}
+	if !local && !g.allowed(r.URL.Hostname()) {
+		return deny(r, 403)
+	}
+	if local && !openAIRequest(r) {
 		return deny(r, 403)
 	}
 	if ok, err := g.approve(r.Context(), r, identity); err != nil || !ok {

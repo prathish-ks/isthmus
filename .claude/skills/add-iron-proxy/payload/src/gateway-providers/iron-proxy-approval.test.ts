@@ -283,7 +283,8 @@ it('rejects malformed proxy summary metadata', async () => {
 });
 
 const compatibilityFixtures = JSON.parse(fs.readFileSync('gateway-compat/onecli-summary/fixtures.json', 'utf8')) as {
-  name: string; request: { host: string; method: string; path: string };
+  name: string;
+  request: { host: string; method: string; path: string };
   summary: { action: string; details: { label: string; value: string }[] };
 }[];
 
@@ -294,10 +295,104 @@ it.each(compatibilityFixtures)('preserves OneCLI approval content: $name', async
   await vi.waitFor(() => expect(held.size).toBe(1));
   const decision = [...held.values()][0];
   expect(decision.request.summary).toEqual({
-    agent: identity.groupName, action: fixture.summary.action, details: fixture.summary.details,
+    agent: identity.groupName,
+    action: fixture.summary.action,
+    details: fixture.summary.details,
     resource: `${fixture.request.method} ${fixture.request.host}${fixture.request.path}`,
     reason: 'The gateway policy requires human approval for this request.',
   });
   decision.resolve('deny');
   expect(await pending.result).toMatchObject({ action: 2 });
+});
+
+// `plaintextOrigins` (#3966) drives safeRequest()'s scheme selection, which
+// in turn feeds an origin-consistency check against `request.url` — and
+// `request.url` is main.go's own safeRequest() output: the REAL request's
+// full absolute URL (scheme and host included), never a bare path. A test
+// fixture that passes a relative path instead masks this: a relative path
+// always inherits the computed `base`'s scheme, so the check trivially
+// passes regardless of whether the authority is declared. These tests use
+// the real absolute-URL shape, matching what Go actually sends, so they
+// exercise the real divergence: a declared authority's scheme matches its
+// own absolute URL (held for approval); an undeclared authority's forced
+// 'https' scheme does NOT match its real (plain http) absolute URL, so the
+// origin check itself rejects it here — a second, independent layer behind
+// main.go's own `local_model_ports` enforcement in forward().
+describe('plaintextOrigins — scheme selection feeds a real origin check', () => {
+  let localRoot: string;
+  let localBridge: IronProxyApprovalBridge;
+  let localClient: TransformClient;
+  let localController: AbortController;
+  let localSubscription: Promise<void>;
+  const localHeld = new Map<string, HeldDecision>();
+
+  beforeEach(async () => {
+    localHeld.clear();
+    localRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'iron-approval-local-'));
+    const protoPath = path.join(process.cwd(), 'src', 'gateway-providers', 'iron-proxy-transform.proto');
+    localBridge = new IronProxyApprovalBridge(
+      {
+        socketPath: path.join(localRoot, 'approval.sock'),
+        timeoutMs: 100,
+        maxPending: 4,
+        protoPath,
+        plaintextOrigins: ['host.docker.internal:11434'],
+      },
+      (runtimeIdentity) => (runtimeIdentity === identity.runtimeIdentity ? identity : undefined),
+    );
+    localController = new AbortController();
+    localSubscription = localBridge.subscribe(async (request) => {
+      return new Promise<GatewayApprovalDecision>((resolve) => localHeld.set(request.id, { request, resolve }));
+    }, localController.signal);
+    await localBridge.ready();
+    const definition = protoLoader.loadSync(protoPath, { defaults: true, enums: Number });
+    const loaded = grpc.loadPackageDefinition(definition) as unknown as {
+      transform: { v1: { TransformService: grpc.ServiceClientConstructor } };
+    };
+    localClient = new loaded.transform.v1.TransformService(
+      `unix:${path.join(localRoot, 'approval.sock')}`,
+      grpc.credentials.createInsecure(),
+    ) as unknown as TransformClient;
+  });
+
+  afterEach(async () => {
+    localClient.close();
+    localController.abort();
+    await localSubscription;
+    fs.rmSync(localRoot, { recursive: true, force: true });
+  });
+
+  // Absolute URL, exactly what Go's own safeRequest() sends
+  // (http.Request.URL.String() for a plain-HTTP forward-proxy request) —
+  // not a relative path.
+  function localTransform(host: string): Promise<{ action: number }> {
+    return new Promise((resolve, reject) => {
+      localClient.transformRequest(
+        { request: { method: 'POST', host, url: `http://${host}/v1/chat/completions` } },
+        metadata(),
+        (error, response) => (error ? reject(error) : resolve(response)),
+      );
+    });
+  }
+
+  it('holds a declared authority for human approval (real absolute-URL shape)', async () => {
+    const pending = localTransform('host.docker.internal:11434');
+    await vi.waitFor(() => expect(localHeld.size).toBe(1));
+    const decision = [...localHeld.values()][0];
+    expect(decision.request.audit).toMatchObject({ host: 'host.docker.internal:11434' });
+    decision.resolve('approve');
+    expect(await pending).toMatchObject({ action: 1 });
+  });
+
+  it('rejects an undeclared authority outright (real absolute-URL shape) — never reaches the decide() callback', async () => {
+    // Undeclared, so safeRequest() picks 'https' for base — but the real
+    // request is plain http://, so url.origin !== base.origin and the
+    // request is rejected before ever being held for a human decision.
+    // (In production this path is moot — main.go's local_model_ports check
+    // already denies an undeclared port before it reaches this bridge at
+    // all — but this proves the bridge fails closed on its own too.)
+    const result = await localTransform('host.docker.internal:9999');
+    expect(result).toMatchObject({ action: 2 });
+    expect(localHeld.size).toBe(0);
+  });
 });

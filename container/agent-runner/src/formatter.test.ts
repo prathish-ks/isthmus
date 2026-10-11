@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './mailbox/sqlite/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { formatMessages, stripInternalTags, stripLegacyTaskContract } from './formatter.js';
+import { formatMessages, stripInternalTags, stripLegacyTaskContract, extractRouting } from './formatter.js';
 import { TIMEZONE, formatLocalTime } from './timezone.js';
 
 beforeEach(() => {
@@ -126,6 +126,31 @@ describe('multi-message chat batches', () => {
     expect(firstIdx).toBeGreaterThan(0);
     expect(secondIdx).toBeGreaterThan(firstIdx);
     expect(thirdIdx).toBeGreaterThan(secondIdx);
+  });
+});
+
+describe('extractRouting — failureNoticeWake (#3908)', () => {
+  it('is true when every waking message is a failure notice', () => {
+    insertMessage('m1', 'chat', { text: 'gateway unavailable', failureNotice: true });
+    const routing = extractRouting(getPendingMessages());
+    expect(routing.failureNoticeWake).toBe(true);
+  });
+
+  it('is false when the batch mixes a failure notice with a normal message', () => {
+    insertMessage('m1', 'chat', { text: 'gateway unavailable', failureNotice: true });
+    insertMessage('m2', 'chat', { text: 'unrelated question' });
+    const routing = extractRouting(getPendingMessages());
+    expect(routing.failureNoticeWake).toBe(false);
+  });
+
+  it('is false for a normal batch with no failure notice at all', () => {
+    insertMessage('m1', 'chat', { text: 'just a normal message' });
+    const routing = extractRouting(getPendingMessages());
+    expect(routing.failureNoticeWake).toBe(false);
+  });
+
+  it('is false for an empty batch', () => {
+    expect(extractRouting([]).failureNoticeWake).toBe(false);
   });
 });
 

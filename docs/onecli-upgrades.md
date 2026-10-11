@@ -20,12 +20,15 @@ Why gateways fall behind: the OneCLI installer's docker-compose tracks the `late
 
 ## 2. Upgrade
 
-The gateway runs as a Docker service in `~/.onecli`. Upgrade just that container to the pinned `onecli-gateway` version — vault data lives in named Docker volumes and survives. This upgrades only the gateway; the CLI binary is pinned separately (see below).
+The gateway runs as a Docker service in `~/.onecli`. Upgrade just that container to the pinned `onecli-gateway` version — vault data lives in named Docker volumes and survives. This upgrades only the gateway; the CLI binary is pinned separately (see below). `~/.onecli`'s own `docker-compose.yml` resolves the image tag from the `ONECLI_VERSION` environment variable, falling back silently to `:latest` if it's unset or empty — pinning nothing. Every block below sets `ONECLI_VERSION` to the substituted value first, guards it with `:?`, then exports it, so the variable the guard checks and the variable Compose actually reads are the same one, not two independently-typed copies of the placeholder.
 
 **Local gateway (the common case):**
 
 ```bash
-cd ~/.onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker compose pull onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker compose up -d
+ONECLI_VERSION=<onecli-gateway pin from versions.json>
+: "${ONECLI_VERSION:?set this to the onecli-gateway pin from versions.json}"
+export ONECLI_VERSION
+cd ~/.onecli && docker compose pull onecli && docker compose up -d
 ```
 
 **Remote gateway** — run the same command on the gateway's host (NanoClaw can't reach it over SSH).
@@ -45,7 +48,16 @@ docker run --rm --add-host=host.docker.internal:host-gateway \
   curlimages/curl -s -o /dev/null -w '%{http_code}' http://host.docker.internal:10254/v1/health
 ```
 
-This must print `200`. If it can't connect while the host-side check passed, set the bind address in `~/.onecli/.env` to the docker-bridge IP (or `0.0.0.0` on a host with a closed firewall) and `cd ~/.onecli && ONECLI_VERSION=<onecli-gateway pin from versions.json> docker compose up -d`. Symptom if skipped: host log clean, agents fail all API calls.
+This must print `200`. If it can't connect while the host-side check passed, set the bind address in `~/.onecli/.env` to the docker-bridge IP (or `0.0.0.0` on a host with a closed firewall) and re-run:
+
+```bash
+ONECLI_VERSION=<onecli-gateway pin from versions.json>
+: "${ONECLI_VERSION:?set this to the onecli-gateway pin from versions.json}"
+export ONECLI_VERSION
+cd ~/.onecli && docker compose up -d
+```
+
+Symptom if skipped: host log clean, agents fail all API calls.
 
 Finally, restart the NanoClaw service (per-install names — derive with `setup/lib/install-slug.sh`):
 
@@ -59,7 +71,10 @@ source setup/lib/install-slug.sh && systemctl --user restart $(systemd_unit)
 ## 4. Rollback
 
 ```bash
-cd ~/.onecli && ONECLI_VERSION=<old-version> docker compose up -d
+ONECLI_VERSION=<old-version>
+: "${ONECLI_VERSION:?set this to the old onecli-gateway version you're rolling back to}"
+export ONECLI_VERSION
+cd ~/.onecli && docker compose up -d
 ```
 
 If the NanoClaw update itself is being rolled back, also pin `@onecli-sh/sdk` back to its previous version in `package.json` and run `pnpm install`. Vault data is unaffected in both directions.

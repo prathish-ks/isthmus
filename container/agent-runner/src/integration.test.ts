@@ -429,6 +429,74 @@ describe('poll loop — provider error recovery', () => {
 
     await loopPromise.catch(() => {});
   });
+
+  it('never answers a failure notice with another, even from the outer catch (#3908)', async () => {
+    insertMessage(
+      'm1',
+      { sender: 'agent-a', text: 'something failed on my end', failureNotice: true },
+      { platformId: 'ag-a', channelType: 'agent' },
+    );
+
+    const provider = new ThrowingProvider('downstream gateway unavailable');
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 2000);
+
+    // getPendingMessages() excludes 'processing' rows too, so it goes empty
+    // as soon as markProcessing runs — well before the batch actually
+    // finishes. markCompleted acks through processing_ack in the outbound
+    // DB (sqlite/operations.ts's mark()), not a messages_in column — wait
+    // for that ack directly.
+    await waitFor(() => {
+      const row = getOutboundDb()
+        .prepare('SELECT status FROM processing_ack WHERE message_id = ?')
+        .get('m1') as { status: string } | undefined;
+      return row?.status === 'completed';
+    }, 2000);
+    controller.abort();
+
+    // The triggering batch was entirely a failure notice, so this error must
+    // not be written back — it would otherwise answer a notice with another.
+    expect(getUndeliveredMessages()).toHaveLength(0);
+
+    await loopPromise.catch(() => {});
+  });
+
+  it('records a task run\'s synchronous throw in the run log, since it always fails sendsFailureNotice', async () => {
+    // A pure task batch (no chat rows riding along), matching poll-loop.test.ts's
+    // TASK_ROUTING shape — taskRun requires every message be task-or-echo.
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, thread_id, content)
+         VALUES ('t1', 'task', datetime('now'), 'pending', 'system:tasks:ser-1', ?)`,
+      )
+      .run(JSON.stringify({ prompt: 'daily check' }));
+
+    const provider = new ThrowingProvider('provider SDK crashed mid-stream');
+    const controller = new AbortController();
+    const loopPromise = runPollLoopWithTimeout(provider as unknown as MockProvider, controller.signal, 2000);
+
+    // bun:sqlite's .get() returns null (not undefined) when nothing matches.
+    await waitFor(() => {
+      const row = getOutboundDb().prepare("SELECT content FROM messages_out WHERE kind = 'task_log'").get();
+      return row !== null;
+    }, 2000);
+    controller.abort();
+
+    // taskRun always fails sendsFailureNotice (its one door is the run log,
+    // not chat) — before the fix, a synchronous throw here (as opposed to
+    // the isError path, which already calls autoAppendTaskLog) left no
+    // trace anywhere persistent. getUndeliveredMessages() returns every
+    // outbound row regardless of kind (task_log rows are never meant to be
+    // "delivered" — the host reads them separately for the run log), so
+    // the no-chat-reply assertion has to filter to kind: 'chat' itself.
+    expect(getUndeliveredMessages().filter((m) => m.kind === 'chat')).toHaveLength(0);
+    const logRow = getOutboundDb().prepare("SELECT content FROM messages_out WHERE kind = 'task_log'").get() as {
+      content: string;
+    };
+    expect(JSON.parse(logRow.content).text).toContain('provider SDK crashed mid-stream');
+
+    await loopPromise.catch(() => {});
+  });
 });
 
 describe('poll loop — stale session recovery', () => {
