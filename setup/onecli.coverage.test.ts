@@ -514,6 +514,20 @@ describe('run() — default install mode', () => {
     expect(status.HEALTH_HINT).toBeUndefined();
   });
 
+  it('pipes the fetched installer script to an explicit /bin/sh, not a PATH-resolved bare "sh"', async () => {
+    // A bare `sh` at the end of a pipe is resolved via the shell's own PATH —
+    // a PATH entry ahead of /bin/sh could substitute a different
+    // interpreter for the fetched script. Named during #4059, closed here.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true }) as Response),
+    );
+    await runOnecli([]);
+    const installCall = cliState.execCalls.find((c) => c.includes('onecli.sh/install'))!;
+    expect(installCall).toBeDefined();
+    expect(installCall).toMatch(/\|\s*\/bin\/sh$/);
+  });
+
   it('reports a HEALTH_HINT when the freshly installed gateway does not answer within the poll window', async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
