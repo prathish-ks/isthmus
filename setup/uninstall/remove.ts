@@ -21,11 +21,30 @@ export interface ExecDeps {
   isRoot: boolean;
 }
 
+/** data/ holds the only keys that can ever make an orphaned volume's contents unreadable again. */
+function isDataGroupAction(action: RemovalAction): boolean {
+  return action.kind === 'backup-env' || (action.kind === 'delete-path' && action.fromDataGroup);
+}
+
 export function executePlan(actions: RemovalAction[], deps: ExecDeps): { notes: string[] } {
   const notes: string[] = [];
+  // Set when a rm-project-residue in this same run did not fully remove a
+  // project: deleting data/'s keys next would make that project's leftover
+  // volume permanently unreadable-but-undeletable-by-key, with no way back.
+  // Every other action keeps this file's general "log a note and continue"
+  // contract — only the data group is held back, and only by this.
+  let dataGroupBlocked = false;
   for (const action of actions) {
+    if (dataGroupBlocked && isDataGroupAction(action)) {
+      notes.push(
+        `${action.kind}: skipped — a Compose project above could not be fully removed, so data/ is being kept ` +
+          `intact until it is. Fix the issue noted above (or finish its manual command), then re-run the ` +
+          `uninstaller to remove data/ for real.`,
+      );
+      continue;
+    }
     try {
-      runAction(action, deps, notes);
+      if (runAction(action, deps, notes) === false) dataGroupBlocked = true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       notes.push(`${action.kind}: failed (${msg}) — re-run the uninstaller to retry.`);
@@ -55,7 +74,8 @@ export function backupEnv(envPath: string): string {
   return backup;
 }
 
-function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): void {
+/** False only for an rm-project-residue that did not fully remove a project — see isDataGroupAction. */
+function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): boolean {
   const { runCommand, log } = deps;
   switch (action.kind) {
     case 'unload-service':
@@ -139,13 +159,15 @@ function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): void
       const { runtime } = action;
       let volumes = 0;
       let networks = 0;
+      let allClean = true;
       for (const project of action.projects) {
-        // data/ (the keys) goes next either way; the note says how to finish.
-        const leftover = (what: string) =>
-          notes.push(
-            `Project ${project}: ${what}. Its keys in data/ are being deleted, so remove it too: ` +
-              projectCleanup(runtime, project),
-          );
+        // data/'s keys are kept back when this isn't fully clean — see
+        // executePlan's dataGroupBlocked — so the note points at the
+        // project directly rather than assuming data/ is already gone.
+        const leftover = (what: string) => {
+          allClean = false;
+          notes.push(`Project ${project}: ${what}. Remove it with: ` + projectCleanup(runtime, project));
+        };
         const found = listProject(runCommand, runtime, project);
         if (!found) {
           leftover(`not removed ('${runtime}' unavailable)`);
@@ -158,15 +180,21 @@ function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): void
         }
         for (const volume of found.volumes) {
           if (runCommand(runtime, ['volume', 'rm', volume]).status === 0) volumes++;
-          else notes.push(`Volume ${volume}: not removed (in use?) — retry with: ${runtime} volume rm ${volume}`);
+          else {
+            allClean = false;
+            notes.push(`Volume ${volume}: not removed (in use?) — retry with: ${runtime} volume rm ${volume}`);
+          }
         }
         for (const network of found.networks) {
           if (runCommand(runtime, ['network', 'rm', network]).status === 0) networks++;
-          else notes.push(`Network ${network}: not removed (in use?) — retry with: ${runtime} network rm ${network}`);
+          else {
+            allClean = false;
+            notes.push(`Network ${network}: not removed (in use?) — retry with: ${runtime} network rm ${network}`);
+          }
         }
       }
       if (volumes + networks > 0) log(`✓ removed ${volumes} data volume(s) and ${networks} network(s)`);
-      break;
+      return allClean;
     }
     case 'rm-ncl-symlink':
       fs.rmSync(action.linkPath, { force: true });
@@ -202,4 +230,5 @@ function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): void
       log(`✓ removed ${action.item.what}`);
       break;
   }
+  return true;
 }

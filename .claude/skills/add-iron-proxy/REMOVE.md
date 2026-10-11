@@ -14,13 +14,17 @@ is gateway-owned (`GATEWAY_ROLE`, see `docs/gateway-seam.md`): the update drain
 and the host's residue reaping leave it alone. The
 uninstaller does not read the role: it takes the Compose project of each
 container with this copy's install label, which is this copy's alone because the
-project name comes from the install slug. With the data group it then
-removes the project's containers, database volume and network, because the
-encryption keys it deletes from `data/` are the only way to read that database. The project is found through
-its containers: an install whose containers predate the labels gets them on its
-next setup run, and a volume whose containers were already removed (the command
-above, or an earlier service-only uninstall) is not found. In both cases the
-uninstaller leaves the volume and the next setup prints the exact removal commands.
+project name comes from the install slug — plus, since Compose stamps its own
+project label on everything it creates regardless of this fork's own labels,
+Iron Control's exact project name is also checked directly. With the data
+group it then removes the project's containers, database volume and network,
+because the encryption keys it deletes from `data/` are the only way to read
+that database. This finds the project even when its containers predate the
+labels, or when its database volume outlived its containers (the command
+above, or an earlier service-only uninstall) — and if it still can't be
+removed cleanly, `data/`'s keys are kept intact rather than deleted out from
+under it; re-run the uninstaller after fixing Docker (or finishing the
+printed manual command) to finish removing `data/` for real.
 
 The ordinary removal command above preserves Iron Control's database volume. To
 keep the data, back up that volume together with

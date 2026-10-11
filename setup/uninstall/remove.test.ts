@@ -57,7 +57,10 @@ describe('executePlan', () => {
     fs.mkdirSync(path.join(dir, 'nested'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'nested', 'f.txt'), 'x');
 
-    const { notes } = executePlan([{ kind: 'delete-path', item: { what: 'Data', where: dir, path: dir } }], deps());
+    const { notes } = executePlan(
+      [{ kind: 'delete-path', item: { what: 'Data', where: dir, path: dir }, fromDataGroup: true }],
+      deps(),
+    );
 
     expect(fs.existsSync(dir)).toBe(false);
     expect(notes).toEqual([]);
@@ -73,7 +76,7 @@ describe('executePlan', () => {
         unitPath: path.join(tempDir, 'svc.plist'),
         unitName: 'com.nanoclaw-v2-test',
       },
-      { kind: 'delete-path', item: { what: 'Logs', where: dir, path: dir } },
+      { kind: 'delete-path', item: { what: 'Logs', where: dir, path: dir }, fromDataGroup: false },
     ];
     const failing: RunCommand = () => {
       throw new Error('launchctl exploded');
@@ -270,7 +273,7 @@ describe('executePlan', () => {
       const calls: string[][] = [];
       const { notes } = executePlan([action], deps({ runCommand: docker(calls, (args) => args[0] === 'rm') }));
       expect(removals(calls)).toEqual([['rm', '-f', 'id1', 'id2']]);
-      expect(notes).toEqual([expect.stringContaining(`containers not removed. Its keys in data/ are being deleted`)]);
+      expect(notes).toEqual([expect.stringContaining(`containers not removed. Remove it with:`)]);
       expect(notes[0]).toContain(cleanup);
     });
 
@@ -305,6 +308,54 @@ describe('executePlan', () => {
       );
       expect(removals(calls)).toHaveLength(4);
       expect(lines).toEqual(['✓ removed 2 data volume(s) and 2 network(s)']);
+    });
+
+    it('keeps data/ intact when cleanup fails, but still removes the unrelated user group', () => {
+      const envPath = path.join(tempDir, '.env');
+      fs.writeFileSync(envPath, 'KEY=secret');
+      const dataDir = path.join(tempDir, 'data-dir');
+      fs.mkdirSync(dataDir);
+      const groupsDir = path.join(tempDir, 'groups-dir');
+      fs.mkdirSync(groupsDir);
+
+      const { notes } = executePlan(
+        [
+          action, // rm-project-residue; this fixture's docker fails every listing
+          { kind: 'backup-env', envPath },
+          { kind: 'delete-path', item: { what: 'Database', where: dataDir, path: dataDir }, fromDataGroup: true },
+          {
+            kind: 'delete-path',
+            item: { what: 'Agent memory', where: groupsDir, path: groupsDir },
+            fromDataGroup: false,
+          },
+        ],
+        deps({ runCommand: docker([], (args) => args[1] === 'ls') }),
+      );
+
+      // Neither the env backup nor the keys-bearing data/ item ran.
+      expect(fs.existsSync(envPath)).toBe(true);
+      expect(fs.existsSync(dataDir)).toBe(true);
+      // The user group is unrelated to the project's keys and still runs.
+      expect(fs.existsSync(groupsDir)).toBe(false);
+      expect(notes.some((n) => n.startsWith('backup-env: skipped'))).toBe(true);
+      expect(notes.some((n) => n.startsWith('delete-path: skipped'))).toBe(true);
+    });
+
+    it('still runs data/ deletion normally when project cleanup fully succeeds', () => {
+      const dataDir = path.join(tempDir, 'data-dir-ok');
+      fs.mkdirSync(dataDir);
+      const calls: string[][] = [];
+
+      const { notes } = executePlan(
+        [
+          action,
+          { kind: 'delete-path', item: { what: 'Database', where: dataDir, path: dataDir }, fromDataGroup: true },
+        ],
+        deps({ runCommand: docker(calls) }),
+      );
+
+      expect(fs.existsSync(dataDir)).toBe(false);
+      expect(notes).toEqual([]);
     });
   });
 });

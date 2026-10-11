@@ -210,6 +210,61 @@ describe('scanInstall compose projects', () => {
     ]);
   });
 
+  it("finds Iron Control's project directly, even when its containers predate the nanoclaw-install label", () => {
+    const slug = getInstallSlug(root);
+    fs.mkdirSync(path.join(root, 'data', 'session-materials', 'iron-control'), { recursive: true });
+    const project = `nanoclaw-iron-control-${slug}`;
+    const fake: Fake = {
+      // Owner left blank: a legacy install's containers carry no
+      // nanoclaw-install label at all, only Compose's own project label.
+      containers: { [`${project}-web-1`]: [project, ''], [`${project}-database-1`]: [project, ''] },
+      volumes: { [`${project}_database`]: project },
+      networks: { [project]: project },
+    };
+    const inv = scanInstall(deps({ runCommand: fakeDocker(fake) }));
+    expect(inv.projects).toEqual({
+      names: [project],
+      containers: [`${project}-web-1`, `${project}-database-1`],
+      volumes: [`${project}_database`],
+      networks: [project],
+    });
+    expect(inv.notes).toEqual([]);
+  });
+
+  it("still finds Iron Control's database volume and network after its containers were already removed (two-stage uninstall: service group removed first, data group removed on a later run)", () => {
+    const slug = getInstallSlug(root);
+    fs.mkdirSync(path.join(root, 'data', 'session-materials', 'iron-control'), { recursive: true });
+    const project = `nanoclaw-iron-control-${slug}`;
+    const fake: Fake = {
+      containers: {}, // an earlier uninstall run already removed them
+      volumes: { [`${project}_database`]: project },
+      networks: { [project]: project },
+    };
+    const inv = scanInstall(deps({ runCommand: fakeDocker(fake) }));
+    expect(inv.projects).toEqual({
+      names: [project],
+      containers: [],
+      volumes: [`${project}_database`],
+      networks: [project],
+    });
+    expect(inv.notes).toEqual([]);
+  });
+
+  it('never queries Docker for an Iron Control project when this copy never installed it', () => {
+    const calls: string[][] = [];
+    const empty: Fake = { containers: {}, volumes: {}, networks: {} };
+    const inv = scanInstall(
+      deps({
+        runCommand: (cmd, args) => {
+          calls.push(args);
+          return fakeDocker(empty)(cmd, args);
+        },
+      }),
+    );
+    expect(inv.projects).toBeUndefined();
+    expect(calls.some((args) => args.some((a) => a.includes('nanoclaw-iron-control-')))).toBe(false);
+  });
+
   it('notes how to find and remove the projects when docker is unavailable', () => {
     const inv = scanInstall(deps());
     expect(inv.projects).toBeUndefined();

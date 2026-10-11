@@ -146,13 +146,23 @@ describe('buildRemovalPlan compose projects', () => {
   });
 
   it('removes the project with the data group even when the service group is declined', () => {
-    const actions = buildRemovalPlan(inventory({ projects }), { service: false, data: true, user: false, onecliDelete: [] });
+    const actions = buildRemovalPlan(inventory({ projects }), {
+      service: false,
+      data: true,
+      user: false,
+      onecliDelete: [],
+    });
     expect(kinds(actions)).not.toContain('rm-containers');
     expect(kinds(actions).indexOf('rm-project-residue')).toBeLessThan(kinds(actions).indexOf('backup-env'));
   });
 
   it('keeps the volumes when the data group is declined', () => {
-    const actions = buildRemovalPlan(inventory({ projects }), { service: true, data: false, user: true, onecliDelete: [] });
+    const actions = buildRemovalPlan(inventory({ projects }), {
+      service: true,
+      data: false,
+      user: true,
+      onecliDelete: [],
+    });
     expect(kinds(actions)).not.toContain('rm-project-residue');
   });
 

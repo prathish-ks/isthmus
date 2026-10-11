@@ -77,7 +77,15 @@ export interface Inventory {
 }
 
 export interface ProjectInventory {
-  /** Compose project names, from the containers carrying this copy's install label. */
+  /**
+   * Compose project names — from the containers carrying this copy's
+   * install label, plus (when this copy ever installed Iron Control)
+   * its own deterministic project name, checked directly: Compose stamps
+   * its own project label on everything it creates regardless of this
+   * fork's own labels, so this also finds an install whose containers
+   * predate those labels, or whose database volume survived an earlier
+   * containers-only removal.
+   */
   names: string[];
   /** Container names; removed with the volumes even when the service group was declined. */
   containers: string[];
@@ -106,7 +114,7 @@ export function scanInstall(deps: ScanDeps): Inventory {
   const notes: string[] = [];
 
   const service = scanService(deps, slug, containerRuntime, notes);
-  const projects = scanProjects(runCommand, slug, containerRuntime, notes);
+  const projects = scanProjects(runCommand, projectRoot, slug, containerRuntime, notes);
 
   const data = existingItems(projectRoot, home, [
     { rel: 'data', what: 'Database & conversations' },
@@ -289,12 +297,43 @@ export function projectCleanup(runtime: string, project: string): string {
 }
 
 /**
- * The Compose projects of this copy's labeled containers. A gateway names its
- * project after the install slug, so the project is this copy's alone; a
- * project shared by two copies would be removed with this one.
+ * Iron Control's own project name, derived the same way `controlPaths()`
+ * does (`.claude/skills/add-iron-proxy/scripts/control.ts`) — duplicated as
+ * a literal rather than imported, the same deliberate layering choice this
+ * fork already makes elsewhere (e.g. `main.go` not importing
+ * `provider-contracts/registry.ts`): generic trunk uninstall code must not
+ * hard-depend on an optional, skill-installed module that may not exist in
+ * this checkout. Checked only when this copy ever installed Iron Control
+ * (its session-materials directory exists), so a copy that never ran
+ * `/add-iron-proxy` never queries Docker for a project it couldn't have.
+ */
+function ironControlProjectName(projectRoot: string, slug: string): string | undefined {
+  return fs.existsSync(path.join(projectRoot, 'data', 'session-materials', 'iron-control'))
+    ? `nanoclaw-iron-control-${slug}`
+    : undefined;
+}
+
+/**
+ * The Compose projects of this copy's labeled containers, plus — exact
+ * name, never a broad match — Iron Control's own deterministic project
+ * name. A gateway names its project after the install slug, so the project
+ * is this copy's alone; a project shared by two copies would be removed
+ * with this one.
+ *
+ * The label-derived names alone miss two real cases: an Iron Control
+ * install whose containers predate this fork's `nanoclaw-install` label
+ * (never recreated since), and a database volume that outlived its
+ * containers (the documented containers-only removal in
+ * `.claude/skills/add-iron-proxy/REMOVE.md`, or an earlier service-only
+ * uninstall of this same copy). Both are covered by checking Iron
+ * Control's deterministic name directly: Docker Compose stamps its own
+ * `com.docker.compose.project` label on every container, volume and
+ * network it creates, with or without this fork's own labels — so
+ * `listProject()`'s exact label filter finds them either way.
  */
 function scanProjects(
   runCommand: RunCommand,
+  projectRoot: string,
   slug: string,
   runtime: string,
   notes: string[],
@@ -315,8 +354,10 @@ function scanProjects(
     );
     return undefined;
   }
+  const ironControl = ironControlProjectName(projectRoot, slug);
+  const candidates = [...new Set([...names, ...(ironControl ? [ironControl] : [])])].sort();
   const found: ProjectInventory = { names: [], containers: [], volumes: [], networks: [] };
-  for (const project of [...new Set(names)].sort()) {
+  for (const project of candidates) {
     const listed = listProject(runCommand, runtime, project);
     if (!listed) {
       notes.push(
@@ -324,6 +365,10 @@ function scanProjects(
       );
       continue;
     }
+    // The deterministic candidate may name a project that was never
+    // actually created (Iron Control installed, then fully removed by
+    // hand) — nothing found for it is not a listing failure.
+    if (listed.containers.length === 0 && listed.volumes.length === 0 && listed.networks.length === 0) continue;
     found.names.push(project);
     found.containers.push(...listed.containers);
     found.volumes.push(...listed.volumes);
