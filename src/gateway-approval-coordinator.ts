@@ -171,10 +171,18 @@ async function resolveSessionProvider(request: GatewayApprovalRequest): Promise<
   return resolveProviderName(session?.agent_provider, containerConfig?.provider);
 }
 
-/** Exact domain or any subdomain of a declared model domain. */
-function isDefaultApprovedModelHost(host: string, providerName: string): boolean {
-  const domains = getProviderHostContract(providerName)?.modelDomains ?? [];
-  return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+/**
+ * Exact domain or any subdomain of a declared model domain, or an exact
+ * declared model authority (`host:port` — see `ProviderHostContract`'s own
+ * doc comment on `modelAuthorities`; it is never domain-suffix matched, since
+ * it names one operator-configured endpoint, not a domain family).
+ */
+export function isDefaultApprovedModelHost(host: string, providerName: string): boolean {
+  const contract = getProviderHostContract(providerName);
+  const domains = contract?.modelDomains ?? [];
+  if (domains.some((domain) => host === domain || host.endsWith(`.${domain}`))) return true;
+  const authorities = contract?.modelAuthorities ?? [];
+  return authorities.includes(host.toLowerCase());
 }
 
 async function decide(request: GatewayApprovalRequest): Promise<GatewayApprovalDecision> {
