@@ -305,15 +305,20 @@ it.each(compatibilityFixtures)('preserves OneCLI approval content: $name', async
   expect(await pending.result).toMatchObject({ action: 2 });
 });
 
-// `plaintextOrigins` (#3966) is documented as display-only — the proxy's own
-// forward() is the real admission gate for the local-model path, this bridge
-// only picks which scheme shows in the approval card's resource text. An
-// external review of a related change raised the concern that this contract
-// could silently become an (unintended) enforcement point, or could be
-// mistaken for one — these tests make the actual behavior explicit: an
-// authority NOT in plaintextOrigins still reaches the human-approval
-// decision (held, not auto-rejected); only the displayed scheme changes.
-describe('plaintextOrigins — display-only, not an admission gate', () => {
+// `plaintextOrigins` (#3966) drives safeRequest()'s scheme selection, which
+// in turn feeds an origin-consistency check against `request.url` — and
+// `request.url` is main.go's own safeRequest() output: the REAL request's
+// full absolute URL (scheme and host included), never a bare path. A test
+// fixture that passes a relative path instead masks this: a relative path
+// always inherits the computed `base`'s scheme, so the check trivially
+// passes regardless of whether the authority is declared. These tests use
+// the real absolute-URL shape, matching what Go actually sends, so they
+// exercise the real divergence: a declared authority's scheme matches its
+// own absolute URL (held for approval); an undeclared authority's forced
+// 'https' scheme does NOT match its real (plain http) absolute URL, so the
+// origin check itself rejects it here — a second, independent layer behind
+// main.go's own `local_model_ports` enforcement in forward().
+describe('plaintextOrigins — scheme selection feeds a real origin check', () => {
   let localRoot: string;
   let localBridge: IronProxyApprovalBridge;
   let localClient: TransformClient;
@@ -357,34 +362,37 @@ describe('plaintextOrigins — display-only, not an admission gate', () => {
     fs.rmSync(localRoot, { recursive: true, force: true });
   });
 
+  // Absolute URL, exactly what Go's own safeRequest() sends
+  // (http.Request.URL.String() for a plain-HTTP forward-proxy request) —
+  // not a relative path.
   function localTransform(host: string): Promise<{ action: number }> {
     return new Promise((resolve, reject) => {
       localClient.transformRequest(
-        { request: { method: 'POST', host, url: '/v1/chat/completions' } },
+        { request: { method: 'POST', host, url: `http://${host}/v1/chat/completions` } },
         metadata(),
         (error, response) => (error ? reject(error) : resolve(response)),
       );
     });
   }
 
-  it('holds (does not reject) an authority not in plaintextOrigins — main.go is the real gate', async () => {
-    const pending = localTransform('host.docker.internal:9999');
-    await vi.waitFor(() => expect(localHeld.size).toBe(1));
-    const decision = [...localHeld.values()][0];
-    // Undeclared, so the display scheme falls back to https — but the
-    // request still reached the human-approval decision; it was not denied.
-    expect(decision.request.audit).toMatchObject({ host: 'host.docker.internal:9999' });
-    expect(decision.request.summary?.resource).toContain('host.docker.internal:9999');
-    decision.resolve('approve');
-    expect(await pending).toMatchObject({ action: 1 });
-  });
-
-  it('holds a declared authority the same way — plaintextOrigins only changes the displayed scheme', async () => {
+  it('holds a declared authority for human approval (real absolute-URL shape)', async () => {
     const pending = localTransform('host.docker.internal:11434');
     await vi.waitFor(() => expect(localHeld.size).toBe(1));
     const decision = [...localHeld.values()][0];
     expect(decision.request.audit).toMatchObject({ host: 'host.docker.internal:11434' });
     decision.resolve('approve');
     expect(await pending).toMatchObject({ action: 1 });
+  });
+
+  it('rejects an undeclared authority outright (real absolute-URL shape) — never reaches the decide() callback', async () => {
+    // Undeclared, so safeRequest() picks 'https' for base — but the real
+    // request is plain http://, so url.origin !== base.origin and the
+    // request is rejected before ever being held for a human decision.
+    // (In production this path is moot — main.go's local_model_ports check
+    // already denies an undeclared port before it reaches this bridge at
+    // all — but this proves the bridge fails closed on its own too.)
+    const result = await localTransform('host.docker.internal:9999');
+    expect(result).toMatchObject({ action: 2 });
+    expect(localHeld.size).toBe(0);
   });
 });

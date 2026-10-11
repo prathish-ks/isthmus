@@ -47,3 +47,20 @@ export function localModelOrigins(
     })
     .sort();
 }
+
+/**
+ * Just the ports out of `localModelOrigins()` — what `main.go`'s `forward()`
+ * actually enforces (via `ironFrontConfig()`'s `local_model_ports` field).
+ * The admission decision is made in Go, not here: this module computes the
+ * declared set, Go is the one process that decides whether a given request
+ * matches it. (`plaintextOrigins`, consumed by the approval bridge, is a
+ * second, independent check on the same set — not the primary gate.)
+ */
+export function localModelPorts(
+  settings: { port: number; approvalPort?: number },
+  contracts: readonly Pick<ProviderHostContract, 'modelAuthorities'>[] = listProviderHostContracts(),
+): number[] {
+  return [...new Set(localModelOrigins(settings, contracts).map((authority) => Number(authority.split(':')[1])))].sort(
+    (a, b) => a - b,
+  );
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { LOCAL_MODEL_HOST, localModelOrigins } from './iron-proxy-local-model.js';
+import { LOCAL_MODEL_HOST, localModelOrigins, localModelPorts } from './iron-proxy-local-model.js';
 
 const SETTINGS = { port: 8080 };
 
@@ -47,5 +47,33 @@ describe('localModelOrigins', () => {
 
   it('returns nothing when no provider declares a local authority', () => {
     expect(localModelOrigins(SETTINGS, [{}, { modelAuthorities: [] }])).toEqual([]);
+  });
+});
+
+// This is what ironFrontConfig() actually writes to front.json's
+// local_model_ports — main.go's forward() real admission gate (PR #76
+// review finding: the port list main.go enforces, not just the display
+// scheme localModelOrigins()/plaintextOrigins feed to the approval bridge).
+describe('localModelPorts', () => {
+  it('extracts just the port number from each admitted authority', () => {
+    expect(localModelPorts(SETTINGS, [{ modelAuthorities: [`${LOCAL_MODEL_HOST}:11434`] }])).toEqual([11434]);
+  });
+
+  it('dedupes and sorts numerically across multiple providers', () => {
+    const ports = localModelPorts(SETTINGS, [
+      { modelAuthorities: [`${LOCAL_MODEL_HOST}:11435`, `${LOCAL_MODEL_HOST}:9000`] },
+      { modelAuthorities: [`${LOCAL_MODEL_HOST}:11435`] },
+    ]);
+    expect(ports).toEqual([9000, 11435]);
+  });
+
+  it('excludes the same ports localModelOrigins excludes (default/self)', () => {
+    expect(
+      localModelPorts({ port: 8080 }, [{ modelAuthorities: [`${LOCAL_MODEL_HOST}:80`, `${LOCAL_MODEL_HOST}:8080`] }]),
+    ).toEqual([]);
+  });
+
+  it('returns nothing when no provider declares a local authority', () => {
+    expect(localModelPorts(SETTINGS, [{}, { modelAuthorities: [] }])).toEqual([]);
   });
 });

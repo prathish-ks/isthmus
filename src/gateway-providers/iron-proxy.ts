@@ -15,7 +15,7 @@ import { log } from '../log.js';
 
 import { IronProxyApprovalBridge, type IronApprovalIdentity } from './iron-proxy-approval.js';
 import { readAllowedHostsFile } from './iron-proxy-allowlist.js';
-import { localModelOrigins } from './iron-proxy-local-model.js';
+import { localModelOrigins, localModelPorts } from './iron-proxy-local-model.js';
 import {
   registerGatewayProvider,
   type GatewayContribution,
@@ -217,6 +217,12 @@ export function ironFrontConfig(settings: IronProxySettings): string {
         allowed_hosts: [
           ...new Set([settings.modelHost, ...providerModelAllowedHosts(), ...readAllowedHosts(settings)]),
         ].sort(),
+        // The real admission gate for the keyless local-model path (#3966):
+        // forward() only forwards a host.docker.internal request on a port
+        // in this list. Computed here (not read back from an approval-side
+        // mechanism) so the enforcement lives in the one process that
+        // actually decides whether to forward the request.
+        local_model_ports: localModelPorts(settings),
         approval_target: settings.approvalPort
           ? `host.docker.internal:${settings.approvalPort}`
           : `unix://${APPROVAL_SOCKET}`,

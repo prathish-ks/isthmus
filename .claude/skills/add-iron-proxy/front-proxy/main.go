@@ -41,17 +41,23 @@ import (
 )
 
 type config struct {
-	Listen         string   `json:"listen"`
-	Backend        string   `json:"backend"`
-	CACert         string   `json:"ca_cert"`
-	CAKey          string   `json:"ca_key"`
-	IdentityKey    string   `json:"identity_key"`
-	AllowedHosts   []string `json:"allowed_hosts"`
-	ApprovalTarget string   `json:"approval_target"`
-	ApprovalCert   string   `json:"approval_cert"`
-	ApprovalKey    string   `json:"approval_key"`
-	SummaryCommand string   `json:"summary_command"`
-	TimeoutMS      int      `json:"timeout_ms"`
+	Listen       string   `json:"listen"`
+	Backend      string   `json:"backend"`
+	CACert       string   `json:"ca_cert"`
+	CAKey        string   `json:"ca_key"`
+	IdentityKey  string   `json:"identity_key"`
+	AllowedHosts []string `json:"allowed_hosts"`
+	// Declared keyless local-model ports (#3966) — the only ports forward()
+	// will ever admit on the local-model path. Not derived from
+	// AllowedHosts: a local-model request is never checked against that
+	// list at all (see allowed()'s own carve-out), so this is the one place
+	// the declared set is actually enforced.
+	LocalModelPorts []int  `json:"local_model_ports"`
+	ApprovalTarget  string `json:"approval_target"`
+	ApprovalCert    string `json:"approval_cert"`
+	ApprovalKey     string `json:"approval_key"`
+	SummaryCommand  string `json:"summary_command"`
+	TimeoutMS       int    `json:"timeout_ms"`
 }
 
 type gateway struct {
@@ -244,6 +250,22 @@ func (g *gateway) localModelPortRefused(port int) bool {
 	return false
 }
 
+// localModelPortDeclared reports whether port is one a provider actually
+// declared via modelAuthorities (ironFrontConfig's local_model_ports). This
+// is the real admission gate for the keyless local-model path — a request
+// for host.docker.internal is never checked against AllowedHosts at all
+// (see allowed()'s own carve-out below), so without this check ANY
+// non-default, non-self port on that host would be forwarded, not just the
+// ones a provider actually declared.
+func (g *gateway) localModelPortDeclared(port int) bool {
+	for _, p := range g.cfg.LocalModelPorts {
+		if p == port {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *gateway) allowed(host string) bool {
 	host = strings.ToLower(host)
 	if host == localModelHost {
@@ -367,15 +389,16 @@ func (g *gateway) forward(r *http.Request, identity, tunnel string) *http.Respon
 		return deny(r, 403)
 	}
 	// A keyless local model (#3966): host.docker.internal only, plain HTTP,
-	// no CONNECT tunnel, an explicit non-default port that also isn't this
-	// process's own listen or approval port (an empty, :80, or self port is
-	// ambiguous or a self-SSRF and refused rather than guessed or trusted —
-	// see localModelPortRefused), and an OpenAI-shaped inference route —
-	// never admitted via the normal allowed_hosts check.
+	// no CONNECT tunnel, a port a provider actually declared via
+	// modelAuthorities (localModelPortDeclared — not just "any non-default
+	// port", and not this process's own listen/approval port either, a
+	// self-SSRF localModelPortRefused still catches as a second check), and
+	// an OpenAI-shaped inference route — never admitted via the normal
+	// allowed_hosts check.
 	local := r.URL.Scheme == "http" && tunnel == "" && strings.EqualFold(r.URL.Hostname(), localModelHost)
 	if local {
 		port, ok := parsePort(r.URL.Port())
-		if !ok || port == 80 || g.localModelPortRefused(port) {
+		if !ok || port == 80 || !g.localModelPortDeclared(port) || g.localModelPortRefused(port) {
 			return deny(r, 403)
 		}
 	}

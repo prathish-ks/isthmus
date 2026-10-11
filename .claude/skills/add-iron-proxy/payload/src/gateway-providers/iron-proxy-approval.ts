@@ -46,8 +46,14 @@ export interface IronApprovalBridgeSettings {
   tls?: { address: string; ca: string; cert: string; key: string };
   /**
    * Exact `host:port` pairs the front forwards over plain HTTP — a keyless
-   * local model (#3966), never a public destination. Scheme selection only;
-   * `main.go`'s own `forward()` is the actual admission gate for these.
+   * local model (#3966), never a public destination. `main.go`'s own
+   * `forward()` is the primary admission gate for these (it denies an
+   * undeclared port — one not in its own `local_model_ports`, derived from
+   * this same list — before a request ever reaches this bridge). This list
+   * also drives `safeRequest()`'s scheme selection below, which doubles as
+   * a second, independent check: a real (absolute-URL) request for a port
+   * NOT in this list fails the origin-consistency check and is rejected
+   * here too, even if it somehow reached this bridge.
    */
   plaintextOrigins?: readonly string[];
 }
@@ -78,9 +84,16 @@ function safeRequest(
   const host = (request?.host ?? '').slice(0, 253);
   if (!host || /[\0\r\n]/.test(host)) return undefined;
   try {
-    // Scheme here is display-only (the approval summary's `resource` text);
-    // the proxy's own forward() already decided whether this specific
-    // request was actually allowed over plain HTTP.
+    // `request.url` is what main.go's own safeRequest() sends: the real
+    // request's full absolute URL (Go's http.Request.URL.String(), scheme
+    // and host included), never a bare path. That matters here: for a
+    // host:port NOT in plaintextOrigins, scheme is forced to 'https', so an
+    // incoming request that is actually plain http:// (as every real
+    // local-model request is) fails this origin check and is rejected — a
+    // second, independent check behind main.go's own `local_model_ports`
+    // enforcement, not merely cosmetic. A test fixture that passes a
+    // relative `request.url` masks this: it inherits `base`'s scheme
+    // either way and can't exercise the real divergence.
     const scheme = plaintextOrigins.includes(host.toLowerCase()) ? 'http' : 'https';
     const base = new URL(`${scheme}://${host}`);
     const url = new URL(request?.url || '/', base);
