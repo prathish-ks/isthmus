@@ -6,9 +6,9 @@ between "TypeScript's chosen shape" and "this kernel's own types" sits, how a
 future upstream break is meant to be caught and handled, and the version-range
 strategy this project follows. Companion to `docs/compatibility-matrix.md`
 (P9-09, the per-component Stable/Preview/Unsupported table) and
-`go-host/docs/ADR-035-v2.4.0-pin-promotion-closure.md` (the dated review
-this document's claims are current as of, superseding
-`ADR-017-p9-07-upstream-overlap-review.md`'s v2.3.0-era one).
+`go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md` (the dated
+review this document's claims are current as of, superseding
+`ADR-035-v2.4.0-pin-promotion-closure.md`'s v2.4.0-era one).
 
 ## 1. What this kernel actually consumes from upstream
 
@@ -38,9 +38,12 @@ citations, not a replacement for them.
 contracts while §4's pin still read `v2.3.0` — the gap between "the kernel's
 Go code already consumes the new shape" (`feat/gateway-provider-seam`/
 `feat/mount-gateway-trust-class`, both merged) and "the pin itself has
-moved" (`docs/promotion-v2.4.0.md`'s Workstream G4). That gap is closed as
-of this pin move: §4 and `docs/upstream-pin.json` now read `v2.4.0`, matching
-the code these rows already described.
+moved" (`docs/promotion-v2.4.0.md`'s Workstream G4). That gap closed with
+the v2.4.0 pin move (2026-09-27): §4 and `docs/upstream-pin.json` then
+read `v2.4.0`, matching the code these rows already described. The pin
+has since moved again, to `v2026.10.0` (`docs/promotion-v2026.10.0.md`) —
+§4 reads that now; this note stays as the historical record of the
+original gap and its closure, not a claim about the current pin.
 
 ## 2. The adapter boundary, precisely
 
@@ -149,7 +152,7 @@ change warranting its own ADR before being retrofitted onto this doc.
 ## 4. Version-range strategy
 
 - **Upstream NanoClaw**: pinned to exactly one tagged release at a time
-  (`docs/baseline.md`, `docs/upstream-pin.json`), currently `v2.4.0`. No
+  (`docs/baseline.md`, `docs/upstream-pin.json`), currently `v2026.10.0`. No
   attempt to support a range of upstream versions simultaneously — see §3.
 - **Go toolchain**: `go-host/go.mod` requires `go 1.25.0`. Bumping this is a
   normal dependency-maintenance change, unrelated to upstream NanoClaw's own

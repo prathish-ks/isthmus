@@ -4,19 +4,30 @@ Recorded: 2026-08-29 (workspace pinned this date)
 
 ## Stable Baseline (pin for reproducible development)
 
-**Updated 2026-09-27** — pin promoted from v2.3.0 to v2.4.0. See
-`docs/promotion-v2.4.0.md` for the full promotion record and
-`go-host/docs/ADR-035-v2.4.0-pin-promotion-closure.md` for the closing
-review superseding `ADR-017-p9-07-upstream-overlap-review.md`'s v2.3.0-era
-one. The v2.3.0 entry below is preserved as history, not deleted, per
-this project's own established practice of recording pin history honestly
-rather than overwriting it.
+**Updated 2026-10-11** — pin promoted from v2.4.0 to v2026.10.0. See
+`docs/promotion-v2026.10.0.md` for the full promotion record and
+`go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md` for the closing
+review superseding `ADR-035-v2.4.0-pin-promotion-closure.md`'s v2.4.0-era
+one. The v2.4.0 and v2.3.0 entries below are preserved as history, not
+deleted, per this project's own established practice of recording pin
+history honestly rather than overwriting it.
+
+- **NanoClaw version**: v2026.10.0
+- **Commit SHA**: `7203e00dc271cc2ea9ea84bb130731b8ca00319e`
+- **Tag object**: annotated tag, SHA `36092f6852a163d29d9bcb2591db2a84e46c35a8` (dereferences to the commit above); verified live against `github.com/nanocoai/nanoclaw` immediately before this commit, matching the SHA captured at this promotion's Step 0 exactly — no drift
+- **Release date**: 09 Oct 2026 (per the tag's own tagger date)
+- **Working branch at the time of this pin move**: `main` (`prathish-ks/isthmus`) — the promotion landed via [PR #73](https://github.com/prathish-ks/isthmus/pull/73) (the 91-commit/83-PR upstream range: implementation, Steps 1-3, the 7-PR tail) and [PR #76](https://github.com/prathish-ks/isthmus/pull/76) (Step 7's live Iron Proxy cutover/rollback test, the three "must close or accept-and-document" items fixed outright, and two rounds of independent/external security review findings closed), both merged, both with real GitHub Actions CI evidence (`ci` check run `success` on each PR's final commit — `dfee5d21` and `367ee4dd` respectively, verified directly via the check-runs API)
+
+<details>
+<summary>v2.4.0 (superseded 2026-10-11, kept for history)</summary>
 
 - **NanoClaw version**: v2.4.0
 - **Commit SHA**: `143db6c907c652773a536c7c9e96269fdad0a4a4`
-- **Tag object**: annotated tag, SHA `58c5ede4737e7c3c2487a80d9beeab9409cf4f80` (dereferences to the commit above); verified live against `github.com/nanocoai/nanoclaw` at promotion time, matching the SHA captured at this promotion's Step 0 exactly — no drift
+- **Tag object**: annotated tag, SHA `58c5ede4737e7c3c2487a80d9beeab9409cf4f80` (dereferences to the commit above); verified live against `github.com/nanocoai/nanoclaw` at promotion time, matching the SHA captured at that promotion's Step 0 exactly — no drift
 - **Release date**: 23 Sep 2026 (per the tag's own tagger date)
-- **Working branch at the time of this pin move**: `main` (`prathish-ks/isthmus`) — the promotion landed via [PR #51](https://github.com/prathish-ks/isthmus/pull/51) (kernel capability) and [PR #52](https://github.com/prathish-ks/isthmus/pull/52) (gateway bypass closure), both merged, both with real GitHub Actions CI evidence (`ci` check run `success` on each PR's final commit)
+- **Working branch**: `main` (`prathish-ks/isthmus`) — the promotion landed via [PR #51](https://github.com/prathish-ks/isthmus/pull/51) (kernel capability) and [PR #52](https://github.com/prathish-ks/isthmus/pull/52) (gateway bypass closure), both merged, both with real GitHub Actions CI evidence (`ci` check run `success` on each PR's final commit)
+
+</details>
 
 <details>
 <summary>v2.3.0 (superseded 2026-09-27, kept for history)</summary>

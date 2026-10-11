@@ -1,15 +1,26 @@
 # nanocoai/nanoclaw v2026.10.0 Promotion — Living Plan
 
-Status: **Steps 0–7 now genuinely done** (Step 6's wiring-registry/ADR-028
-check still needs a real run; Step 7's live acceptance test is recorded in
-`docs/promotion-v2026.10.0-rollback-iron-proxy.md`). PR `#73` merged with CI
-green. The three "must close or accept-and-document" items (`#3908`,
-`#4039`, `#3966`) are fixed, not just documented. **Step 8 re-validated**:
-the tag SHA is unchanged and `upstream/main` is still exactly one trivial
-commit ahead (`#4066`), same as Step 0 recorded — nothing new to
-reclassify. **Step 9 (the pin-move PR) has not started.** This document is
-the source of truth for where the promotion actually stands; update it in
-place as each remaining piece lands — don't let the chat history that
+Status: **Promotion closed — Steps 0–10, the full eleven-step process,
+all genuinely done.** PR `#73` (implementation) and PR `#76` (follow-ups:
+the three "must close" items fixed, Step 7's live test, two rounds of
+independent/external security review) both merged with CI green. Step
+6's wiring-registry/ADR-028 check was run for real at Step 9's closing
+review (`13 entries OK`). Step 8 re-validated twice: the tag SHA is
+unchanged both times; `upstream/main` had moved from "one trivial commit
+ahead" to 4 commits/2 PRs ahead by the second check — recorded honestly
+in `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md` and
+`docs/upstream-watch-log.md`, confirmed out of scope (both are past the
+tag), not silently reconciled. **Step 9's pin-move landed**:
+`docs/upstream-pin.json`, `docs/baseline.md`, and the closing ADR are
+updated together. **Step 10's retrospective is also done**, not just
+implied by Step 9 closing: checked against `docs/design-laws.md`'s bar
+for a new law (none warranted), with a dated 2026-10-11 annotation added
+under LAW-09's section instead — these are two distinct steps, and an
+earlier version of this document's status line conflated them, which an
+external review of PR `#77` (the pin-move PR) correctly caught. This
+document is the source of truth for where the promotion actually stood
+at each point; update it in place if that ever changes — don't let the
+chat history that
 produced it become the only record, and don't let a status line get ahead
 of what was actually checked.
 
@@ -401,7 +412,7 @@ needs a live test), not just a bucket of "deferred":
     small fix, not security-critical (runs on the operator's own
     machine during setup).
 
-## Open before Step 8/9 — all closed
+## Open before Step 8/9/10 — all closed
 
 1. **Real CI evidence** — done. `#73`'s required `ci` gate shows
    `completed`/`success` on `dfee5d21` (the commit carrying the semgrep
@@ -424,13 +435,30 @@ needs a live test), not just a bucket of "deferred":
    unset-`ONECLI_VERSION` guard), `#3966` (Iron Proxy keyless local HTTP
    model support, with its own security review recorded in that
    commit's message).
-4. **Step 8 re-validation** — done. Tag SHA unchanged
-   (`7203e00dc271cc2ea9ea84bb130731b8ca00319e`); `upstream/main` is still
-   exactly one trivial commit ahead (`#4066`, a dependency bump), the
-   same single commit Step 0 already recorded and excluded — nothing new
-   to reclassify.
-5. **Step 9's pin-move PR** — not prepared yet; follows now that 1–4
-   above are closed.
+4. **Step 8 re-validation** — done, twice. First pass (2026-10-10): tag
+   SHA unchanged; `upstream/main` one trivial commit ahead (`#4066`).
+   Second pass, at Step 9's own closing review (2026-10-11): tag SHA
+   still unchanged, but `upstream/main` had moved further —
+   **4 commits / 2 PRs** ahead (`#4066` plus a newly-landed `#4069`,
+   a Claude Code/Agent SDK/Codex version-pin bump). Both commits sit
+   *past* the `v2026.10.0` tag — out of this promotion's scope by
+   definition, the same way `#4066` alone already was. Recorded
+   honestly in `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md`
+   and a new `docs/upstream-watch-log.md` entry, not quietly folded in.
+5. **Step 9's pin-move PR** — done.
+   `docs/upstream-pin.json` + `docs/baseline.md`'s Stable Baseline
+   section + `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md`
+   + the compatibility docs + the current-pin reference sweep
+   (`README.md`, `go-host/README.md`, `docs/quickstart.md`) all updated
+   together. Step 6's wiring-registry/ADR-028 check (left open above)
+   was run for real as part of this closing step: `13 entries OK`.
+6. **Step 10's retrospective** — done, as its own distinct step, not
+   folded silently into Step 9's "done." Checked against
+   `docs/design-laws.md`'s bar for a new law; none warranted — a dated
+   2026-10-11 annotation added under LAW-09's section instead (a
+   cross-subsystem reinforcement of LAW-07's existing reading, found in
+   `#3966`'s Iron Proxy admission path by two different reviewers in the
+   same promotion; no playbook or skill change follows).
 
 ## Changelog
 
@@ -452,3 +480,37 @@ needs a live test), not just a bucket of "deferred":
   which also caught and fixed a second real bug in `#3948`'s own fix),
   Step 8 re-validated (tag unchanged, upstream/main still one trivial
   commit ahead). Step 9's pin-move PR is the only remaining step.
+- 2026-10-11 (same day, continued) — PR `#76` merged (follow-ups); CI
+  confirmed green. Two rounds of review closed real findings in that
+  PR's own code: an independent review found and fixed 7 issues
+  (`#3966`'s self-SSRF guard computed in TS but never enforced in Go, a
+  `host.docker.internal` allowlist regression, a zero-padded-port bypass,
+  a silently-dropped task-run error, and three reuse cleanups); an
+  external PR review then found and fixed two more — the `#4039`
+  ONECLI_VERSION guard checking one variable while the actual command
+  re-stated a different one, and `#3966`'s admission gate still not
+  actually enforcing *which* ports were declared (closed by threading
+  `local_model_ports` into `main.go` and enforcing it in `forward()`
+  before the approval bridge, the real primary gate). Full detail in
+  `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md`.
+- 2026-10-11 (same day, continued) — Step 9 closed. Wiring-registry/
+  ADR-028 check run for real (`13 entries OK`). Step 8 re-validated a
+  second time: tag unchanged, but `upstream/main` had moved to 4
+  commits/2 PRs ahead (`#4066`, `#4069`) — recorded, confirmed out of
+  scope, not reclassified. Pin moved: `docs/upstream-pin.json`,
+  `docs/baseline.md`, `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md`,
+  the compatibility docs, and the current-pin reference sweep all landed
+  together. **Promotion closed — no step remains open.**
+- 2026-10-11 (same day, continued) — **Correction**, caught by an
+  external review of PR `#77` (the pin-move PR itself): the line above
+  was premature. Step 10 (the playbook's own required retrospective
+  against `docs/design-laws.md`) had not actually been done — closing
+  Step 9 is not the same step as Step 10, and the prior entry's "no step
+  remains open" conflated them. Also caught by the same review:
+  `go-host/docs/ADR-036-v2026.10.0-pin-promotion-closure.md` described
+  the `upstream-watch` job as weekly; `.github/workflows/ci.yml`'s
+  actual schedule is daily (`cron: "0 13 * * *"`) — fixed. Step 10 is
+  now actually done: checked against `docs/design-laws.md`'s bar for a
+  new law (none warranted), a dated 2026-10-11 annotation added under
+  LAW-09's section instead. **Promotion now genuinely closed, Steps
+  0–10 — this time including the step that was previously only implied.**
