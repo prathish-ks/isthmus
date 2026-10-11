@@ -2,10 +2,20 @@
 
 Status: living document, established 2026-09-03 (Phase 9, P9-09). Current as
 of the pinned baseline in `docs/upstream-pin.json` (nanocoai/nanoclaw
-`v2.4.0`) and `ADR-035-v2.4.0-pin-promotion-closure.md`'s closing review
-(supersedes `ADR-017-p9-07-upstream-overlap-review.md`'s v2.3.0-era one).
-Companion to `version-compatibility.md` (P9-08 — the adapter-boundary/
-deprecation mechanics this matrix is the current snapshot of).
+`v2026.10.0`) and `ADR-036-v2026.10.0-pin-promotion-closure.md`'s closing
+review (supersedes `ADR-035-v2.4.0-pin-promotion-closure.md`'s v2.4.0-era
+one). Companion to `version-compatibility.md` (P9-08 — the
+adapter-boundary/deprecation mechanics this matrix is the current snapshot
+of).
+
+**2026-10-11**: the pin moved to `v2026.10.0` (83 PRs across the full
+`v2.4.0`→`v2026.10.0` upstream range — see
+`docs/promotion-v2026.10.0.md`). No row below changes rating: Step 1's
+consumed-contracts re-check found 7 of 8 rows clean and one break
+(`#4061`'s CLI-restart guard falsy-bypass) closed in the same range, not
+a new gap in this matrix's own contracts. The keyless-local-HTTP-model
+work (`#3966`, Iron Proxy) is a new provider capability, not a change to
+any row's own rated contract.
 
 **2026-09-27**: the pin moved to `v2.4.0`. The "Gateway-trust /
 multi-container isolation" rows below, implemented and tested on
