@@ -155,8 +155,14 @@ function installOnecli(): { stdout: string; gatewayStdout: string; ok: boolean }
   // Gateway install (docker-compose based, no rate-limit concerns).
   // The script runs in a shell, so fetch it over HTTPS only: a scheme-less URL
   // makes curl use plain HTTP, and --proto-redir blocks a redirect downgrade.
+  // Piped to /bin/sh explicitly, not a bare "sh" — a bare command name is
+  // resolved via the shell's own PATH, so a PATH entry ahead of /bin/sh
+  // (attacker-controlled or just a misconfigured operator PATH) could
+  // substitute a different interpreter for the fetched installer script.
+  // Named during #4059's port, closed here (docs/promotion-v2026.10.0.md's
+  // "Named deferred follow-ups").
   const gw = runInstall(
-    `export ONECLI_VERSION=${ONECLI_GATEWAY_VERSION} && curl --proto '=https' --proto-redir '=https' -fsSL https://onecli.sh/install | sh`,
+    `export ONECLI_VERSION=${ONECLI_GATEWAY_VERSION} && curl --proto '=https' --proto-redir '=https' -fsSL https://onecli.sh/install | /bin/sh`,
   );
   stdout += gw.stdout;
   if (!gw.ok) {
