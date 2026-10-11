@@ -67,9 +67,8 @@ const {
   startGatewayApprovalCoordinator,
   stopGatewayApprovalCoordinator,
 } = await import('./gateway-approval-coordinator.js');
-const { registerProviderHostContract, resetProviderHostContractForTesting } = await import(
-  './provider-contracts/registry.js'
-);
+const { registerProviderHostContract, resetProviderHostContractForTesting } =
+  await import('./provider-contracts/registry.js');
 
 const TEST_DIR = '/tmp/nanoclaw-test-gateway-approvals-cov';
 const DM_CHANNEL = 'slack';
