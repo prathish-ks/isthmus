@@ -467,6 +467,34 @@ describe('error result with no <message> envelope', () => {
     expect(pushes).toHaveLength(1);
     expect(pushes[0]).toContain('was not delivered');
   });
+
+  it('stamps the failure-notice marker on a delivered error, so a reply to it can be suppressed', async () => {
+    const budgetText = 'Spending limit reached. Add your own key at https://example.com/keys';
+    const { query } = makeResultQuery({ type: 'result', text: budgetText, isError: true });
+
+    await processQuery(query, ERR_ROUTING, ['m1'], 'claude', undefined, 'prompt', undefined);
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).failureNotice).toBe(true);
+  });
+
+  it('never answers a failure notice with another (#3908)', async () => {
+    const budgetText = 'Spending limit reached. Add your own key at https://example.com/keys';
+    const { query } = makeResultQuery({ type: 'result', text: budgetText, isError: true });
+
+    await processQuery(
+      query,
+      { ...ERR_ROUTING, failureNoticeWake: true },
+      ['m1'],
+      'claude',
+      undefined,
+      'prompt',
+      undefined,
+    );
+
+    expect(getUndeliveredMessages()).toHaveLength(0);
+  });
 });
 
 // --- Task-run turn wiring: the REAL processQuery path (one-door) ---

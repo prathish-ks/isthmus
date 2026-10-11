@@ -44,6 +44,18 @@ export interface IronApprovalBridgeSettings {
   maxPending: number;
   protoPath?: string;
   tls?: { address: string; ca: string; cert: string; key: string };
+  /**
+   * Exact `host:port` pairs the front forwards over plain HTTP — a keyless
+   * local model (#3966), never a public destination. `main.go`'s own
+   * `forward()` is the primary admission gate for these (it denies an
+   * undeclared port — one not in its own `local_model_ports`, derived from
+   * this same list — before a request ever reaches this bridge). This list
+   * also drives `safeRequest()`'s scheme selection below, which doubles as
+   * a second, independent check: a real (absolute-URL) request for a port
+   * NOT in this list fails the origin-consistency check and is rejected
+   * here too, even if it somehow reached this bridge.
+   */
+  plaintextOrigins?: readonly string[];
 }
 
 interface PendingTransform {
@@ -65,13 +77,25 @@ function metadataIdentity(metadata: grpc.Metadata): string | undefined {
 
 function safeRequest(
   request: TransformRequest | undefined,
+  plaintextOrigins: readonly string[],
 ): { method: string; host: string; path: string } | undefined {
   const method = request?.method?.toUpperCase() ?? '';
   if (!/^[A-Z]{1,16}$/.test(method)) return undefined;
   const host = (request?.host ?? '').slice(0, 253);
   if (!host || /[\0\r\n]/.test(host)) return undefined;
   try {
-    const base = new URL(`https://${host}`);
+    // `request.url` is what main.go's own safeRequest() sends: the real
+    // request's full absolute URL (Go's http.Request.URL.String(), scheme
+    // and host included), never a bare path. That matters here: for a
+    // host:port NOT in plaintextOrigins, scheme is forced to 'https', so an
+    // incoming request that is actually plain http:// (as every real
+    // local-model request is) fails this origin check and is rejected — a
+    // second, independent check behind main.go's own `local_model_ports`
+    // enforcement, not merely cosmetic. A test fixture that passes a
+    // relative `request.url` masks this: it inherits `base`'s scheme
+    // either way and can't exercise the real divergence.
+    const scheme = plaintextOrigins.includes(host.toLowerCase()) ? 'http' : 'https';
+    const base = new URL(`${scheme}://${host}`);
     const url = new URL(request?.url || '/', base);
     if (url.origin !== base.origin || url.username || url.password || base.username || base.password) return undefined;
     const requestPath = url.pathname.slice(0, 240) || '/';
@@ -226,7 +250,7 @@ export class IronProxyApprovalBridge {
     const identity = runtimeIdentity ? this.resolveIdentity(runtimeIdentity) : undefined;
     if (!runtimeIdentity || !identity) return rejection('Unknown workload identity');
 
-    const request = safeRequest(call.request.request);
+    const request = safeRequest(call.request.request, this.settings.plaintextOrigins ?? []);
     if (!request) return rejection('Invalid request metadata');
     // Iron uses a synthetic CONNECT before MITM. The inner HTTP request is the
     // only approval point; Iron itself closes non-HTTP/TLS tunnel payloads.

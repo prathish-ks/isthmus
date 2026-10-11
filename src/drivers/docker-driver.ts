@@ -26,10 +26,10 @@ import { KernelClient, KernelError, type KernelClientLike } from '../kernel/clie
 import { realCli, validateRuntimeName, type Cli, type SupervisedProcess } from './cli.js';
 import { JsonDocumentStream } from './json-stream.js';
 import {
-  GATEWAY_ROLE,
   LABELS,
   asFailureError,
   deniedByPolicy,
+  parseNonGatewayRows,
   specInvalid,
   validateSpec,
   type ContainerSpec,
@@ -341,13 +341,7 @@ export class DockerSessionDriver implements SessionDriver {
         '--format',
         `{{.Names}}|{{.Label "${LABELS.role}"}}`,
       ]);
-      const stale = out
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.split('|'))
-        .filter(([, role]) => role !== GATEWAY_ROLE)
-        .map(([name]) => name);
+      const stale = parseNonGatewayRows(out).map(([name]) => name);
       for (const name of stale) {
         try {
           this.#cli.run(['rm', '--force', validateRuntimeName(name, 'container')]);
@@ -374,12 +368,8 @@ export class DockerSessionDriver implements SessionDriver {
         '--format',
         `{{.Names}}|{{.Label "${LABELS.session}"}}|{{.Label "${LABELS.role}"}}`,
       ]);
-      const preSeam = out
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.split('|'))
-        .filter(([, sessionId, role]) => !sessionId && role !== GATEWAY_ROLE)
+      const preSeam = parseNonGatewayRows(out)
+        .filter(([, sessionId]) => !sessionId)
         .map(([name]) => name);
       for (const name of preSeam) {
         try {

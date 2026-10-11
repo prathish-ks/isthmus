@@ -51,6 +51,15 @@ func (b *fixtureBridge) TransformResponse(c context.Context, r *pb.TransformResp
 	return &pb.TransformResponseResponse{Action: pb.TransformAction_TRANSFORM_ACTION_CONTINUE}, nil
 }
 func fixture(t *testing.T, b *fixtureBridge, handler http.Handler) (*gateway, *httptest.Server) {
+	return fixtureWithConfig(t, b, handler, config{})
+}
+
+// fixtureWithConfig is fixture with caller-supplied overrides merged in —
+// only non-zero fields on extra (e.g. Listen, ApprovalTarget) replace
+// fixture's own defaults. Used by tests exercising localModelPortRefused,
+// which needs a real Listen/ApprovalTarget to check a local-model request
+// against.
+func fixtureWithConfig(t *testing.T, b *fixtureBridge, handler http.Handler, extra config) (*gateway, *httptest.Server) {
 	t.Helper()
 	dir := t.TempDir()
 	key, e := rsa.GenerateKey(rand.Reader, 2048)
@@ -72,7 +81,26 @@ func fixture(t *testing.T, b *fixtureBridge, handler http.Handler) (*gateway, *h
 	os.WriteFile(helper, []byte("#!/bin/sh\ncat >/dev/null\nprintf '{}'\n"), 0700)
 	backend := httptest.NewServer(handler)
 	t.Cleanup(backend.Close)
-	g, e := newGateway(config{Backend: backend.URL, CACert: cert, CAKey: priv, IdentityKey: identity, AllowedHosts: []string{"api.example.test"}, SummaryCommand: helper, TimeoutMS: 2000}, b)
+	cfg := config{
+		Backend:         backend.URL,
+		CACert:          cert,
+		CAKey:           priv,
+		IdentityKey:     identity,
+		AllowedHosts:    []string{"api.example.test"},
+		LocalModelPorts: []int{11434},
+		SummaryCommand:  helper,
+		TimeoutMS:       2000,
+	}
+	if extra.Listen != "" {
+		cfg.Listen = extra.Listen
+	}
+	if extra.ApprovalTarget != "" {
+		cfg.ApprovalTarget = extra.ApprovalTarget
+	}
+	if extra.LocalModelPorts != nil {
+		cfg.LocalModelPorts = extra.LocalModelPorts
+	}
+	g, e := newGateway(cfg, b)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -654,4 +682,130 @@ func mustURL(raw string) *url.URL {
 		panic(e)
 	}
 	return u
+}
+
+// localModelRequest builds a request targeting host.docker.internal the
+// way forward()'s local-model branch expects: URL and Host set together
+// (authority() rejects a mismatch), proxy-authenticated.
+func localModelRequest(g *gateway, method, hostport, path string) *http.Request {
+	r := httptest.NewRequest(method, "http://"+hostport+path, nil)
+	r.URL, _ = url.Parse("http://" + hostport + path)
+	r.Host = hostport
+	r.Header.Set("Proxy-Authorization", auth(g, "session-A"))
+	return r
+}
+
+// A keyless local model (#3966) is admitted only through this narrower
+// rule, never the normal AllowedHosts check — host.docker.internal isn't
+// in AllowedHosts at all here, confirming that.
+func TestLocalModelPlainHTTPForwardedWhenAllowedHostsAndOpenAIShaped(t *testing.T) {
+	var gotPath string
+	g, _ := fixture(t, &fixtureBridge{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(200)
+	}))
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, localModelRequest(g, "POST", "host.docker.internal:11434", "/v1/chat/completions"))
+	if w.Code != 200 {
+		t.Fatalf("status=%d, want 200 (local OpenAI-shaped request should forward)", w.Code)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("backend saw path %q", gotPath)
+	}
+}
+
+func TestLocalModelRejections(t *testing.T) {
+	g, _ := fixture(t, &fixtureBridge{}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("rejected local-model request reached backend")
+	}))
+	for _, name := range []string{"default-port-empty", "default-port-80", "default-port-zero-padded", "non-openai-path", "connect-tunnel"} {
+		t.Run(name, func(t *testing.T) {
+			var r *http.Request
+			switch name {
+			case "default-port-empty":
+				r = localModelRequest(g, "POST", "host.docker.internal", "/v1/chat/completions")
+			case "default-port-80":
+				r = localModelRequest(g, "POST", "host.docker.internal:80", "/v1/chat/completions")
+			case "default-port-zero-padded":
+				// url.URL.Port() never normalizes leading zeros — "080" must
+				// still be read as port 80, not as some other, distinct
+				// non-default port (the string-equality bug this guards).
+				r = localModelRequest(g, "POST", "host.docker.internal:080", "/v1/chat/completions")
+			case "non-openai-path":
+				r = localModelRequest(g, "POST", "host.docker.internal:11434", "/admin/shutdown")
+			case "connect-tunnel":
+				r = httptest.NewRequest("CONNECT", "/", nil)
+				r.Host = "host.docker.internal:11434"
+				r.Header.Set("Proxy-Authorization", auth(g, "session-A"))
+			}
+			w := httptest.NewRecorder()
+			g.ServeHTTP(w, r)
+			if w.Code < 400 {
+				t.Fatalf("accepted %s (status=%d)", name, w.Code)
+			}
+		})
+	}
+}
+
+// A local-model request aimed at this same process's own listen port must
+// be refused — otherwise a provider's modelAuthorities entry could point
+// "the local model" at Iron's own management surface instead of an actual
+// model server (a self-SSRF). This is the enforcement side of that guard:
+// gatewayPorts()/localModelOrigins() (TS) only ever affects an approval
+// card's display text, so this check has to live here, in forward() itself.
+func TestLocalModelRejectsOwnListenPort(t *testing.T) {
+	// Declare port 9443 too (not just set it as Listen) — otherwise
+	// localModelPortDeclared would already deny the request on its own,
+	// and this test would stop actually exercising localModelPortRefused's
+	// self-SSRF check at all.
+	g, _ := fixtureWithConfig(t, &fixtureBridge{}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("self-SSRF local-model request reached backend")
+	}), config{Listen: ":9443", LocalModelPorts: []int{9443}})
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, localModelRequest(g, "POST", "host.docker.internal:9443", "/v1/chat/completions"))
+	if w.Code < 400 {
+		t.Fatalf("accepted a local-model request aimed at Iron's own listen port (status=%d)", w.Code)
+	}
+}
+
+// localModelPortDeclared (the PR #76 review's #1 finding) is the real
+// admission gate: forward() must forward a declared port and deny an
+// undeclared one, even when neither is port 80/empty/self. Both cases use
+// the SAME host:port shape as production (an OpenAI-shaped plain-HTTP
+// request with an explicit port) — the only variable is declaration.
+func TestLocalModelPortDeclaration(t *testing.T) {
+	t.Run("declared port is forwarded", func(t *testing.T) {
+		var reached bool
+		g, _ := fixtureWithConfig(t, &fixtureBridge{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reached = true
+			w.WriteHeader(200)
+		}), config{LocalModelPorts: []int{11434}})
+		w := httptest.NewRecorder()
+		g.ServeHTTP(w, localModelRequest(g, "POST", "host.docker.internal:11434", "/v1/chat/completions"))
+		if w.Code != 200 || !reached {
+			t.Fatalf("declared port 11434 was not forwarded (status=%d, reached=%v)", w.Code, reached)
+		}
+	})
+
+	t.Run("undeclared port is denied before reaching the backend or the approval bridge", func(t *testing.T) {
+		approveCalled := false
+		g, _ := fixtureWithConfig(t, &fixtureBridge{
+			request: func(context.Context, *pb.TransformRequestRequest) (*pb.TransformRequestResponse, error) {
+				approveCalled = true
+				return &pb.TransformRequestResponse{Action: pb.TransformAction_TRANSFORM_ACTION_CONTINUE}, nil
+			},
+		}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Error("undeclared-port request reached backend")
+		}), config{LocalModelPorts: []int{11434}})
+		w := httptest.NewRecorder()
+		// Same host, same OpenAI-shaped path, same scheme — only the port
+		// (9999, never declared) differs from the case above.
+		g.ServeHTTP(w, localModelRequest(g, "POST", "host.docker.internal:9999", "/v1/chat/completions"))
+		if w.Code < 400 {
+			t.Fatalf("accepted an undeclared local-model port (status=%d)", w.Code)
+		}
+		if approveCalled {
+			t.Fatal("undeclared port reached the approval bridge — forward() must deny it first")
+		}
+	})
 }

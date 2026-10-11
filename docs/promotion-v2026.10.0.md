@@ -1,16 +1,17 @@
 # nanocoai/nanoclaw v2026.10.0 Promotion — Living Plan
 
-Status: **Steps 0–6 done in substance and in the playbook's required
-artifact form (Step 6's wiring-registry/ADR-028 check still needs a real
-run). Step 7 (migration continuity) has not actually been done for this
-promotion — an earlier version of this document claimed Steps 0–7 were
-complete; that was wrong, caught during an external review of PR #73 (see
-"External review findings" below), and is corrected here.** Steps 8–9
-have not started. This document is the source of truth for where the
-promotion actually stands; update it in place as each remaining piece
-lands — don't let the chat history that produced it become the only
-record, and don't let a status line get ahead of what was actually
-checked.
+Status: **Steps 0–7 now genuinely done** (Step 6's wiring-registry/ADR-028
+check still needs a real run; Step 7's live acceptance test is recorded in
+`docs/promotion-v2026.10.0-rollback-iron-proxy.md`). PR `#73` merged with CI
+green. The three "must close or accept-and-document" items (`#3908`,
+`#4039`, `#3966`) are fixed, not just documented. **Step 8 re-validated**:
+the tag SHA is unchanged and `upstream/main` is still exactly one trivial
+commit ahead (`#4066`), same as Step 0 recorded — nothing new to
+reclassify. **Step 9 (the pin-move PR) has not started.** This document is
+the source of truth for where the promotion actually stands; update it in
+place as each remaining piece lands — don't let the chat history that
+produced it become the only record, and don't let a status line get ahead
+of what was actually checked.
 
 Companion to `go-host/docs/upstream-promotion-playbook.md` (the
 version-agnostic procedure this document is an instance of),
@@ -349,35 +350,36 @@ document, none silently dropped. Each now carries an explicit
 disposition for the Step 9 gate (fix before pin / accept-and-document /
 needs a live test), not just a bucket of "deferred":
 
-- **Must close or explicitly accept-and-document before Step 9** (real
-  operational or security-relevant gaps upstream's own release already
-  closed):
-  - `#3908` — A2A failure-notice loops. `poll-loop.ts` still uses
-    `deliverErrorResult()` with no suppression; upstream's own incident
-    (428 notices in 12 minutes) is a believable failure mode on this
-    fork too. Needs either a narrow suppression mechanism (preserving
-    this fork's own routing architecture, not upstream's `queuedTurns`
-    rewrite) or an explicit, dated risk-acceptance note.
-  - `#4039` — OneCLI upgrade guide has no executable version-validation
-    guard (manual env-var substitution only); an empty/unset pin could
-    silently resolve to `:latest`. Low severity (a doc/guide gap, not a
-    runtime enforcement path) and a small fix — no real reason to leave
-    this open past Step 9.
-  - `#3966` — Iron Proxy keyless local HTTP model. User-approved
-    adopting this (`docs/promotion-prep-notes.md`'s "Decisions from the
-    user" §2) but never implemented. This inconsistency (approved ≠
-    shipped) needs resolving one way before claiming parity: implement
-    it for real feature parity (needs its own security review — it
-    changes Iron's trust boundary), or explicitly keep this fork's
-    stricter TLS-only rule and document the divergence. Either is fine;
-    leaving it ambiguous is not.
-- **Needs Step 7's live evidence, not further architectural reasoning**:
-  - `#3948` — gateway survival through update cutover/rollback. See the
-    External review findings section above: the architectural argument
-    is real (`drainContainers` cannot force-stop anything), but
-    unproven by a live test. A real Step 7 pass for this tag should
-    include an Iron Proxy + active-session cutover/rollback scenario,
-    not just a code read.
+- **Closed, not deferred** (were "must close or accept-and-document
+  before Step 9"; all fixed for real rather than documented as an
+  accepted gap):
+  - `#3908` — A2A failure-notice loops. Fixed: a `failureNotice` marker
+    on the outbound content, checked before `deliverErrorResult`'s own
+    write and the outer-catch error writer, container-side only —
+    matches upstream's real shipped shape (`FAILURE_NOTICE_FIELD`,
+    `failureNoticeWake`, `sendsFailureNotice`), not upstream's bundled
+    `queuedTurns` rewrite.
+  - `#4039` — OneCLI upgrade guide now refuses to run with
+    `ONECLI_VERSION` unset, via a `: "${ONECLI_VERSION:?...}"` guard
+    baked into each of the three copy-paste command blocks.
+  - `#3966` — Iron Proxy keyless local HTTP model. Implemented: a new
+    `modelAuthorities` provider-contract field, `iron-proxy-local-model.ts`'s
+    origin filtering (local host, non-default port, no collision with
+    Iron's own management ports), and `main.go` changes admitting the
+    local-model path only through a narrow rule (plain HTTP, no CONNECT
+    tunnel, explicit non-default port, OpenAI-shaped route) — never
+    through the normal allowed-hosts check. Security review recorded in
+    the commit message (redirect-based SSRF, authority spoofing, DNS
+    rebinding all checked and found not applicable; the one accepted
+    tradeoff — cleartext on this one hop — matches an existing
+    credentialed precedent, not a new risk).
+  - `#3948` — gateway survival through update cutover/rollback. Fixed
+    (`drainContainers`'s missing gateway-role exclusion) and proven with
+    a live Iron Proxy cutover/rollback test, not just the architectural
+    read the external review flagged as insufficient — see
+    `docs/promotion-v2026.10.0-rollback-iron-proxy.md`. That same live
+    test caught a second real bug in the first fix attempt (a
+    `docker ps -q`/`--format` incompatibility), also fixed.
 - **Large, separate efforts — reasonable to defer past this promotion,
   tracked with an owner**:
   - `#3883` — Iron Control database cleanup on uninstall. 799 lines
@@ -399,28 +401,36 @@ needs a live test), not just a bucket of "deferred":
     small fix, not security-critical (runs on the operator's own
     machine during setup).
 
-## Open before Step 8/9
+## Open before Step 8/9 — all closed
 
-Still outstanding before the pin can move — sharpened per the external
-review above, not just "CI + re-validation":
-
-1. **Real CI evidence.** Now exists for this PR (`#73`'s own CI run) —
-   confirm the required `ci` gate (not `semgrep`, which is report-only
-   and already addressed above) is green before treating this as closed.
-2. **Step 7, actually done.** A concrete, executable migration-
-   continuity acceptance test for this tag, with a recorded rollback
-   artifact — including the live Iron Proxy cutover/rollback scenario
-   `#3948` needs. Not yet started.
-3. **The three "must close or accept-and-document" items** (`#3908`,
-   `#4039`, `#3966`) — either fixed, or each given an explicit, dated
-   risk-acceptance note naming the user-visible difference and the
-   security implication. Ask the user how much of this to do now versus
-   name as Step-9-blocking follow-ups with an owner.
-4. **Step 8 re-validation itself** — re-run Step 2's classification
-   against the tag's actual current state and re-confirm the tag SHA
-   hasn't moved, immediately before any pin-move PR.
-5. **Step 9's pin-move PR** — not prepared yet; follows once 1–4 above
-   are closed.
+1. **Real CI evidence** — done. `#73`'s required `ci` gate shows
+   `completed`/`success` on `dfee5d21` (the commit carrying the semgrep
+   fix and the stale Iron-Proxy-comment correction from the external
+   re-review); `ci`'s own script requires `performance-gate` among its
+   dependencies to succeed, so that gate passed too.
+2. **Step 7, actually done** — done. Live acceptance test recorded in
+   `docs/promotion-v2026.10.0-rollback-iron-proxy.md`: a real running
+   Iron Proxy gateway container survived a real cutover and rollback
+   untouched (same container identity throughout), `#3948`'s
+   `drainContainers` fix was reproduced failing pre-fix and passing
+   post-fix live (and caught a second, real bug in that same fix —
+   `docker ps -q`/`--format` incompatibility — that the mocked unit
+   tests couldn't have caught), and a genuine mid-cutover infrastructure
+   interruption was recovered via `rollbackUpdate` without data loss.
+3. **The three "must close or accept-and-document" items** — done, all
+   three fixed (not deferred to a risk-acceptance note):
+   `#3908` (A2A failure-notice reply-loop suppression, container-side,
+   matching upstream's real shape), `#4039` (OneCLI upgrade guide's
+   unset-`ONECLI_VERSION` guard), `#3966` (Iron Proxy keyless local HTTP
+   model support, with its own security review recorded in that
+   commit's message).
+4. **Step 8 re-validation** — done. Tag SHA unchanged
+   (`7203e00dc271cc2ea9ea84bb130731b8ca00319e`); `upstream/main` is still
+   exactly one trivial commit ahead (`#4066`, a dependency bump), the
+   same single commit Step 0 already recorded and excluded — nothing new
+   to reclassify.
+5. **Step 9's pin-move PR** — not prepared yet; follows now that 1–4
+   above are closed.
 
 ## Changelog
 
@@ -435,3 +445,10 @@ review above, not just "CI + re-validation":
   named two previously-untracked gaps along the way (`#3920`'s opencode/
   codex halves, `#3966`'s approved-but-unimplemented status). Only real
   CI evidence and Step 8's final re-validation remain before Step 9.
+- 2026-10-11 — PR `#73` merged; CI confirmed green. All items in "Open
+  before Step 8/9" closed for real: `#3908`/`#4039`/`#3966` fixed
+  (not accept-and-documented), Step 7's live Iron Proxy
+  cutover/rollback test done (`docs/promotion-v2026.10.0-rollback-iron-proxy.md`,
+  which also caught and fixed a second real bug in `#3948`'s own fix),
+  Step 8 re-validated (tag unchanged, upstream/main still one trivial
+  commit ahead). Step 9's pin-move PR is the only remaining step.

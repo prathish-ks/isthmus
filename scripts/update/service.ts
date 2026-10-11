@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { getInstallSlug, getRuntimeSocketDir } from '../../src/install-slug.js';
+import { LABELS, parseNonGatewayRows } from '../../src/drivers/types.js';
 
 export interface CommandRunner {
   run(command: string, args: string[], cwd?: string): string;
@@ -341,14 +342,35 @@ export async function drainContainers(
   timeoutMs = 300_000,
 ): Promise<void> {
   const runtime = process.env.CONTAINER_RUNTIME ?? 'docker';
-  const label = `nanoclaw-install=${getInstallSlug(projectRoot)}`;
+  const label = `${LABELS.install}=${getInstallSlug(projectRoot)}`;
   const started = Date.now();
   while (true) {
-    const listed = env.runner.tryRun(runtime, ['ps', '-q', '--filter', `label=${label}`]);
+    // `docker ps` has no native "label != value" filter, so the gateway
+    // exclusion is a post-filter here — parseNonGatewayRows, shared with
+    // reapResidue's own gateway-role exclusion (src/drivers/docker-driver.ts):
+    // Iron Proxy's central container carries this same install label and is
+    // long-running by design (`--restart unless-stopped`), so draining must
+    // never wait on it — a cutover or rollback that did would hang the full
+    // timeout and fail every time Iron Proxy is installed.
+    // `-q` and `--format` cannot be combined — docker silently drops the
+    // format and falls back to bare IDs with a warning ("Ignoring custom
+    // format, because both --format and --quiet are set"), which would
+    // make every container's role read as undefined and defeat the
+    // exclusion below. `--format '{{.ID}}|...}'` already includes the ID.
+    const listed = env.runner.tryRun(runtime, [
+      'ps',
+      '--filter',
+      `label=${label}`,
+      '--format',
+      `{{.ID}}|{{.Label "${LABELS.role}"}}`,
+    ]);
     if (!listed.ok) throw new Error(`Cannot inspect active NanoClaw containers with ${runtime}`);
-    if (!listed.stdout) return;
+    const stillRunning = parseNonGatewayRows(listed.stdout);
+    if (stillRunning.length === 0) return;
     if (Date.now() - started >= timeoutMs) {
-      throw new Error(`Timed out waiting for active NanoClaw containers: ${listed.stdout.split('\n').join(', ')}`);
+      throw new Error(
+        `Timed out waiting for active NanoClaw containers: ${stillRunning.map(([id]) => id).join(', ')}`,
+      );
     }
     await env.sleep(1_000);
   }

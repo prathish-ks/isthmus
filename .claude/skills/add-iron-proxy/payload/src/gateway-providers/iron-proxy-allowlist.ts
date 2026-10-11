@@ -6,6 +6,11 @@ import fs from 'node:fs';
 
 const HOST = /^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
+// Mirrors iron-proxy-local-model.ts's LOCAL_MODEL_HOST — duplicated as a
+// literal, not imported, because this file must stay NanoClaw-import-free
+// (see the file-top note: setup loads it before the provider is installed).
+const LOCAL_MODEL_HOST = 'host.docker.internal';
+
 function bareHost(candidate: string): string {
   const host = candidate.trim().toLowerCase();
   return HOST.test(host) ? host : '';
@@ -18,6 +23,14 @@ function useBare(host: string): string {
 /** Why an entry cannot be an allowed host, with the fix, or null when it can. */
 export function allowedHostProblem(raw: string): string | null {
   const host = raw.trim().toLowerCase();
+  // host.docker.internal is reserved for the keyless local-model path
+  // (main.go's allowed() refuses it unconditionally, before even
+  // consulting this allowlist) — accepting it here would silently never
+  // actually work, 403-ing every request at the front proxy with nothing
+  // in this file's own validation to explain why.
+  if (host === LOCAL_MODEL_HOST) {
+    return 'host.docker.internal is reserved for the local-model path and is never reachable via the normal allowlist';
+  }
   if (HOST.test(host)) return null;
   if (!host) return 'the entry is empty; remove it';
   if (host.includes('://')) {

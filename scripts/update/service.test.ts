@@ -292,15 +292,47 @@ describe('liveness probes: running / stopped / probe failed', () => {
 });
 
 describe('drain and health gates', () => {
+  const roleFormat = '{{.ID}}|{{.Label "nanoclaw-role"}}';
+
   it('filters active containers by this install slug', async () => {
     const root = temp();
     const label = `nanoclaw-install=${slug(root)}`;
+    const key = `docker ps --filter label=${label} --format ${roleFormat}`;
     const { env, calls } = makeEnv('linux', {
-      [`docker ps -q --filter label=${label}`]: { ok: true, stdout: '' },
+      [key]: { ok: true, stdout: '' },
     });
 
     await drainContainers(root, env);
-    expect(calls).toEqual([`docker ps -q --filter label=${label}`]);
+    expect(calls).toEqual([key]);
+  });
+
+  it('never waits on a gateway-role container (#3948) — returns immediately', async () => {
+    const root = temp();
+    const label = `nanoclaw-install=${slug(root)}`;
+    const key = `docker ps --filter label=${label} --format ${roleFormat}`;
+    const { env } = makeEnv('linux', {
+      [key]: { ok: true, stdout: 'abc123|gateway' },
+    });
+
+    // No non-gateway containers present — must return without ever sleeping
+    // (a sleep that never resolves would hang this test past its timeout).
+    await drainContainers(root, env, 5_000);
+  });
+
+  it('still waits for (and times out on) a real non-gateway container', async () => {
+    const root = temp();
+    const label = `nanoclaw-install=${slug(root)}`;
+    const key = `docker ps --filter label=${label} --format ${roleFormat}`;
+    let sleeps = 0;
+    const { env } = makeEnv('linux', {
+      [key]: { ok: true, stdout: 'def456|agent' },
+    });
+    env.sleep = async () => {
+      sleeps += 1;
+    };
+
+    await expect(drainContainers(root, env, 10)).rejects.toThrow('Timed out waiting for active NanoClaw containers');
+    expect(sleeps).toBeGreaterThan(0);
   });
 
   it('requires active process state, the ncl socket, and a successful CLI probe', async () => {

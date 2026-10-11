@@ -84,6 +84,18 @@ describe('Iron Proxy allowed-hosts file', () => {
     roots.push(root);
     expect(readAllowedHosts(root)).toEqual([]);
   });
+
+  it('rejects a bare host.docker.internal as reserved for the local-model path', () => {
+    // Unlike host.docker.internal:<port> (rejected above as a port suffix),
+    // the bare host passes the plain-hostname check — without this guard it
+    // would be accepted into allowed_hosts even though main.go's allowed()
+    // refuses that exact host unconditionally, so it could never actually
+    // forward a request.
+    const { hosts, warnings } = readWithWarnings(['api.example.com', 'host.docker.internal']);
+    expect(hosts).toEqual(['api.example.com']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('reserved for the local-model path');
+  });
 });
 
 describe('adding an allowed host', () => {
@@ -93,6 +105,10 @@ describe('adding an allowed host', () => {
     );
     expect(() => validateAllowedHost('https://x.example.com/path')).toThrow('use the bare host name "x.example.com"');
     expect(() => validateAllowedHost('')).toThrow('the entry is empty');
+  });
+
+  it('rejects a bare host.docker.internal', () => {
+    expect(() => validateAllowedHost('host.docker.internal')).toThrow('reserved for the local-model path');
   });
 
   it('normalizes a valid host and keeps wildcards', () => {

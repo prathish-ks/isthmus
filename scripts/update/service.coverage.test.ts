@@ -341,11 +341,13 @@ describe('startService branch coverage', () => {
 });
 
 describe('drainContainers branch coverage', () => {
+  const roleFormat = '{{.ID}}|{{.Label "nanoclaw-role"}}';
+
   it('throws when the runtime cannot be inspected', async () => {
     const root = temp();
     const label = `nanoclaw-install=${slug(root)}`;
     const { env } = makeEnv('linux', {
-      [`docker ps -q --filter label=${label}`]: { ok: false },
+      [`docker ps --filter label=${label} --format ${roleFormat}`]: { ok: false },
     });
     await expect(drainContainers(root, env)).rejects.toThrow('Cannot inspect active NanoClaw containers');
   });
@@ -354,7 +356,7 @@ describe('drainContainers branch coverage', () => {
     const root = temp();
     const label = `nanoclaw-install=${slug(root)}`;
     const { env } = makeEnv('linux', {
-      [`docker ps -q --filter label=${label}`]: { ok: true, stdout: '9999' },
+      [`docker ps --filter label=${label} --format ${roleFormat}`]: { ok: true, stdout: '9999|agent' },
     });
     await expect(drainContainers(root, env, 0)).rejects.toThrow(
       'Timed out waiting for active NanoClaw containers: 9999',
