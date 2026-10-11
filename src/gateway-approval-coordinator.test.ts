@@ -62,10 +62,14 @@ vi.mock('./config.js', async () => {
 const {
   GATEWAY_APPROVAL_ACTION,
   editCardExpired,
+  isDefaultApprovedModelHost,
   resolveGatewayApproval,
   startGatewayApprovalCoordinator,
   stopGatewayApprovalCoordinator,
 } = await import('./gateway-approval-coordinator.js');
+const { registerProviderHostContract, resetProviderHostContractForTesting } = await import(
+  './provider-contracts/registry.js'
+);
 
 const TEST_DIR = '/tmp/nanoclaw-test-gateway-approvals-cov';
 const DM_CHANNEL = 'slack';
@@ -689,5 +693,36 @@ describe('card question rendering', () => {
   it('ignores an empty summary and falls back to the method line', async () => {
     const q = await questionFor({ ...makeRequest(), summary: { details: [] } } as ApprovalRequest);
     expect(q).toBe('*Agent:* Group One\n_POST api.example.com/v1/send_');
+  });
+});
+
+// `#3964`'s core gap: ProviderHostContract.modelAuthorities is a declared
+// field (added alongside the #3966 keyless local-model work), but nothing
+// upstream of this check ever consulted it — a provider could declare an
+// authority and have `decide()`'s auto-approve path silently ignore it. A
+// declared-but-unenforced field is exactly the shape this project's own
+// LAW-07 discipline treats as a gap, even with no live caller yet.
+describe('isDefaultApprovedModelHost', () => {
+  const FIXTURE = 'model-authority-fixture';
+
+  afterEach(() => {
+    resetProviderHostContractForTesting(FIXTURE);
+  });
+
+  it.each([
+    ['models.example.test:8000', true],
+    ['MODELS.EXAMPLE.TEST:8000', true],
+    ['models.example.test:8001', false],
+    ['models.example.test', false],
+    ['sub.models.example.test:8000', false],
+  ])('matches only the exact declared model authority: %s', (host, expected) => {
+    registerProviderHostContract(FIXTURE, { seamVersion: 1, modelAuthorities: ['models.example.test:8000'] });
+    expect(isDefaultApprovedModelHost(host, FIXTURE)).toBe(expected);
+  });
+
+  it('still matches a declared model domain when no authority is declared', () => {
+    registerProviderHostContract(FIXTURE, { seamVersion: 1, modelDomains: ['api.example.com'] });
+    expect(isDefaultApprovedModelHost('sub.api.example.com', FIXTURE)).toBe(true);
+    expect(isDefaultApprovedModelHost('other.test', FIXTURE)).toBe(false);
   });
 });
