@@ -23,6 +23,7 @@ import type { ApprovalRequest } from '@onecli-sh/sdk';
 import { getDb } from './db/connection.js';
 import { initTestDb, closeDb, runMigrations } from './db/index.js';
 import { createAgentGroup } from './db/agent-groups.js';
+import { ensureContainerConfig } from './db/container-configs.js';
 import { createMessagingGroup } from './db/messaging-groups.js';
 import {
   createPendingApproval,
@@ -32,6 +33,8 @@ import {
   transitionPendingApprovalStatus,
 } from './db/sessions.js';
 import type { ChannelDeliveryAdapter } from './delivery.js';
+import { resetGatewayProvider } from './gateway-providers/index.js';
+import type { GatewayApprovalDecision, GatewayApprovalRequest } from './gateway-providers/gateway-provider-registry.js';
 import { log } from './log.js';
 import type { PendingApproval } from './types.js';
 import { upsertUser } from './modules/permissions/db/users.js';
@@ -723,5 +726,87 @@ describe('isDefaultApprovedModelHost', () => {
     registerProviderHostContract(FIXTURE, { seamVersion: 1, modelDomains: ['api.example.com'] });
     expect(isDefaultApprovedModelHost('sub.api.example.com', FIXTURE)).toBe(true);
     expect(isDefaultApprovedModelHost('other.test', FIXTURE)).toBe(false);
+  });
+});
+
+// Coordinator-level coverage for the same gap: isDefaultApprovedModelHost is
+// only a helper — the actual security-sensitive enforcement is decide()'s own
+// trigger check (only 'default' ever auto-approves; 'policy' always keeps a
+// card, whatever the destination is). OneCLI's own adapter hardcodes
+// trigger: 'policy' for every request, so it can never exercise the
+// auto-approve branch — these two tests drive decide() directly through a
+// fake gateway provider, the same seam a real second gateway (e.g. Iron
+// Proxy) would use to set trigger: 'default'.
+describe('decide() auto-approval via trigger', () => {
+  const FIXTURE = 'model-authority-decide-fixture';
+  const HOST = 'models.example.test:8000';
+
+  afterEach(() => {
+    resetProviderHostContractForTesting(FIXTURE);
+    resetGatewayProvider(null);
+  });
+
+  function captureDecide(): { decide: (request: GatewayApprovalRequest) => Promise<GatewayApprovalDecision> } {
+    const captured: { decide: (request: GatewayApprovalRequest) => Promise<GatewayApprovalDecision> } = {
+      decide: async () => 'unavailable',
+    };
+    resetGatewayProvider({
+      kind: 'fixture',
+      agentSkills: [],
+      sessions: {
+        ensure: () => {
+          throw new Error('not exercised by this test');
+        },
+      },
+      approvals: {
+        async subscribe(decide) {
+          captured.decide = decide;
+        },
+      },
+    });
+    startGatewayApprovalCoordinator(fakeAdapter);
+    return captured;
+  }
+
+  it('auto-approves a default-trigger request against a declared model authority, without a card', async () => {
+    registerProviderHostContract(FIXTURE, { seamVersion: 1, modelAuthorities: [HOST] });
+    await ensureContainerConfig('ag-1', FIXTURE);
+    const { decide } = captureDecide();
+
+    const decision = await decide({
+      id: 'req-authority-default',
+      trigger: 'default',
+      agentGroupId: 'ag-1',
+      destination: { host: HOST, method: 'POST' },
+      createdAt: now(),
+      title: 'Network credentials request',
+      question: 'irrelevant — never rendered for an auto-approval',
+    });
+
+    expect(decision).toBe('approve');
+    expect(delivered).toHaveLength(0);
+    expect(await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).toEqual([]);
+  });
+
+  it('still delivers a card for a policy-trigger request against the same declared authority', async () => {
+    registerProviderHostContract(FIXTURE, { seamVersion: 1, modelAuthorities: [HOST] });
+    await ensureContainerConfig('ag-1', FIXTURE);
+    await seedApprover();
+    const { decide } = captureDecide();
+
+    const decisionPromise = decide({
+      id: 'req-authority-policy',
+      trigger: 'policy',
+      agentGroupId: 'ag-1',
+      destination: { host: HOST, method: 'POST' },
+      createdAt: now(),
+      title: 'Network credentials request',
+      question: 'POST models.example.test:8000',
+    });
+
+    const row = await awaitCard();
+    expect(row.action).toBe(GATEWAY_APPROVAL_ACTION);
+    await resolveGatewayApproval(row.approval_id, 'approve');
+    await expect(decisionPromise).resolves.toBe('approve');
   });
 });
