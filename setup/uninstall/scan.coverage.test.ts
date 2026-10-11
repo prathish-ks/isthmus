@@ -68,7 +68,11 @@ describe('scanInstall — partial docker degrade', () => {
     // scenarios below).
     const run = fakeRun({
       docker: (args) => {
-        if (args[0] === 'ps') return { status: 0, stdout: 'c1\n' };
+        if (args[0] === 'ps' && args.some((a) => a.startsWith('label=nanoclaw-install='))) {
+          const byProject = args.some((a) => a.includes('com.docker.compose.project'));
+          return { status: 0, stdout: byProject ? '\n' : 'c1\n' };
+        }
+        if (args[0] === 'ps' || args[1] === 'ls') return { status: 0, stdout: '' };
         if (args[0] === 'image') return { status: 1, stdout: '' };
         return { status: 1, stdout: '' };
       },

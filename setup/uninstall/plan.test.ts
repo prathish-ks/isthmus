@@ -124,6 +124,43 @@ describe('buildRemovalPlan declined groups', () => {
   });
 });
 
+describe('buildRemovalPlan compose projects', () => {
+  const projects = {
+    names: ['nanoclaw-iron-control-abcd1234'],
+    containers: ['nanoclaw-iron-control-abcd1234-web-1'],
+    volumes: ['nanoclaw-iron-control-abcd1234_database'],
+    networks: ['nanoclaw-iron-control-abcd1234'],
+  };
+
+  it('removes project volumes and networks with the data group, after containers and before the keys in data/', () => {
+    const actions = buildRemovalPlan(inventory({ projects }), allYes());
+    const idx = actions.findIndex((a) => a.kind === 'rm-project-residue');
+    expect(actions[idx]).toEqual({
+      kind: 'rm-project-residue',
+      runtime: 'docker',
+      projects: ['nanoclaw-iron-control-abcd1234'],
+    });
+    expect(idx).toBeGreaterThan(actions.findIndex((a) => a.kind === 'rm-containers'));
+    expect(idx).toBeLessThan(actions.findIndex((a) => a.kind === 'backup-env'));
+    expect(idx).toBeLessThan(actions.findIndex((a) => a.kind === 'delete-path'));
+  });
+
+  it('removes the project with the data group even when the service group is declined', () => {
+    const actions = buildRemovalPlan(inventory({ projects }), { service: false, data: true, user: false, onecliDelete: [] });
+    expect(kinds(actions)).not.toContain('rm-containers');
+    expect(kinds(actions).indexOf('rm-project-residue')).toBeLessThan(kinds(actions).indexOf('backup-env'));
+  });
+
+  it('keeps the volumes when the data group is declined', () => {
+    const actions = buildRemovalPlan(inventory({ projects }), { service: true, data: false, user: true, onecliDelete: [] });
+    expect(kinds(actions)).not.toContain('rm-project-residue');
+  });
+
+  it('plans nothing extra when the copy has no projects', () => {
+    expect(kinds(buildRemovalPlan(inventory(), allYes()))).not.toContain('rm-project-residue');
+  });
+});
+
 describe('buildRemovalPlan conditional actions', () => {
   it('skips backup-env when there is no .env', () => {
     const inv = inventory({ data: [item('/proj/data', 'Database & conversations')] });
