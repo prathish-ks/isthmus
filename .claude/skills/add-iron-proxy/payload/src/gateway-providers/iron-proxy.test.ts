@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { GatewaySessionInput } from './gateway-provider-registry.js';
 import { IronProxyApprovalBridge } from './iron-proxy-approval.js';
+import type { IronCredentialScope } from './iron-proxy-credential-scope.js';
 
 vi.mock('../env.js', () => ({ readEnvFile: () => ({}) }));
 vi.mock('node:child_process', () => ({
@@ -19,6 +20,12 @@ vi.mock('node:child_process', () => ({
 vi.mock('../container-runtime.js', () => ({ CONTAINER_RUNTIME_BIN: 'docker' }));
 vi.mock('../log.js', () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+}));
+vi.mock('./iron-proxy-credential-scope.js', () => ({
+  DEFAULT_IRON_CONTROL_PORT: 10_257,
+  IronCredentialScope: vi.fn(),
+  ironCredentialRules: vi.fn(() => async () => {}),
+  seenRuleFile: vi.fn((file: string) => ({ file })),
 }));
 
 import {
@@ -258,6 +265,52 @@ describe('Iron Proxy provider', () => {
     expect(provider.egressGateway!()).toEqual({
       endpoint: 'iron-proxy',
       target: { kind: 'runtime', identity: settings.containerName },
+    });
+  });
+
+  describe('approvals.credentialScope', () => {
+    it('lazily builds one IronCredentialScope from the configured settings and returns lookup()', async () => {
+      const { IronCredentialScope, ironCredentialRules, seenRuleFile } =
+        await import('./iron-proxy-credential-scope.js');
+      const { execFile } = await import('node:child_process');
+      const lookup = vi.fn(async () => 'none' as const);
+      vi.mocked(IronCredentialScope).mockImplementation(function () {
+        return { lookup } as unknown as IronCredentialScope;
+      } as unknown as new (...args: unknown[]) => IronCredentialScope);
+      vi.mocked(ironCredentialRules).mockClear();
+      vi.mocked(seenRuleFile).mockClear();
+      vi.mocked(execFile).mockClear();
+
+      const configured: IronProxySettings = { ...settings, controlPort: 20257 };
+      const provider = defineIronProxyProvider(configured);
+      const destination = { host: 'api.example.com', method: 'GET' };
+
+      expect(await provider.approvals.credentialScope!(destination)).toBe('none');
+      expect(await provider.approvals.credentialScope!(destination)).toBe('none');
+
+      expect(IronCredentialScope).toHaveBeenCalledTimes(1);
+      expect(lookup).toHaveBeenNthCalledWith(1, destination);
+      expect(lookup).toHaveBeenNthCalledWith(2, destination);
+
+      expect(ironCredentialRules).toHaveBeenCalledTimes(1);
+      expect(ironCredentialRules).toHaveBeenCalledWith(
+        configured,
+        expect.objectContaining({ proxyStartedAt: expect.any(Function) }),
+      );
+      expect(seenRuleFile).toHaveBeenCalledWith(
+        path.join(path.dirname(configured.configFile), 'seen-credential-rules.json'),
+      );
+
+      // The sources passed to ironCredentialRules() thread through to the
+      // real container-inspect call, keyed on this provider's container name.
+      const sources = vi.mocked(ironCredentialRules).mock.calls[0]![1];
+      await sources.proxyStartedAt().catch(() => {});
+      expect(execFile).toHaveBeenCalledWith(
+        'docker',
+        ['inspect', '-f', '{{.State.StartedAt}}', configured.containerName],
+        expect.objectContaining({ timeout: 5_000 }),
+        expect.any(Function),
+      );
     });
   });
 
