@@ -299,6 +299,41 @@ minimum:
 Use the `code-review` skill with a trust-boundary-specific angle for this
 step, not general bug-hunting.
 
+**Lesson from the v2026.10.0 promotion — LAW-07's reading applies to any
+new enforcement boundary a promotion introduces, not just the Go
+kernel.** `#3966`'s Iron Proxy port shipped, through its own review
+cycle, with the self-SSRF exclusion and the "which ports are actually
+declared" check both computed in TypeScript while the Go process that
+actually decides whether to forward a request (a skill-installed front
+proxy, not `go-host`) had no knowledge of either — a decision computed,
+with nothing physically enforcing the corresponding effect. That is
+exactly LAW-07's "decision vs. enforced effect" reading, found in a
+process this fork didn't write from scratch, not Isthmus's own kernel.
+When Step 3 asks "is the effect physically reachable only through
+enforcement," read "enforcement" as whatever process actually decides
+the outcome for *this* surface — a skill-installed gateway, a front
+proxy, anything a promotion ports — not only `internal/kernel`. See
+`docs/design-laws.md`'s 2026-10-11 LAW-09-section annotation for the
+full account.
+
+**Lesson from the same promotion — a single review pass is not
+guaranteed sufficient for a new enforcement boundary, and a reviewer's
+own proposed test needs the same verification its findings get.** The
+`#3966` gap above took three independent passes to fully close: an
+internal `code-review` pass found the TS-side computation was never
+wired to Go at all; a first external PR review correctly flagged that
+the fix still didn't check *which* ports were declared, but the
+regression test it asked for used a relative request URL — which
+doesn't match what the real Go process actually sends (an absolute
+URL), so the test's own verdict would have been right for the wrong
+reason; a second external review caught exactly that, and only then
+was the real enforcement gap closed in Go itself. Budget for iteration
+on Bucket B / new-enforcement-boundary findings — don't treat one
+review pass, even an external one, as closing a trust-boundary finding.
+When a review asks for a specific test, check that test's own fixture
+or request shape against the real production wire format before
+trusting what it proves.
+
 ## Step 4 — Kernel port work, if Bucket A/B implicates new Go behavior
 
 Standard engineering discipline applies here (LAW-06: contracts before
@@ -558,6 +593,21 @@ confirmed or sharpened — not a new law number. Only propose a new law if
 this promotion surfaced a genuinely distinct principle, held to the same
 evidence bar the declined 2026-08-30 LAW-10 proposal was held to.
 
+**Lesson from the v2026.10.0 promotion — the Step 9/Step 10 conflation
+named in this document's own intro (above) recurred a second time, in a
+real promotion instance document this time, not just this playbook's
+own first draft.** `docs/promotion-v2026.10.0.md`'s status line said
+"Promotion closed. Steps 0–9 all genuinely done" the moment the pin-move
+PR was drafted — true of Step 9, but Step 10 had not actually been run
+yet, and the line didn't distinguish the two. An external review of
+that same pin-move PR caught it. Two occurrences of the identical
+mistake, roughly a month apart, in two different kinds of document, is
+a pattern worth a structural fix, not just another reminder: the
+per-promotion instance template below now requires Step 10 as its own
+explicitly tracked checklist line, separate from Step 9's, from the
+moment the template is created — so "Step 9 done" has nowhere to
+silently stand in for "Step 10 done" in the document's own structure.
+
 ## Per-promotion instance template
 
 Each promotion gets its own `docs/promotion-vX.Y.Z.md`, structured as: an
@@ -573,8 +623,15 @@ living in Step 2's file-inventory artifact, not duplicated as prose), the
 playbook's copy of it), one status-tracked table per workstream mirroring
 Steps 1–7 above (including Step 3's acceptance-record fields and Step 4's
 compatibility matrix where relevant), a promotion gate checklist mirroring
-Steps 8–9 (including the tag-immutability re-check) that doubles as the
-final PR's evidence index once filled in, and a changelog.
+Steps 8–9 **and Step 10 as its own separate, explicitly-checked line —
+never implied by Step 9's own checkbox** (the v2026.10.0 promotion's own
+status line conflated the two once; this line exists so the template
+itself can't repeat that) — that doubles as the final PR's evidence
+index once filled in, and a changelog. The document's own top-line
+status summary must name Step 10's state explicitly too, not just the
+checklist — a reader skimming only the opening paragraph should not
+come away believing the promotion is fully closed while Step 10 is
+still unchecked.
 `docs/promotion-v2.4.0.md` is the first such instance — read it as a
 worked example, not as this playbook's canonical content (the playbook
 stays version-agnostic; that document carries v2.4.0's actual findings and
