@@ -26,7 +26,7 @@ import * as setupLog from '../logs.js';
 import { resolveOnecliDeletions, type RunCommand, type VaultAgent } from './onecli-agents.js';
 import { buildRemovalPlan, type Decisions } from './plan.js';
 import { executePlan, type ExecDeps } from './remove.js';
-import { scanInstall, tilde, type Inventory } from './scan.js';
+import { scanInstall, tilde, type Inventory, type ProjectInventory } from './scan.js';
 
 const GROUPS = {
   service: {
@@ -49,6 +49,17 @@ const GROUPS = {
     desc: 'Per-agent entries this copy registered in the OneCLI vault. The OneCLI app, your credentials, and the gateway are NOT touched.',
   },
 } as const;
+
+export const PROJECT_NOTE =
+  "This includes this copy's service containers and their data volumes (such as a gateway's database), even if you keep group 1. The volumes can't be read without the keys in data/, which this deletes.";
+
+export function projectRows(projects: ProjectInventory): { what: string; where: string }[] {
+  const rows: { what: string; where: string }[] = [];
+  if (projects.containers.length > 0) rows.push({ what: 'Service containers', where: projects.containers.join(', ') });
+  if (projects.volumes.length > 0) rows.push({ what: 'Service data volumes', where: projects.volumes.join(', ') });
+  if (projects.networks.length > 0) rows.push({ what: 'Service networks', where: projects.networks.join(', ') });
+  return rows;
+}
 
 const runCommand: RunCommand = (cmd, args) => {
   const res = spawnSync(cmd, args, { encoding: 'utf-8' });
@@ -90,6 +101,8 @@ export async function runUninstallFlow(opts: {
 
   const svcRows = serviceRows(inv, home);
   const dataRows = [...inv.data, ...inv.runtime].map(({ what, where }) => ({ what, where }));
+  if (inv.projects) dataRows.unshift(...projectRows(inv.projects));
+  const dataDesc = inv.projects ? `${GROUPS.data.desc} ${PROJECT_NOTE}` : GROUPS.data.desc;
   const userRows = inv.user.map(({ what, where }) => ({ what, where }));
   const totalFound =
     svcRows.length + dataRows.length + userRows.length + inv.onecli.mine.length + inv.onecli.orphans.length;
@@ -105,7 +118,7 @@ export async function runUninstallFlow(opts: {
   if (dryRun) {
     p.log.message(k.cyan('PREVIEW ONLY — this shows what would be deleted and changes nothing.'));
     if (svcRows.length > 0) note(groupBody(GROUPS.service.desc, svcRows), GROUPS.service.title);
-    if (dataRows.length > 0) note(groupBody(GROUPS.data.desc, dataRows), GROUPS.data.title);
+    if (dataRows.length > 0) note(groupBody(dataDesc, dataRows), GROUPS.data.title);
     if (userRows.length > 0) note(groupBody(GROUPS.user.desc, userRows), GROUPS.user.title);
     if (inv.onecli.mine.length > 0 || inv.onecli.orphans.length > 0) {
       const lines = [GROUPS.onecli.desc, ''];
@@ -144,7 +157,7 @@ export async function runUninstallFlow(opts: {
 
   let dataYes = false;
   if (dataRows.length > 0) {
-    note(groupBody(GROUPS.data.desc, dataRows), GROUPS.data.title);
+    note(groupBody(dataDesc, dataRows), GROUPS.data.title);
     dataYes = await confirmGroup(GROUPS.data.prompt, yes);
   }
 
@@ -213,17 +226,33 @@ export async function runUninstallFlow(opts: {
     log: (line) => p.log.message(line),
     isRoot: process.getuid?.() === 0,
   };
-  const { notes: execNotes } = executePlan(head, deps);
+  const { notes: execNotes, dataGroupBlocked } = executePlan(head, deps);
 
   printLeftAlone([...inv.notes, ...keptNotes, ...execNotes]);
 
-  const { notes: tailNotes } = executePlan(tail, {
-    ...deps,
-    log: (line) => console.log(`  ${line}`),
-  });
+  // Threaded through so a block set in the head run (a Compose project
+  // that couldn't be fully removed) also holds back the tail's
+  // delete-runtime-path items — otherwise this second, independent
+  // executePlan call would start clean and remove node_modules/ anyway,
+  // leaving the operator without the runtime the uninstaller itself
+  // needs to be re-run.
+  const { notes: tailNotes, dataGroupBlocked: stillBlocked } = executePlan(
+    tail,
+    { ...deps, log: (line) => console.log(`  ${line}`) },
+    dataGroupBlocked,
+  );
   for (const n of tailNotes) console.log(`  • ${n}`);
-  console.log(`\n✓ Done. NanoClaw copy ${inv.slug} has been uninstalled.`);
-  process.exit(0);
+  if (stillBlocked) {
+    console.log(
+      `\n! Uninstall incomplete: data/ (and its Compose project) could not be fully removed — see above. ` +
+        `Fix the issue, then re-run the uninstaller to finish.`,
+    );
+  } else {
+    console.log(`\n✓ Done. NanoClaw copy ${inv.slug} has been uninstalled.`);
+  }
+  // A nonzero exit is the only signal an unattended --yes caller gets;
+  // the console message alone is invisible to a script.
+  process.exit(stillBlocked ? 1 : 0);
 }
 
 /** Unwrap a confirm result; Ctrl-C / Esc cancels the whole uninstall — nothing deleted. */

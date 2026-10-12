@@ -48,7 +48,25 @@ export type RemovalAction =
    * of their API keys). .env is deliberately excluded from `delete-path`.
    */
   | { kind: 'backup-env'; envPath: string }
-  | { kind: 'delete-path'; item: PathItem }
+  /**
+   * This copy's Compose projects, listed by project label at removal time
+   * (the host was alive through the confirm phase): containers (they hold
+   * the volumes), then volumes, then networks. `incomplete` carries the
+   * scan's own uncertainty forward — set when a listing failure there
+   * could have been hiding a real project; it holds data/'s keys back
+   * even if every project actually found here gets fully removed.
+   */
+  | { kind: 'rm-project-residue'; runtime: string; projects: string[]; incomplete: boolean }
+  /**
+   * `fromDataGroup` marks an action `executePlan` must skip once a
+   * `rm-project-residue` in the same run fails to fully remove a project:
+   * data/ holds the only keys that can ever make an orphaned volume's
+   * contents unreadable again, so it must never be deleted out from under
+   * a project cleanup that didn't finish. `delete-path` also serves the
+   * user group (groups/, store/), which carries no such dependency and is
+   * never skipped — hence the per-action flag rather than a blanket one.
+   */
+  | { kind: 'delete-path'; item: PathItem; fromDataGroup: boolean }
   | { kind: 'delete-runtime-path'; item: PathItem };
 
 export function buildRemovalPlan(inv: Inventory, d: Decisions): RemovalAction[] {
@@ -105,16 +123,25 @@ export function buildRemovalPlan(inv: Inventory, d: Decisions): RemovalAction[] 
   }
 
   if (d.data) {
+    // Before .env and data/: service data is encrypted with keys kept there.
+    if (inv.projects) {
+      actions.push({
+        kind: 'rm-project-residue',
+        runtime: inv.containerRuntime,
+        projects: inv.projects.names,
+        incomplete: inv.projects.incomplete,
+      });
+    }
     const env = inv.data.find((i) => path.basename(i.path) === '.env');
     if (env) actions.push({ kind: 'backup-env', envPath: env.path });
     for (const item of inv.data) {
       if (item === env) continue; // removed by backup-env, never a bare delete
-      actions.push({ kind: 'delete-path', item });
+      actions.push({ kind: 'delete-path', item, fromDataGroup: true });
     }
   }
 
   if (d.user) {
-    for (const item of inv.user) actions.push({ kind: 'delete-path', item });
+    for (const item of inv.user) actions.push({ kind: 'delete-path', item, fromDataGroup: false });
   }
 
   if (d.data) {
