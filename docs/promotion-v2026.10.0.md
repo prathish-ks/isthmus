@@ -447,17 +447,39 @@ needs a live test), not just a bucket of "deferred":
   - `setup/onecli.ts`'s installer piping to `sh` instead of an explicit
     `/bin/sh` (named during `#4059`) — closed (Isthmus PR `#78`): pipes
     to an explicit `/bin/sh` now, with a regression test asserting it.
+- **In an open PR, not yet merged — do not call this closed until it
+  lands** (the Step 9/Step 10 and `#3920` corrections above are exactly
+  why this gets its own bucket instead of being written as done):
+  - `#3965`'s Iron Proxy half — `fix/3965-iron-local-model-setup-validator`.
+    Unlike the OpenCode half (below), this one is self-contained: Iron
+    Proxy already exists on this fork, and `#3966`/`#4015` already
+    taught the gateway itself (the Go front proxy, the TS approval seam)
+    about a keyless local model at `host.docker.internal`. This closes
+    the matching gap one layer up — the setup-time URL validator
+    (`provider-credentials.ts`'s `ironModelEndpoint`) rejected that exact
+    URL shape as plain HTTP even though the gateway would have allowed
+    it once configured. Move to "Closed, not deferred" once merged.
 - **Large, separate efforts — reasonable to defer past this promotion,
   tracked with an owner**:
-  - `#3965` — not yet addressed by any Isthmus PR. Upstream's PR checks
-    an OpenCode local-model URL against the selected gateway at the
-    setup prompt itself (`OPENCODE_BASE_URL`, a validator calling the
-    gateway's `modelEndpoint()`). This fork's `providers` branch has no
-    matching interactive setup-prompt flow for OpenCode today — the
-    same root cause `#3920`/`#3964`'s OpenCode halves were ruled not
-    applicable for — but that determination hasn't actually been made
-    for `#3965` specifically yet; don't assume it from the pattern
-    alone without checking the `providers` branch directly first.
+  - `#3965`'s OpenCode half — not yet addressed by any Isthmus PR.
+    Upstream's PR checks an OpenCode local-model URL against the
+    selected gateway at the setup prompt itself (`opencode-auth.ts`,
+    a validator calling the gateway's `modelEndpoint()`). Scoped for
+    real (using the `/promote-upstream` skill directly on this one
+    deferred item, not a full release promotion): `opencode-auth.ts`
+    depends on upstream's `setup/gateways/` module (12 files — catalog,
+    selection, install, credential-store — a generic, skill-manifest-
+    driven seam), which doesn't exist on this fork in any form; Isthmus's
+    actual gateway machinery (`src/gateway-providers/`) is a differently-
+    shaped, registry-based seam. Isthmus's own `add-opencode` skill has
+    no setup-time payload at all today — no auth flow, host-model
+    detection, vault, or model-selection CLI (`opencode-auth.ts`,
+    `opencode-host.ts`, `opencode-vault.ts`, `opencode-model-config.ts`,
+    `opencode-models.ts` — none exist on this fork). This is a genuinely
+    new ~24-file subsystem to build, not a port of something partially
+    there — sized like `#3883` was before its own dedicated PR, not a
+    quick patch. Still deferred, now with a real inventory behind that
+    disposition instead of an assumption.
 
 ## Open before Step 8/9/10 — all closed
 
@@ -584,3 +606,18 @@ needs a live test), not just a bucket of "deferred":
     answered for `#3920`/`#3964`'s OpenCode halves) hasn't actually
     been checked yet, so it's named as its own item rather than folded
     into the others' pattern by assumption.
+- 2026-10-13 — Scoped `#3965` for real, using the `/promote-upstream`
+  skill directly on this one deferred item rather than waiting for the
+  next full release promotion. It splits into two pieces of very
+  different size: the Iron Proxy half is self-contained (Isthmus
+  already has the touched file; `#3966`/`#4015` already built the
+  underlying keyless-local-model mechanism this half's setup-time
+  validator needed to catch up with) — ported in open PR
+  `fix/3965-iron-local-model-setup-validator`, not yet merged. The
+  OpenCode half is not a port at all: it needs upstream's `setup/
+  gateways/` module (12 files, a seam this fork has no equivalent of)
+  plus roughly a dozen more files for a setup-time payload
+  (auth/host/vault/model-selection) `add-opencode` doesn't have in any
+  form today — a genuinely new subsystem, not something to fold into a
+  quick patch. Updated the entry above to carry this real inventory
+  instead of the prior "not yet checked" placeholder.
