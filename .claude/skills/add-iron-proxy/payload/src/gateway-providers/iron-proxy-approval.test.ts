@@ -14,6 +14,7 @@ vi.mock('../log.js', () => ({
 
 import {
   IRON_PROXY_IDENTITY_METADATA,
+  IRON_PROXY_PAYLOAD_METADATA,
   IronProxyApprovalBridge,
   type IronApprovalIdentity,
 } from './iron-proxy-approval.js';
@@ -135,9 +136,71 @@ describe('Iron Proxy approval transport', () => {
     await vi.waitFor(() => expect(held.size).toBe(1));
     const decision = [...held.values()][0];
     expect(decision.request.trigger).toBe('default');
-    expect(decision.request.destination).toEqual({ host, method: 'POST' });
+    // No x-iron-request-payload metadata was sent, so this fails toward
+    // "has a payload" — the safe default for an older front too.
+    expect(decision.request.destination).toEqual({ host, method: 'POST', sendsPayload: true });
     decision.resolve('approve');
     expect(await pending.result).toMatchObject({ action: 1 });
+  });
+
+  it('attests sendsPayload:false only on an exact, single "none" from the trusted front', async () => {
+    const payloadMetadata = metadata();
+    payloadMetadata.set(IRON_PROXY_PAYLOAD_METADATA, 'none');
+    const pending = transformCall(
+      { request: { method: 'GET', host: 'api.github.com', url: 'https://api.github.com/repos/example/repo' } },
+      payloadMetadata,
+    );
+    await vi.waitFor(() => expect(held.size).toBe(1));
+    const decision = [...held.values()][0];
+    expect(decision.request.destination).toEqual({ host: 'api.github.com', method: 'GET', sendsPayload: false });
+    decision.resolve('approve');
+    expect(await pending.result).toMatchObject({ action: 1 });
+  });
+
+  it.each([
+    ['present, not none', (m: grpc.Metadata) => m.set(IRON_PROXY_PAYLOAD_METADATA, 'present')],
+    [
+      'two values',
+      (m: grpc.Metadata) => {
+        m.add(IRON_PROXY_PAYLOAD_METADATA, 'none');
+        m.add(IRON_PROXY_PAYLOAD_METADATA, 'none');
+      },
+    ],
+    ['no metadata at all', () => {}],
+  ])('keeps sendsPayload:true for %s', async (_name, mutate) => {
+    const payloadMetadata = metadata();
+    mutate(payloadMetadata);
+    const pending = transformCall(
+      { request: { method: 'GET', host: 'api.github.com', url: 'https://api.github.com/repos/example/repo' } },
+      payloadMetadata,
+    );
+    await vi.waitFor(() => expect(held.size).toBe(1));
+    const decision = [...held.values()][0];
+    expect(decision.request.destination).toEqual({ host: 'api.github.com', method: 'GET', sendsPayload: true });
+    decision.resolve('approve');
+    await pending.result;
+  });
+
+  it("threads the front's exact method case into policy, case-sensitively, but keeps the audit log minimal", async () => {
+    const pending = transformCall({
+      request: { method: 'get', host: 'api.github.com', url: 'https://api.github.com/repos/example/repo' },
+    });
+    await vi.waitFor(() => expect(held.size).toBe(1));
+    const decision = [...held.values()][0];
+    // permitsUncredentialedGatewayRead (and permitsConfiguredGatewayRead)
+    // compare method case-sensitively, so a lower-case "get" from the wire
+    // must reach policy as "get", not normalized to "GET" — a bypass there
+    // would make the opt-in reads feature silently more permissive.
+    expect(decision.request.destination).toMatchObject({ method: 'get' });
+    // The audit log stays the pre-#4015 shape: method (upper-cased), host,
+    // path only — never rawMethod or sendsPayload.
+    expect(decision.request.audit).toEqual({
+      method: 'GET',
+      host: 'api.github.com',
+      path: '/repos/example/repo',
+    });
+    decision.resolve('approve');
+    await pending.result;
   });
 
   it.each([

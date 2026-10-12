@@ -23,6 +23,7 @@ import {
   type GatewayApprovalScope,
 } from './gateway-providers/gateway-provider-registry.js';
 import { getGatewayProvider } from './gateway-providers/index.js';
+import { permitsConfiguredGatewayRead, permitsUncredentialedGatewayRead } from './gateway-read-policy.js';
 import { pickApprovalDelivery, pickApprover } from './modules/approvals/primitive.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getContainerConfig } from './db/container-configs.js';
@@ -56,6 +57,8 @@ type ExpiryReason = 'no response' | 'host restarted';
 const MAX_APPROVAL_TIMEOUT_MS = 15 * 60 * 1000;
 /** Applied when a request carries no `expiresAt` at all. */
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+/** A slow or hung credentialScope lookup must never hold a request open longer than this. */
+const CREDENTIAL_SCOPE_TIMEOUT_MS = 5_000;
 
 interface PendingState {
   resolve: (decision: Decision) => void;
@@ -171,10 +174,48 @@ async function resolveSessionProvider(request: GatewayApprovalRequest): Promise<
   return resolveProviderName(session?.agent_provider, containerConfig?.provider);
 }
 
-/** Exact domain or any subdomain of a declared model domain. */
-function isDefaultApprovedModelHost(host: string, providerName: string): boolean {
-  const domains = getProviderHostContract(providerName)?.modelDomains ?? [];
-  return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+/**
+ * Exact domain or any subdomain of a declared model domain, or an exact
+ * declared model authority (`host:port` — see `ProviderHostContract`'s own
+ * doc comment on `modelAuthorities`; it is never domain-suffix matched, since
+ * it names one operator-configured endpoint, not a domain family).
+ */
+export function isDefaultApprovedModelHost(host: string, providerName: string): boolean {
+  const contract = getProviderHostContract(providerName);
+  const domains = contract?.modelDomains ?? [];
+  if (domains.some((domain) => host === domain || host.endsWith(`.${domain}`))) return true;
+  const authorities = contract?.modelAuthorities ?? [];
+  return authorities.includes(host.toLowerCase());
+}
+
+/**
+ * Only a timely, explicit 'none' ever skips the card. The active provider's
+ * own `credentialScope` is consulted fresh every call — never cached here —
+ * because it is the gateway's own live answer for whether a stored
+ * credential could still apply to this destination; a provider that omits
+ * `credentialScope` entirely, an error, or a lookup slower than
+ * `CREDENTIAL_SCOPE_TIMEOUT_MS` all fail the same way: the card stays.
+ */
+async function attachesNoCredential(destination: NonNullable<GatewayApprovalRequest['destination']>): Promise<boolean> {
+  const credentialScope = getGatewayProvider().approvals.credentialScope;
+  if (!credentialScope || !permitsUncredentialedGatewayRead(destination)) return false;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const scope = await Promise.race([
+      credentialScope({ host: destination.host, method: destination.method }),
+      new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), CREDENTIAL_SCOPE_TIMEOUT_MS);
+        timer.unref();
+      }),
+    ]);
+    if (scope === 'timeout') log.warn('Gateway credential scope timed out; card kept');
+    return scope === 'none';
+  } catch (err) {
+    log.warn('Gateway credential scope failed; card kept', { err });
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function decide(request: GatewayApprovalRequest): Promise<GatewayApprovalDecision> {
@@ -188,12 +229,26 @@ async function decide(request: GatewayApprovalRequest): Promise<GatewayApprovalD
   // — a policy hold is never silently overridden by this check, whatever the
   // destination is.
   if (request.trigger === 'default' && request.destination?.host) {
+    if (permitsConfiguredGatewayRead(request.destination)) {
+      log.info('Gateway request auto-approved: operator-configured read-only host', {
+        id: request.id,
+        host: request.destination.host,
+      });
+      return 'approve';
+    }
     const provider = await resolveSessionProvider(request);
     if (isDefaultApprovedModelHost(request.destination.host, provider)) {
       log.info('Gateway request auto-approved: declared provider model traffic', {
         id: request.id,
         host: request.destination.host,
         provider,
+      });
+      return 'approve';
+    }
+    if (await attachesNoCredential(request.destination)) {
+      log.info('Gateway request auto-approved: no credential in scope for an uncredentialed read', {
+        id: request.id,
+        host: request.destination.host,
       });
       return 'approve';
     }

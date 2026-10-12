@@ -23,6 +23,7 @@ import type { ApprovalRequest } from '@onecli-sh/sdk';
 import { getDb } from './db/connection.js';
 import { initTestDb, closeDb, runMigrations } from './db/index.js';
 import { createAgentGroup } from './db/agent-groups.js';
+import { ensureContainerConfig } from './db/container-configs.js';
 import { createMessagingGroup } from './db/messaging-groups.js';
 import {
   createPendingApproval,
@@ -32,6 +33,8 @@ import {
   transitionPendingApprovalStatus,
 } from './db/sessions.js';
 import type { ChannelDeliveryAdapter } from './delivery.js';
+import { resetGatewayProvider } from './gateway-providers/index.js';
+import type { GatewayApprovalDecision, GatewayApprovalRequest } from './gateway-providers/gateway-provider-registry.js';
 import { log } from './log.js';
 import type { PendingApproval } from './types.js';
 import { upsertUser } from './modules/permissions/db/users.js';
@@ -62,10 +65,13 @@ vi.mock('./config.js', async () => {
 const {
   GATEWAY_APPROVAL_ACTION,
   editCardExpired,
+  isDefaultApprovedModelHost,
   resolveGatewayApproval,
   startGatewayApprovalCoordinator,
   stopGatewayApprovalCoordinator,
 } = await import('./gateway-approval-coordinator.js');
+const { registerProviderHostContract, resetProviderHostContractForTesting } =
+  await import('./provider-contracts/registry.js');
 
 const TEST_DIR = '/tmp/nanoclaw-test-gateway-approvals-cov';
 const DM_CHANNEL = 'slack';
@@ -689,5 +695,304 @@ describe('card question rendering', () => {
   it('ignores an empty summary and falls back to the method line', async () => {
     const q = await questionFor({ ...makeRequest(), summary: { details: [] } } as ApprovalRequest);
     expect(q).toBe('*Agent:* Group One\n_POST api.example.com/v1/send_');
+  });
+});
+
+// `#3964`'s core gap: ProviderHostContract.modelAuthorities is a declared
+// field (added alongside the #3966 keyless local-model work), but nothing
+// upstream of this check ever consulted it — a provider could declare an
+// authority and have `decide()`'s auto-approve path silently ignore it. A
+// declared-but-unenforced field is exactly the shape this project's own
+// LAW-07 discipline treats as a gap, even with no live caller yet.
+describe('isDefaultApprovedModelHost', () => {
+  const FIXTURE = 'model-authority-fixture';
+
+  afterEach(() => {
+    resetProviderHostContractForTesting(FIXTURE);
+  });
+
+  it.each([
+    ['models.example.test:8000', true],
+    ['MODELS.EXAMPLE.TEST:8000', true],
+    ['models.example.test:8001', false],
+    ['models.example.test', false],
+    ['sub.models.example.test:8000', false],
+  ])('matches only the exact declared model authority: %s', (host, expected) => {
+    registerProviderHostContract(FIXTURE, { seamVersion: 1, modelAuthorities: ['models.example.test:8000'] });
+    expect(isDefaultApprovedModelHost(host, FIXTURE)).toBe(expected);
+  });
+
+  it('still matches a declared model domain when no authority is declared', () => {
+    registerProviderHostContract(FIXTURE, { seamVersion: 1, modelDomains: ['api.example.com'] });
+    expect(isDefaultApprovedModelHost('sub.api.example.com', FIXTURE)).toBe(true);
+    expect(isDefaultApprovedModelHost('other.test', FIXTURE)).toBe(false);
+  });
+});
+
+// Coordinator-level coverage for the same gap: isDefaultApprovedModelHost is
+// only a helper — the actual security-sensitive enforcement is decide()'s own
+// trigger check (only 'default' ever auto-approves; 'policy' always keeps a
+// card, whatever the destination is). OneCLI's own adapter hardcodes
+// trigger: 'policy' for every request, so it can never exercise the
+// auto-approve branch — these two tests drive decide() directly through a
+// fake gateway provider, the same seam a real second gateway (e.g. Iron
+// Proxy) would use to set trigger: 'default'.
+describe('decide() auto-approval via trigger', () => {
+  const FIXTURE = 'model-authority-decide-fixture';
+  const HOST = 'models.example.test:8000';
+
+  afterEach(() => {
+    resetProviderHostContractForTesting(FIXTURE);
+    resetGatewayProvider(null);
+  });
+
+  function captureDecide(): { decide: (request: GatewayApprovalRequest) => Promise<GatewayApprovalDecision> } {
+    const captured: { decide: (request: GatewayApprovalRequest) => Promise<GatewayApprovalDecision> } = {
+      decide: async () => 'unavailable',
+    };
+    resetGatewayProvider({
+      kind: 'fixture',
+      agentSkills: [],
+      sessions: {
+        ensure: () => {
+          throw new Error('not exercised by this test');
+        },
+      },
+      approvals: {
+        async subscribe(decide) {
+          captured.decide = decide;
+        },
+      },
+    });
+    startGatewayApprovalCoordinator(fakeAdapter);
+    return captured;
+  }
+
+  it('auto-approves a default-trigger request against a declared model authority, without a card', async () => {
+    registerProviderHostContract(FIXTURE, { seamVersion: 1, modelAuthorities: [HOST] });
+    await ensureContainerConfig('ag-1', FIXTURE);
+    const { decide } = captureDecide();
+
+    const decision = await decide({
+      id: 'req-authority-default',
+      trigger: 'default',
+      agentGroupId: 'ag-1',
+      destination: { host: HOST, method: 'POST' },
+      createdAt: now(),
+      title: 'Network credentials request',
+      question: 'irrelevant — never rendered for an auto-approval',
+    });
+
+    expect(decision).toBe('approve');
+    expect(delivered).toHaveLength(0);
+    expect(await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).toEqual([]);
+  });
+
+  it('still delivers a card for a policy-trigger request against the same declared authority', async () => {
+    registerProviderHostContract(FIXTURE, { seamVersion: 1, modelAuthorities: [HOST] });
+    await ensureContainerConfig('ag-1', FIXTURE);
+    await seedApprover();
+    const { decide } = captureDecide();
+
+    const decisionPromise = decide({
+      id: 'req-authority-policy',
+      trigger: 'policy',
+      agentGroupId: 'ag-1',
+      destination: { host: HOST, method: 'POST' },
+      createdAt: now(),
+      title: 'Network credentials request',
+      question: 'POST models.example.test:8000',
+    });
+
+    const row = await awaitCard();
+    expect(row.action).toBe(GATEWAY_APPROVAL_ACTION);
+    await resolveGatewayApproval(row.approval_id, 'approve');
+    await expect(decisionPromise).resolves.toBe('approve');
+  });
+});
+
+// #4015: an opted-in, wire-attested-payload-free read can skip the card only
+// when the active provider's own live credentialScope() answers 'none' —
+// fast and explicitly. Every other outcome (no opt-in, a payload, a 'credential'
+// answer, a thrown error, a slow lookup, or no credentialScope at all) must
+// keep the card. These are the fail-closed paths the feature's whole safety
+// rests on, so each is tested as its own case rather than inferred.
+describe('decide() auto-approval: configured reads and uncredentialed reads', () => {
+  const HOST = 'models.example.test:8000';
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetGatewayProvider(null);
+  });
+
+  function captureDecideWith(
+    credentialScope?: (destination: { host: string; method?: string }) => Promise<'credential' | 'none'>,
+  ): { decide: (request: GatewayApprovalRequest) => Promise<GatewayApprovalDecision> } {
+    const captured: { decide: (request: GatewayApprovalRequest) => Promise<GatewayApprovalDecision> } = {
+      decide: async () => 'unavailable',
+    };
+    resetGatewayProvider({
+      kind: 'fixture',
+      agentSkills: [],
+      sessions: {
+        ensure: () => {
+          throw new Error('not exercised by this test');
+        },
+      },
+      approvals: {
+        async subscribe(decide) {
+          captured.decide = decide;
+        },
+        ...(credentialScope ? { credentialScope } : {}),
+      },
+    });
+    startGatewayApprovalCoordinator(fakeAdapter);
+    return captured;
+  }
+
+  const request = (overrides: Partial<GatewayApprovalRequest> = {}): GatewayApprovalRequest => ({
+    id: 'req-uncredentialed-1',
+    trigger: 'default',
+    agentGroupId: 'ag-1',
+    destination: { host: HOST, method: 'GET', sendsPayload: false },
+    createdAt: now(),
+    title: 'Network credentials request',
+    question: 'GET models.example.test:8000',
+    ...overrides,
+  });
+
+  describe('permitsConfiguredGatewayRead', () => {
+    // Deliberately no port — permitsConfiguredGatewayRead matches bare
+    // hostnames (stripping only an explicit, redundant :443), unlike
+    // modelAuthorities' exact host:port match tested elsewhere.
+    const CONFIGURED_HOST = 'status.example.test';
+
+    it('auto-approves a default-trigger GET to an operator-configured read-only host, no provider needed', async () => {
+      vi.stubEnv('NANOCLAW_GATEWAY_READ_ONLY_HOSTS', CONFIGURED_HOST);
+      const { decide } = captureDecideWith();
+
+      const decision = await decide(request({ destination: { host: CONFIGURED_HOST, method: 'GET' } }));
+
+      expect(decision).toBe('approve');
+      expect(delivered).toHaveLength(0);
+    });
+
+    it('still delivers a card for a policy-trigger request to that same configured host', async () => {
+      vi.stubEnv('NANOCLAW_GATEWAY_READ_ONLY_HOSTS', CONFIGURED_HOST);
+      await seedApprover();
+      const { decide } = captureDecideWith();
+
+      const decisionPromise = decide(
+        request({ trigger: 'policy', destination: { host: CONFIGURED_HOST, method: 'GET' } }),
+      );
+
+      const row = await awaitCard();
+      await resolveGatewayApproval(row.approval_id, 'approve');
+      await expect(decisionPromise).resolves.toBe('approve');
+    });
+  });
+
+  it('auto-approves when opted in, the read sends no payload, and credentialScope answers none', async () => {
+    vi.stubEnv('NANOCLAW_GATEWAY_UNCREDENTIALED_READS', 'true');
+    const { decide } = captureDecideWith(async () => 'none');
+
+    const decision = await decide(request());
+
+    expect(decision).toBe('approve');
+    expect(delivered).toHaveLength(0);
+    expect(await getPendingApprovalsByAction(GATEWAY_APPROVAL_ACTION)).toEqual([]);
+  });
+
+  it('keeps the card when not opted in, even if credentialScope would answer none', async () => {
+    await seedApprover();
+    const scope = vi.fn(async () => 'none' as const);
+    const { decide } = captureDecideWith(scope);
+
+    const decisionPromise = decide(request());
+    const row = await awaitCard();
+
+    expect(scope).not.toHaveBeenCalled();
+    await resolveGatewayApproval(row.approval_id, 'approve');
+    await expect(decisionPromise).resolves.toBe('approve');
+  });
+
+  it('keeps the card when the request is not attested payload-free', async () => {
+    vi.stubEnv('NANOCLAW_GATEWAY_UNCREDENTIALED_READS', 'true');
+    await seedApprover();
+    const scope = vi.fn(async () => 'none' as const);
+    const { decide } = captureDecideWith(scope);
+
+    const decisionPromise = decide(request({ destination: { host: HOST, method: 'GET', sendsPayload: true } }));
+    const row = await awaitCard();
+
+    expect(scope).not.toHaveBeenCalled();
+    await resolveGatewayApproval(row.approval_id, 'approve');
+    await expect(decisionPromise).resolves.toBe('approve');
+  });
+
+  it('keeps the card when credentialScope answers credential', async () => {
+    vi.stubEnv('NANOCLAW_GATEWAY_UNCREDENTIALED_READS', 'true');
+    await seedApprover();
+    const { decide } = captureDecideWith(async () => 'credential');
+
+    const decisionPromise = decide(request());
+    const row = await awaitCard();
+    await resolveGatewayApproval(row.approval_id, 'approve');
+
+    await expect(decisionPromise).resolves.toBe('approve');
+  });
+
+  it('fails closed (keeps the card) when credentialScope throws', async () => {
+    vi.stubEnv('NANOCLAW_GATEWAY_UNCREDENTIALED_READS', 'true');
+    await seedApprover();
+    const { decide } = captureDecideWith(async () => {
+      throw new Error('iron control unreachable');
+    });
+
+    const decisionPromise = decide(request());
+    const row = await awaitCard();
+    await resolveGatewayApproval(row.approval_id, 'approve');
+
+    await expect(decisionPromise).resolves.toBe('approve');
+  });
+
+  it('fails closed (keeps the card) when credentialScope never settles, after its own timeout', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('NANOCLAW_GATEWAY_UNCREDENTIALED_READS', 'true');
+    await seedApprover();
+    const { decide } = captureDecideWith(() => new Promise(() => {}));
+
+    const decisionPromise = decide(request());
+    await vi.advanceTimersByTimeAsync(5_000);
+    const row = await awaitCardFake();
+    await resolveGatewayApproval(row.approval_id, 'approve');
+
+    await expect(decisionPromise).resolves.toBe('approve');
+  });
+
+  it('keeps the card when the active provider declares no credentialScope at all', async () => {
+    vi.stubEnv('NANOCLAW_GATEWAY_UNCREDENTIALED_READS', 'true');
+    await seedApprover();
+    const { decide } = captureDecideWith(); // OneCLI's real shape: no credentialScope
+
+    const decisionPromise = decide(request());
+    const row = await awaitCard();
+    await resolveGatewayApproval(row.approval_id, 'approve');
+
+    await expect(decisionPromise).resolves.toBe('approve');
+  });
+
+  it('never auto-approves via credentialScope for a policy-trigger request, whatever the destination', async () => {
+    vi.stubEnv('NANOCLAW_GATEWAY_UNCREDENTIALED_READS', 'true');
+    await seedApprover();
+    const scope = vi.fn(async () => 'none' as const);
+    const { decide } = captureDecideWith(scope);
+
+    const decisionPromise = decide(request({ trigger: 'policy' }));
+    const row = await awaitCard();
+
+    expect(scope).not.toHaveBeenCalled();
+    await resolveGatewayApproval(row.approval_id, 'approve');
+    await expect(decisionPromise).resolves.toBe('approve');
   });
 });

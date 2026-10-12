@@ -68,8 +68,43 @@ export interface Inventory {
   /** Group 3: groups/ and store/ — user content, unrecoverable. */
   user: PathItem[];
   onecli: OnecliInventory;
+  /**
+   * Volumes and networks of the Compose projects this copy's labeled
+   * containers belong to; removed with the data group.
+   */
+  projects?: ProjectInventory;
   notes: string[];
 }
+
+export interface ProjectInventory {
+  /**
+   * Compose project names — from the containers carrying this copy's
+   * install label, plus (when this copy ever installed Iron Control)
+   * its own deterministic project name, checked directly: Compose stamps
+   * its own project label on everything it creates regardless of this
+   * fork's own labels, so this also finds an install whose containers
+   * predate those labels, or whose database volume survived an earlier
+   * containers-only removal.
+   */
+  names: string[];
+  /** Container names; removed with the volumes even when the service group was declined. */
+  containers: string[];
+  volumes: string[];
+  networks: string[];
+  /**
+   * True when a Docker listing failed in a way that could be hiding a
+   * project or volume this copy's own keys unlock — Docker was briefly
+   * unavailable, or a specific project's listing (including Iron
+   * Control's deterministic one) errored. Never treated as "nothing
+   * found": the planner holds data/'s keys back exactly as it would for
+   * a real project that failed to remove, until a clean re-run either
+   * finds nothing or finishes removing what it finds.
+   */
+  incomplete: boolean;
+}
+
+/** The label Compose stamps on every container, volume and network of a project. */
+export const COMPOSE_PROJECT_LABEL = 'com.docker.compose.project';
 
 export interface ScanDeps {
   projectRoot: string;
@@ -89,6 +124,7 @@ export function scanInstall(deps: ScanDeps): Inventory {
   const notes: string[] = [];
 
   const service = scanService(deps, slug, containerRuntime, notes);
+  const projects = scanProjects(runCommand, projectRoot, slug, containerRuntime, notes);
 
   const data = existingItems(projectRoot, home, [
     { rel: 'data', what: 'Database & conversations' },
@@ -127,6 +163,7 @@ export function scanInstall(deps: ScanDeps): Inventory {
     runtime,
     user,
     onecli,
+    ...(projects ? { projects } : {}),
     notes,
   };
 }
@@ -221,6 +258,140 @@ function scanService(deps: ScanDeps, slug: string, containerRuntime: string, not
   }
 
   return service;
+}
+
+/** Non-empty trimmed stdout lines, or null when the runtime did not answer. */
+function listLines(runCommand: RunCommand, runtime: string, args: string[]): string[] | null {
+  let res: { status: number | null; stdout: string };
+  try {
+    res = runCommand(runtime, args);
+  } catch {
+    return null;
+  }
+  if (res.status !== 0) return null;
+  return res.stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** A project's containers, volumes and networks by its Compose label; null when a listing failed. */
+export function listProject(
+  runCommand: RunCommand,
+  runtime: string,
+  project: string,
+): { containerIds: string[]; containers: string[]; volumes: string[]; networks: string[] } | null {
+  const filter = `label=${COMPOSE_PROJECT_LABEL}=${project}`;
+  // IDs to remove (a name can be reused between listing and removal), names to show.
+  const rows = listLines(runCommand, runtime, ['ps', '-a', '--filter', filter, '--format', '{{.ID}}|{{.Names}}']);
+  const volumes = listLines(runCommand, runtime, ['volume', 'ls', '-q', '--filter', filter]);
+  const networks = listLines(runCommand, runtime, ['network', 'ls', '--filter', filter, '--format', '{{.Name}}']);
+  if (!rows || !volumes || !networks) return null;
+  const split = rows.map((row) => row.split('|'));
+  return {
+    containerIds: split.map(([id]) => id),
+    containers: split.map(([id, name = id]) => name),
+    volumes,
+    networks,
+  };
+}
+
+/** One pasteable line per project; `;` so an empty listing doesn't skip the rest. */
+export function projectCleanup(runtime: string, project: string): string {
+  const filter = `--filter label=${COMPOSE_PROJECT_LABEL}=${project}`;
+  return (
+    `${runtime} ps -aq ${filter} | xargs -r ${runtime} rm -f; ` +
+    `${runtime} volume ls -q ${filter} | xargs -r ${runtime} volume rm; ` +
+    `${runtime} network ls -q ${filter} | xargs -r ${runtime} network rm`
+  );
+}
+
+/**
+ * Iron Control's own project name, derived the same way `controlPaths()`
+ * does (`.claude/skills/add-iron-proxy/scripts/control.ts`) — duplicated as
+ * a literal rather than imported, the same deliberate layering choice this
+ * fork already makes elsewhere (e.g. `main.go` not importing
+ * `provider-contracts/registry.ts`): generic trunk uninstall code must not
+ * hard-depend on an optional, skill-installed module that may not exist in
+ * this checkout. Checked only when this copy ever installed Iron Control
+ * (its session-materials directory exists), so a copy that never ran
+ * `/add-iron-proxy` never queries Docker for a project it couldn't have.
+ */
+function ironControlProjectName(projectRoot: string, slug: string): string | undefined {
+  return fs.existsSync(path.join(projectRoot, 'data', 'session-materials', 'iron-control'))
+    ? `nanoclaw-iron-control-${slug}`
+    : undefined;
+}
+
+/**
+ * The Compose projects of this copy's labeled containers, plus — exact
+ * name, never a broad match — Iron Control's own deterministic project
+ * name. A gateway names its project after the install slug, so the project
+ * is this copy's alone; a project shared by two copies would be removed
+ * with this one.
+ *
+ * The label-derived names alone miss two real cases: an Iron Control
+ * install whose containers predate this fork's `nanoclaw-install` label
+ * (never recreated since), and a database volume that outlived its
+ * containers (the documented containers-only removal in
+ * `.claude/skills/add-iron-proxy/REMOVE.md`, or an earlier service-only
+ * uninstall of this same copy). Both are covered by checking Iron
+ * Control's deterministic name directly: Docker Compose stamps its own
+ * `com.docker.compose.project` label on every container, volume and
+ * network it creates, with or without this fork's own labels — so
+ * `listProject()`'s exact label filter finds them either way.
+ */
+function scanProjects(
+  runCommand: RunCommand,
+  projectRoot: string,
+  slug: string,
+  runtime: string,
+  notes: string[],
+): ProjectInventory | undefined {
+  const names = listLines(runCommand, runtime, [
+    'ps',
+    '-a',
+    '--filter',
+    `label=nanoclaw-install=${slug}`,
+    '--format',
+    `{{.Label "${COMPOSE_PROJECT_LABEL}"}}`,
+  ]);
+  const ironControl = ironControlProjectName(projectRoot, slug);
+  if (!names) {
+    notes.push(
+      `Service volumes/networks: '${runtime}' unavailable; for each project of this copy's containers ` +
+        `(${runtime} ps -a --filter label=nanoclaw-install=${slug} --format '{{.Label "${COMPOSE_PROJECT_LABEL}"}}') ` +
+        `remove later with: ${projectCleanup(runtime, '<project>')}`,
+    );
+    // Docker itself is unreachable: if this copy ever installed Iron
+    // Control, whether its volume survived is unknown — never return
+    // "nothing to protect" on an assumption. A copy that never installed
+    // it has nothing at risk, so this stays undefined for it.
+    return ironControl ? { names: [], containers: [], volumes: [], networks: [], incomplete: true } : undefined;
+  }
+  const candidates = [...new Set([...names, ...(ironControl ? [ironControl] : [])])].sort();
+  const found: ProjectInventory = { names: [], containers: [], volumes: [], networks: [], incomplete: false };
+  for (const project of candidates) {
+    const listed = listProject(runCommand, runtime, project);
+    if (!listed) {
+      notes.push(
+        `Project ${project}: '${runtime}' listing failed; remove later with: ${projectCleanup(runtime, project)}`,
+      );
+      // Unlike "nothing found" below, a failed listing could be hiding a
+      // real volume — never silently treated as this project is gone.
+      found.incomplete = true;
+      continue;
+    }
+    // The deterministic candidate may name a project that was never
+    // actually created (Iron Control installed, then fully removed by
+    // hand) — nothing found for it is not a listing failure.
+    if (listed.containers.length === 0 && listed.volumes.length === 0 && listed.networks.length === 0) continue;
+    found.names.push(project);
+    found.containers.push(...listed.containers);
+    found.volumes.push(...listed.volumes);
+    found.networks.push(...listed.networks);
+  }
+  return found.names.length > 0 || found.incomplete ? found : undefined;
 }
 
 function scanOnecli(projectRoot: string, runCommand: RunCommand, notes: string[]): OnecliInventory {

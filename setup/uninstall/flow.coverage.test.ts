@@ -454,4 +454,48 @@ describe('runUninstallFlow — full execution, runtime tail last', () => {
 
     expect(mocks.note).toHaveBeenCalledWith(expect.stringContaining('launchctl exploded'), expect.any(String));
   });
+
+  it('exits nonzero and keeps data/ and node_modules/ when a Compose project cannot be fully removed', async () => {
+    const root = tempDir('nanoclaw-flow-');
+    process.chdir(root);
+    const dataDir = path.join(root, 'data');
+    const nodeModulesDir = path.join(root, 'node_modules');
+    fs.mkdirSync(dataDir);
+    fs.mkdirSync(nodeModulesDir);
+    const project = 'nanoclaw-iron-control-test1234';
+    mocks.scanInstall.mockReturnValue(
+      baseInventory(root, {
+        data: [item(dataDir, 'Database & conversations')],
+        runtime: [item(nodeModulesDir, 'Installed dependencies')],
+        projects: {
+          names: [project],
+          containers: [],
+          volumes: [`${project}_database`],
+          networks: [],
+          incomplete: false,
+        },
+      }),
+    );
+    // The volume removal fails (e.g. still in use) while everything else
+    // in this uninstaller's own docker/launchctl/systemctl calls succeeds,
+    // including the live re-listing by Compose project label that finds
+    // this exact volume (listProject queries Docker directly — it doesn't
+    // read back the scan's own inv.projects).
+    const filter = `label=com.docker.compose.project=${project}`;
+    mocks.spawnSync.mockImplementation((cmd: string, args: string[] = []) => {
+      if (cmd !== 'docker') return { status: 0, stdout: '' };
+      if (args[0] === 'volume' && args[1] === 'rm') return { status: 1, stdout: '' };
+      if (args[0] === 'volume' && args.includes(filter)) return { status: 0, stdout: `${project}_database\n` };
+      return { status: 0, stdout: '' };
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { exit } = await call({ dryRun: false, yes: true, invokedFrom: 'flag' });
+
+    expect(exit).toBe(1);
+    expect(fs.existsSync(dataDir)).toBe(true);
+    expect(fs.existsSync(nodeModulesDir)).toBe(true);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('! Uninstall incomplete'));
+    logSpy.mockRestore();
+  });
 });

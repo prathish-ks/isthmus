@@ -12,6 +12,7 @@ import path from 'path';
 
 import type { RunCommand } from './onecli-agents.js';
 import type { RemovalAction } from './plan.js';
+import { listProject, projectCleanup } from './scan.js';
 
 export interface ExecDeps {
   runCommand: RunCommand;
@@ -20,17 +21,59 @@ export interface ExecDeps {
   isRoot: boolean;
 }
 
-export function executePlan(actions: RemovalAction[], deps: ExecDeps): { notes: string[] } {
+/**
+ * data/ holds the only keys that can ever make an orphaned volume's
+ * contents unreadable again — never deleted once a project cleanup in
+ * this run is known incomplete. delete-runtime-path (dist/, node_modules/)
+ * carries no such risk, but is held back too so a blocked run still
+ * leaves node_modules/ in place to re-run the uninstaller with.
+ */
+function isDataGroupAction(action: RemovalAction): boolean {
+  return (
+    action.kind === 'backup-env' ||
+    action.kind === 'delete-runtime-path' ||
+    (action.kind === 'delete-path' && action.fromDataGroup)
+  );
+}
+
+export function executePlan(
+  actions: RemovalAction[],
+  deps: ExecDeps,
+  initialDataGroupBlocked = false,
+): { notes: string[]; dataGroupBlocked: boolean } {
   const notes: string[] = [];
+  // Set when a rm-project-residue in this same run did not fully remove a
+  // project (or the scan that found it couldn't be sure it found
+  // everything): deleting data/'s keys next would make that project's
+  // leftover volume permanently unreadable-but-undeletable-by-key, with
+  // no way back. Every other action keeps this file's general "log a
+  // note and continue" contract — only the data group is held back, and
+  // only by this. The caller threads this run's result into any later
+  // executePlan call over the rest of the same plan (see flow.ts's
+  // head/tail split) so a block set in one call is never forgotten in
+  // the next.
+  let dataGroupBlocked = initialDataGroupBlocked;
   for (const action of actions) {
+    if (dataGroupBlocked && isDataGroupAction(action)) {
+      notes.push(
+        `${action.kind}: skipped — a Compose project above could not be fully removed, so data/ is being kept ` +
+          `intact until it is. Fix the issue noted above (or finish its manual command), then re-run the ` +
+          `uninstaller to remove data/ for real.`,
+      );
+      continue;
+    }
     try {
-      runAction(action, deps, notes);
+      if (runAction(action, deps, notes) === false) dataGroupBlocked = true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       notes.push(`${action.kind}: failed (${msg}) — re-run the uninstaller to retry.`);
+      // A thrown container/volume/network removal is exactly as unproven
+      // as one that returned a nonzero status — never let an exception
+      // quietly skip the same guard a handled failure would have set.
+      if (action.kind === 'rm-project-residue') dataGroupBlocked = true;
     }
   }
-  return { notes };
+  return { notes, dataGroupBlocked };
 }
 
 /**
@@ -54,7 +97,8 @@ export function backupEnv(envPath: string): string {
   return backup;
 }
 
-function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): void {
+/** False only for an rm-project-residue that did not fully remove a project — see isDataGroupAction. */
+function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): boolean {
   const { runCommand, log } = deps;
   switch (action.kind) {
     case 'unload-service':
@@ -134,6 +178,56 @@ function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): void
       }
       break;
     }
+    case 'rm-project-residue': {
+      const { runtime } = action;
+      let volumes = 0;
+      let networks = 0;
+      // A scan that couldn't rule out a hidden project never gets to
+      // call this run clean, even if every project actually listed here
+      // is removed without issue.
+      let allClean = !action.incomplete;
+      if (action.incomplete) {
+        notes.push(
+          `Project scan: a Docker listing failed earlier and may have hidden a project, so data/ is being kept ` +
+            `intact. Re-run the uninstaller once Docker is reachable.`,
+        );
+      }
+      for (const project of action.projects) {
+        // data/'s keys are kept back when this isn't fully clean — see
+        // executePlan's dataGroupBlocked — so the note points at the
+        // project directly rather than assuming data/ is already gone.
+        const leftover = (what: string) => {
+          allClean = false;
+          notes.push(`Project ${project}: ${what}. Remove it with: ` + projectCleanup(runtime, project));
+        };
+        const found = listProject(runCommand, runtime, project);
+        if (!found) {
+          leftover(`not removed ('${runtime}' unavailable)`);
+          continue;
+        }
+        // Containers first: a declined service group leaves them holding the volumes.
+        if (found.containerIds.length > 0 && runCommand(runtime, ['rm', '-f', ...found.containerIds]).status !== 0) {
+          leftover('containers not removed');
+          continue;
+        }
+        for (const volume of found.volumes) {
+          if (runCommand(runtime, ['volume', 'rm', volume]).status === 0) volumes++;
+          else {
+            allClean = false;
+            notes.push(`Volume ${volume}: not removed (in use?) — retry with: ${runtime} volume rm ${volume}`);
+          }
+        }
+        for (const network of found.networks) {
+          if (runCommand(runtime, ['network', 'rm', network]).status === 0) networks++;
+          else {
+            allClean = false;
+            notes.push(`Network ${network}: not removed (in use?) — retry with: ${runtime} network rm ${network}`);
+          }
+        }
+      }
+      if (volumes + networks > 0) log(`✓ removed ${volumes} data volume(s) and ${networks} network(s)`);
+      return allClean;
+    }
     case 'rm-ncl-symlink':
       fs.rmSync(action.linkPath, { force: true });
       log('✓ removed ncl command');
@@ -168,4 +262,5 @@ function runAction(action: RemovalAction, deps: ExecDeps, notes: string[]): void
       log(`✓ removed ${action.item.what}`);
       break;
   }
+  return true;
 }

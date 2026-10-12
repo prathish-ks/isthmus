@@ -223,6 +223,47 @@ For every changed path, assign one of:
   *after* A and B are finalized, since files can get reclassified once a
   closer read shows they belong elsewhere.
 
+**Lesson from the #4015 port (v2026.10.0 post-promotion work, Isthmus PR
+#82) — classification tells you *where* a change lives, not *how to build
+it*.** Once a file or feature is in Bucket B or C — or even Bucket A's
+non-kernel TS glue, once Step 4 has confirmed no new kernel design is
+actually needed — the default reconciliation stance for Steps 3–5 is
+**lift-and-shift**: fetch upstream's real diff directly (not a summary, not
+a re-derivation from the feature description) and port it verbatim,
+adapting only where Isthmus's code has already diverged from the exact
+lines upstream changed. Reinventing an independent design is the
+exception, not the default, and needs a stated reason — a real
+architectural mismatch, a security model upstream's version doesn't
+satisfy, or Step 4's genuine "no upstream Go to translate" case — not
+"it's simpler to write fresh." #4015 (an auto-approval seam for
+uncredentialed gateway reads, entirely Bucket B: gateway-provider
+credential handling) is the worked example: every new file was ported
+byte-for-byte from upstream's actual commit, reconciled by hand only
+against the two existing files a *prior* promotion (#3966) had already
+changed. This generalizes what Step 5 already said for Bucket C
+specifically: don't let a file's bucket label become an excuse to skip
+checking what upstream actually shipped before writing something new.
+
+**The same port also shows lift-and-shift's own failure mode: "it's
+upstream's real code" is not a security review.** Upstream NanoClaw's own
+PR #4015 merged with a glob-to-regex conversion whose backtracking blows
+up against an adversarial, non-matching host — a real ReDoS, present in
+upstream's own shipped TypeScript, not introduced by any Isthmus-side
+adaptation. Isthmus's port (PR #82) initially carried that same
+implementation, and it was first missed locally too — a semgrep finding
+on it was suppressed on the reasoning that the *pattern* side was
+config-trusted, without separately checking that the *host* side being
+matched against it is request/agent-controlled. An independent review
+caught it **while PR #82 was still open**; the fix landed and was pushed
+before the PR merged, so the vulnerable matcher never reached Isthmus's
+own `main`. Get the chronology right when citing this: the gap this
+lesson is actually about is that verbatim-porting upstream's code still
+needs the full security read Step 3 already demands for Bucket B —
+upstream having shipped it, or this fork's own CI tooling having flagged
+and then dismissed it, are both exactly the kind of claim this playbook's
+own Step 3 principle says to verify, not accept — not that the bug
+reached a release.
+
 ## Step 3 — Trace Bucket B to a real answer, not a diff scan
 
 For each Bucket B finding, answer explicitly: is the privileged effect this
