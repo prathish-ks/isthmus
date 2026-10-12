@@ -16,7 +16,7 @@ export const LOCAL_MODEL_HOST = 'host.docker.internal';
  * declaration could point a "local model" at Iron's own management
  * surface instead of an actual model server (a self-SSRF).
  */
-function gatewayPorts(settings: { port: number; approvalPort?: number }): Set<number> {
+export function gatewayPorts(settings: { port: number; approvalPort?: number }): Set<number> {
   const ports = new Set([settings.port]);
   if (settings.approvalPort) ports.add(settings.approvalPort);
   return ports;
