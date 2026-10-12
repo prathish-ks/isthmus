@@ -245,20 +245,24 @@ specifically: don't let a file's bucket label become an excuse to skip
 checking what upstream actually shipped before writing something new.
 
 **The same port also shows lift-and-shift's own failure mode: "it's
-upstream's real code" is not a security review.** The merged file
-carried a real ReDoS — a glob-to-regex conversion whose backtracking blows
-up against an adversarial, non-matching host — present in upstream's own
-shipped TypeScript from the original port commit, not introduced by any
-Isthmus-side adaptation. It was missed locally (a semgrep finding was
-suppressed on the reasoning that the *pattern* side was config-trusted,
-without separately checking that the *host* side being matched against it
-is request/agent-controlled) and only caught by an independent review of
-the merged PR, fixed in a follow-up commit. Verbatim-porting upstream's
-code still needs the full security read Step 3 already demands for
-Bucket B — upstream having shipped it, or this fork's own CI tooling
-having flagged and then dismissed it, are both exactly the kind of claim
-this playbook's own Step 3 principle says to verify, not accept, before
-moving on.
+upstream's real code" is not a security review.** Upstream NanoClaw's own
+PR #4015 merged with a glob-to-regex conversion whose backtracking blows
+up against an adversarial, non-matching host — a real ReDoS, present in
+upstream's own shipped TypeScript, not introduced by any Isthmus-side
+adaptation. Isthmus's port (PR #82) initially carried that same
+implementation, and it was first missed locally too — a semgrep finding
+on it was suppressed on the reasoning that the *pattern* side was
+config-trusted, without separately checking that the *host* side being
+matched against it is request/agent-controlled. An independent review
+caught it **while PR #82 was still open**; the fix landed and was pushed
+before the PR merged, so the vulnerable matcher never reached Isthmus's
+own `main`. Get the chronology right when citing this: the gap this
+lesson is actually about is that verbatim-porting upstream's code still
+needs the full security read Step 3 already demands for Bucket B —
+upstream having shipped it, or this fork's own CI tooling having flagged
+and then dismissed it, are both exactly the kind of claim this playbook's
+own Step 3 principle says to verify, not accept — not that the bug
+reached a release.
 
 ## Step 3 — Trace Bucket B to a real answer, not a diff scan
 
