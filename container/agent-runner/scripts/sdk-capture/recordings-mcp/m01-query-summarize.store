@@ -1,0 +1,12 @@
+[
+  {
+    "id": "rec-1",
+    "body": "first sample",
+    "updated_at": "2026-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "rec-2",
+    "body": "second sample",
+    "updated_at": "2026-01-02T00:00:00.000Z"
+  }
+]
