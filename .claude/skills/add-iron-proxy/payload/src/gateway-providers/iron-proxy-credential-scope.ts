@@ -30,6 +30,9 @@ const INERT_CONFIG_KEYS = new Set(['dns', 'proxy', 'tls', 'log', 'metrics', 'man
 // Go and JavaScript lowercase some non-ASCII letters differently, so only plain ASCII is matched.
 const ASCII = /^[\x21-\x7e]+$/;
 const CONTROL_TIMEOUT_MS = 2_000;
+// Iron Control's own default API port — shared with iron-proxy.ts's settings reader so the
+// two never silently disagree about what "unset" means.
+export const DEFAULT_IRON_CONTROL_PORT = 10_257;
 // Longer than a few of Iron's 10 s grant syncs, so a grant revoked before this host's first read is gone.
 const WARM_UP_MS = 30_000;
 
@@ -328,7 +331,7 @@ export function ironCredentialRules(
       throw new Error('Iron Proxy environment changed after the proxy started; restart the proxy');
     const { config, stable } = await controlEffectiveConfig(
       directory,
-      settings.controlPort ?? 10_257,
+      settings.controlPort ?? DEFAULT_IRON_CONTROL_PORT,
       sources.fetchImpl ?? fetch,
     );
     keep(effectiveConfigRules(config));

@@ -22,6 +22,7 @@ vi.mock('../log.js', () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
 }));
 vi.mock('./iron-proxy-credential-scope.js', () => ({
+  DEFAULT_IRON_CONTROL_PORT: 10_257,
   IronCredentialScope: vi.fn(),
   ironCredentialRules: vi.fn(() => async () => {}),
   seenRuleFile: vi.fn((file: string) => ({ file })),

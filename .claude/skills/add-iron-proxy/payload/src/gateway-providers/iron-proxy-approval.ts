@@ -289,6 +289,9 @@ export class IronProxyApprovalBridge {
       },
       title: 'Network credentials request',
       question: `*Agent:* ${safeDisplay(identity.groupName.slice(0, 120))}\n*Request:* ${safeDisplay(`${request.method} ${request.host}${request.path}`)}`,
+      // Deliberately narrower than `request`: rawMethod/sendsPayload inform
+      // policy, not the operator-facing audit trail. Update by hand if a
+      // future field on `request` should actually show up here too.
       audit: { method: request.method, host: request.host, path: request.path },
     };
 

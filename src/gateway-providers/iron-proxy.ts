@@ -15,7 +15,12 @@ import { log } from '../log.js';
 
 import { IronProxyApprovalBridge, type IronApprovalIdentity } from './iron-proxy-approval.js';
 import { readAllowedHostsFile } from './iron-proxy-allowlist.js';
-import { IronCredentialScope, ironCredentialRules, seenRuleFile } from './iron-proxy-credential-scope.js';
+import {
+  DEFAULT_IRON_CONTROL_PORT,
+  IronCredentialScope,
+  ironCredentialRules,
+  seenRuleFile,
+} from './iron-proxy-credential-scope.js';
 import { localModelOrigins, localModelPorts } from './iron-proxy-local-model.js';
 import {
   registerGatewayProvider,
@@ -129,7 +134,7 @@ export function readIronProxySettings(
     containerName: value('NANOCLAW_IRON_PROXY_CONTAINER') || `nanoclaw-iron-proxy-${getInstallSlug(projectRoot)}`,
     port,
     managed: !!value('NANOCLAW_IRON_CONTROL_URL'),
-    controlPort: Number(value('NANOCLAW_IRON_CONTROL_PORT') || 10257),
+    controlPort: Number(value('NANOCLAW_IRON_CONTROL_PORT') || DEFAULT_IRON_CONTROL_PORT),
     projectRoot,
     approvalDir: isInside(approvalSocket, materialRoot)
       ? path.dirname(approvalSocket)
