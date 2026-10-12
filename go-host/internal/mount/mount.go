@@ -554,7 +554,13 @@ func LabelValueLegal(value string) bool {
 // ---------- secret/credential checks (types.ts:526-553) ----------
 
 var (
-	pathValueRe = regexp.MustCompile(`^/[^\s]*$`)
+	// Multi-segment, matching types.ts's isSecretShaped. The exemption is
+	// tested first and short-circuits both checks, so a bare `^/[^\s]*$`
+	// admitted any opaque token beginning with '/' — base64 legitimately can
+	// — letting a credential's bytes through the one exemption documented as
+	// unable to do that. Every real mount path is rooted under a mount
+	// directory and so has a segment pair; a lone token no longer does.
+	pathValueRe = regexp.MustCompile(`^/(?:[^\s/]+/)+[^\s/]+$`)
 	secretKeyRe = regexp.MustCompile(`(?i)(_KEY|_TOKEN|_SECRET|PASSWORD)$`)
 	credSkRe    = regexp.MustCompile(`^sk-[A-Za-z0-9_-]{20,}$`)
 	credGhRe    = regexp.MustCompile(`^(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}$`)
