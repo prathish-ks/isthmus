@@ -219,6 +219,23 @@ describe("conformance with Iron's own matcher", () => {
   });
 });
 
+describe('hostMatches() ReDoS resistance', () => {
+  // Regression for a real finding: a naive `*`-glob-to-regex conversion
+  // builds a backtracking pattern whose match time blows up combinatorially
+  // against an adversarial, non-matching host. `host` here is the request's
+  // own destination (attacker/agent-influenced), not trusted config, so a
+  // many-wildcard rule plus a crafted host is a real event-loop-blocking DoS,
+  // not just a theoretical one.
+  it('stays fast against a many-wildcard pattern and a pathological non-matching host', () => {
+    const rule: CredentialRule = { host: `${Array(40).fill('a').join('*')}*b`, methods: null };
+    const destination: Destination = { host: 'a'.repeat(2000), method: 'GET' };
+    const start = Date.now();
+    const result = ruleCovers(rule, destination);
+    expect(Date.now() - start).toBeLessThan(200);
+    expect(result).toBe(false);
+  });
+});
+
 describe('fresh credential scope', () => {
   const docs = { host: 'docs.example.test', method: 'GET' };
   const github = { host: 'api.github.com', method: 'GET' };

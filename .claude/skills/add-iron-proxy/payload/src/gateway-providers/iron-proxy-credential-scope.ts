@@ -133,19 +133,37 @@ function hostMatches(pattern: string, host: string): boolean {
   if (pattern.startsWith('*.')) return host.endsWith(pattern.slice(1)) || host === pattern.slice(2);
   // Character classes and escapes are not modeled, so they cover every host.
   if (/[[\\]/.test(pattern)) return true;
-  const glob = pattern
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\\\*/g, '.*')
-    .replace(/\\\?/g, '.');
-  // False positive: `glob` is built only from a fully-escaped literal plus
-  // bounded `.*`/`.` substitutions (no nested quantifiers, no alternation),
-  // run against a length-capped DNS host string — not susceptible to ReDoS.
-  // `pattern` is Iron's own config/Iron-Control-sourced rule data (operator/
-  // admin trust), never request- or agent-controlled. Same disposition as
-  // this project's other non-literal-regexp false positive (router.ts's
-  // engage_pattern, see .github/workflows/ci.yml's semgrep-scope comment).
-  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-  return new RegExp(`^${glob}$`).test(host);
+  // `host` is the request's own destination, not trusted config — a glob
+  // with several `*` segments turned into a backtracking regex is a real
+  // ReDoS against an adversarial host (verified: chained `*` segments
+  // against a non-matching host blow past exponential time), so this
+  // walks both strings with a single backtrack point instead of asking a
+  // regex engine to explore every way the wildcards could absorb `host`.
+  return globMatches(pattern, host);
+}
+
+/** Bounded-time `*`/`?` glob match, O(pattern × host) worst case, no backtracking blowup. */
+function globMatches(pattern: string, host: string): boolean {
+  let p = 0;
+  let h = 0;
+  let starAt = -1;
+  let starHost = 0;
+  while (h < host.length) {
+    if (p < pattern.length && (pattern[p] === '?' || pattern[p] === host[h])) {
+      p++;
+      h++;
+    } else if (p < pattern.length && pattern[p] === '*') {
+      starAt = p++;
+      starHost = h;
+    } else if (starAt !== -1) {
+      p = starAt + 1;
+      h = ++starHost;
+    } else {
+      return false;
+    }
+  }
+  while (p < pattern.length && pattern[p] === '*') p++;
+  return p === pattern.length;
 }
 
 export function ruleCovers(rule: CredentialRule, destination: Destination): boolean {
