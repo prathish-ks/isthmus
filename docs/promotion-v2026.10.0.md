@@ -391,26 +391,73 @@ needs a live test), not just a bucket of "deferred":
     `docs/promotion-v2026.10.0-rollback-iron-proxy.md`. That same live
     test caught a second real bug in the first fix attempt (a
     `docker ps -q`/`--format` incompatibility), also fixed.
+  - `#4015` — auto-approval seam for uncredentialed gateway reads.
+    Landed after this document's own Step 9 closed, in a dedicated
+    follow-on (Isthmus PR `#82`): `gateway-read-policy.ts`'s
+    `permitsConfiguredGatewayRead`/`permitsUncredentialedGatewayRead`,
+    `gateway-approval-coordinator.ts`'s `attachesNoCredential()` (fails
+    closed on timeout, error, or a missing `credentialScope` capability),
+    Iron Proxy's own `IronCredentialScope` mirror of its Go rule-matching
+    package, and the front proxy's payload-free attestation
+    (`x-iron-request-payload`) — every new file ported verbatim from
+    upstream's real diff per this playbook's own Step 2/5 lift-and-shift
+    lesson, reconciled only against what `#3966` had already changed.
+    Two independent reviews of the merged PR: the first closed with no
+    changes needed beyond what a follow-up commit had already fixed; the
+    second caught a real ReDoS in upstream's own glob-to-regex matcher
+    (`hostMatches()`) that a local semgrep suppression had wrongly
+    cleared — caught and fixed (a bounded-time matcher, no regex) while
+    the PR was still open, never reaching `main`. See the playbook's own
+    Step 2 lift-and-shift lesson and its ReDoS counterpoint for the full
+    account.
+  - `#3883` — Iron Control database cleanup on uninstall. Landed as its
+    own dedicated pass (Isthmus PR `#81`), the full 799-line upstream
+    mechanism ported to this fork's own `LABELS`/`GATEWAY_ROLE`
+    primitives and scan→plan→remove→flow uninstall pipeline rather than
+    upstream's generic Compose-project scanner: `control.ts` now labels
+    both the web and database containers the same way
+    `startCentralProxy()` already labels the central proxy (never the
+    volume itself, so Compose won't offer to recreate it on a label
+    change); `scan.ts`'s new `scanProjects()`/`listProject()`/
+    `projectCleanup()` find this copy's Compose projects by install
+    label, then their volumes/networks by Compose project label; a new
+    `rm-project-residue` plan/remove action runs after container
+    removal but before the data group's `.env` backup and `data/`
+    deletion, since the volume's encryption keys live there.
+  - `#3920`'s Codex failure-assist half — closed (Isthmus PR `#79`):
+    `offerCodexFailureAssist()`'s bare, fully-interactive
+    `spawn('codex', ...)` now carries `--sandbox read-only
+    --ask-for-approval on-request`, matching upstream's real fix and
+    bringing it to the same bar as Claude's own already-fixed
+    equivalent (`CLAUDE_READ_ONLY_ARGS`). Its OpenCode half was
+    confirmed not applicable, not just left on the sibling branch:
+    upstream's own fix for that half never landed on upstream's
+    `providers` branch either (confirmed byte-identical), so there is
+    nothing on this fork to port.
+  - `#3964`'s core half — closed (Isthmus PR `#80`): `decide()` now
+    consults a provider's declared `modelAuthorities`, not just
+    `modelDomains`, in `isDefaultApprovedModelHost()` — closing a
+    declared-but-unenforced gap matching `#3966`'s own self-SSRF
+    pattern (no provider populates the field yet, so this closes a
+    latent gap, not a live one). Its OpenCode-specific half (declaring
+    `modelAuthorities` from `OPENCODE_BASE_URL`) was confirmed not
+    applicable: this fork's `opencode.ts` never ported upstream's
+    custom/local-model-endpoint configuration feature at all, the same
+    root cause already found for `#3920`'s OpenCode half.
+  - `setup/onecli.ts`'s installer piping to `sh` instead of an explicit
+    `/bin/sh` (named during `#4059`) — closed (Isthmus PR `#78`): pipes
+    to an explicit `/bin/sh` now, with a regression test asserting it.
 - **Large, separate efforts — reasonable to defer past this promotion,
   tracked with an owner**:
-  - `#3883` — Iron Control database cleanup on uninstall. 799 lines
-    across 7 files of new generic Compose-project-scanning machinery;
-    needs its own dedicated pass against this fork's uninstall
-    scan/plan/remove pipeline, not squeezed into this promotion.
-  - `#3964`/`#3965`'s OpenCode-provider halves, `#3920`'s OpenCode/Codex
-    failure-assist halves — target files live only on the `providers`
-    sibling branch, never reviewed against `main`. Reasonable to leave
-    there until that branch gets its own review pass; the sibling branch
-    itself still needs that pass before being offered to users.
-  - `#4015` — needs predecessor abstractions (`modelAuthorities`,
-    `credentialScope`, `gateway-read-policy.ts`) this fork doesn't have
-    yet. Its own dedicated Step-3 trust-boundary pass. Already more
-    restrictive than upstream's opt-in default, so not a regression —
-    just not yet implemented.
-  - `setup/onecli.ts`'s installer piping to `sh` instead of an explicit
-    `/bin/sh` (named during `#4059`) — a real but narrow hardening gap,
-    small fix, not security-critical (runs on the operator's own
-    machine during setup).
+  - `#3965` — not yet addressed by any Isthmus PR. Upstream's PR checks
+    an OpenCode local-model URL against the selected gateway at the
+    setup prompt itself (`OPENCODE_BASE_URL`, a validator calling the
+    gateway's `modelEndpoint()`). This fork's `providers` branch has no
+    matching interactive setup-prompt flow for OpenCode today — the
+    same root cause `#3920`/`#3964`'s OpenCode halves were ruled not
+    applicable for — but that determination hasn't actually been made
+    for `#3965` specifically yet; don't assume it from the pattern
+    alone without checking the `providers` branch directly first.
 
 ## Open before Step 8/9/10 — all closed
 
@@ -514,3 +561,26 @@ needs a live test), not just a bucket of "deferred":
   new law (none warranted), a dated 2026-10-11 annotation added under
   LAW-09's section instead. **Promotion now genuinely closed, Steps
   0–10 — this time including the step that was previously only implied.**
+- 2026-10-12 — Audited "Named deferred follow-ups" against Isthmus PRs
+  `#78`–`#84` (none of which had updated this document when they
+  merged) and found every item but one already closed:
+  - `#4015` — landed as its own dedicated follow-on (PR `#82`), after
+    this promotion's own Step 9/10 had already closed. Two independent
+    reviews of that PR; the second caught a real ReDoS in a matcher
+    ported verbatim from upstream's own shipped code (fixed before the
+    PR merged, never reaching `main`). Also fed two lessons back into
+    `go-host/docs/upstream-promotion-playbook.md` and
+    `.claude/skills/promote-upstream/SKILL.md` (PRs `#83`, `#84`): the
+    default-to-lift-and-shift principle this port followed, and its own
+    counterpoint that verbatim-porting upstream's code is still not a
+    substitute for the Step 3 security read.
+  - `#3883` (PR `#81`), `#3920`'s Codex half (PR `#79`, OpenCode half
+    confirmed not applicable), `#3964`'s core half (PR `#80`, OpenCode
+    half confirmed not applicable), and `setup/onecli.ts`'s `sh` → an
+    explicit `/bin/sh` (PR `#78`) — all closed, moved from "Large,
+    separate efforts" to "Closed, not deferred."
+  - `#3965` is the one item still genuinely open — no PR in `#78`–`#84`
+    touched it, and its own applicability (same question already
+    answered for `#3920`/`#3964`'s OpenCode halves) hasn't actually
+    been checked yet, so it's named as its own item rather than folded
+    into the others' pattern by assumption.
