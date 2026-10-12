@@ -137,6 +137,14 @@ function hostMatches(pattern: string, host: string): boolean {
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     .replace(/\\\*/g, '.*')
     .replace(/\\\?/g, '.');
+  // False positive: `glob` is built only from a fully-escaped literal plus
+  // bounded `.*`/`.` substitutions (no nested quantifiers, no alternation),
+  // run against a length-capped DNS host string — not susceptible to ReDoS.
+  // `pattern` is Iron's own config/Iron-Control-sourced rule data (operator/
+  // admin trust), never request- or agent-controlled. Same disposition as
+  // this project's other non-literal-regexp false positive (router.ts's
+  // engage_pattern, see .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   return new RegExp(`^${glob}$`).test(host);
 }
 
