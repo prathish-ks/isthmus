@@ -182,6 +182,11 @@ const SDK_NOTICES = new Map([
   ['Not logged in · Please run /login', OWNER_FIX_HINT],
   ['Invalid API key · Fix external API key', OWNER_FIX_HINT],
   ['Invalid auth token · Fix external auth token', OWNER_FIX_HINT],
+  // Observed verbatim from the CLI (2026-10-12, SDK 0.3.260) when a Claude
+  // Code keychain OAuth session has lapsed and the standalone refresh fails —
+  // a sibling of the three notices above that was missing from this map, so
+  // the turn surfaced the raw SDK string with no owner hint.
+  ['Failed to authenticate: OAuth session expired and could not be refreshed', OWNER_FIX_HINT],
   ['Credit balance is too low', OWNER_FIX_HINT],
   ['Prompt is too long', 'This conversation got too long. An admin can send /clear to start a new one.'],
 ]);
