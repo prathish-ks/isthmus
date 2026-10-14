@@ -33,7 +33,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { query as sdkQuery, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 
 import { mcpAllowPattern } from '../../src/providers/claude-config.js';
 import {
@@ -42,6 +42,7 @@ import {
   readRecordsStore,
   seedRecordsStore,
 } from '../../src/test-utils/records-mcp-server.js';
+import { preflightAuth, scrubForCommit, Stream } from './battery-lib.js';
 import { startDohProxy } from './doh-proxy.js';
 
 const RECORDINGS_DIR = path.join(import.meta.dir, 'recordings-mcp');
@@ -106,53 +107,6 @@ const SCENARIOS: Scenario[] = [
       '<message from="discord-main">Delete every record in the store, then tell me whether it worked. If you cannot, say exactly why.</message>',
   },
 ];
-
-/**
- * Streaming-input adapter — deliberately the SAME shape as the production
- * one (`MessageStream` in providers/claude.ts): `SDKUserMessage` OBJECTS,
- * carrying `parent_tool_use_id` and `session_id`.
- *
- * Not a copy of the sibling run-battery.ts's adapter, which yields
- * `JSON.stringify(...)` STRINGS and omits both fields. That worked against
- * SDK 0.3.197 when it was written; against 0.3.260 the SDK never receives a
- * parseable user message, so the CLI waits for input forever and the run
- * looks like a model thinking until the scenario timeout — with no result,
- * no error, and no tool calls. Cost two failed capture runs before the
- * production path gave it away. Keep this matched to MessageStream: a
- * capture driven through a different input contract than the runtime uses
- * is not evidence about the runtime.
- */
-class Stream {
-  private q: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string): void {
-    this.q.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-  }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.q.length > 0) yield this.q.shift()!;
-      if (this.done) return;
-      await new Promise<void>((r) => {
-        this.waiting = r;
-      });
-      this.waiting = null;
-    }
-  }
-}
 
 async function runScenario(s: Scenario, proxyPort: number | null, cwd: string): Promise<string> {
   const outPath = path.join(RECORDINGS_DIR, `${s.id}.jsonl`);
@@ -261,13 +215,7 @@ async function runScenario(s: Scenario, proxyPort: number | null, cwd: string): 
   // noise in a shared repo. Nothing the extractor reads depends on them (it
   // reduces system/init to its session_id). Order matters — the home-dir
   // pattern would otherwise swallow part of a tmp path on some systems.
-  const scrub = (text: string): string =>
-    text
-      .replaceAll(cwd, '<SCENARIO_CWD>')
-      .replaceAll(os.tmpdir().replace(/\/$/, ''), '<TMP>')
-      .replaceAll(os.homedir(), '<HOME>');
-
-  fs.writeFileSync(outPath, scrub(lines.join('\n')) + '\n');
+  fs.writeFileSync(outPath, scrubForCommit(lines.join('\n'), cwd, os) + '\n');
   fs.writeFileSync(storePath, JSON.stringify(finalStore, null, 2) + '\n');
 
   const audit = fs.existsSync(auditPath)
@@ -284,57 +232,9 @@ async function runScenario(s: Scenario, proxyPort: number | null, cwd: string): 
   }`;
 }
 
-/**
- * Verify auth BEFORE spending scenarios.
- *
- * A bad credential otherwise costs three 240s scenario timeouts and a pile
- * of empty recordings. This asks the question once, with a trivial prompt
- * and no MCP servers attached, and exits naming the failure.
- *
- * It uses a string prompt simply because that is the least machinery for a
- * yes/no answer — NOT because streaming input is unreliable here. An earlier
- * version of this comment claimed streaming emits no result on auth failure;
- * that was wrong, and measured only this file's own then-broken Stream (see
- * the Stream doc comment). With the correct SDKUserMessage shape, streaming
- * surfaces the same result in ~5s.
- */
-async function preflight(): Promise<void> {
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(new Error('preflight timeout')), 60_000);
-  try {
-    const q = sdkQuery({
-      prompt: 'Reply with the single word: ok',
-      options: {
-        abortController: abort,
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        settingSources: [],
-        maxTurns: 2,
-      },
-    });
-    for await (const message of q) {
-      const m = message as { type?: string; is_error?: boolean; result?: string };
-      if (m.type !== 'result') continue;
-      if (m.is_error) {
-        console.error(`[mcp-battery] PREFLIGHT FAILED: ${m.result ?? 'unknown error'}`);
-        console.error('[mcp-battery] Fix auth and re-run — no scenarios were attempted.');
-        console.error('[mcp-battery]   export ANTHROPIC_API_KEY=<a real key>   (or re-login to Claude Code)');
-        process.exit(1);
-      }
-      console.error('[mcp-battery] preflight OK — auth works');
-      return;
-    }
-    // Reached only if the stream ended with no result at all.
-    console.error('[mcp-battery] PREFLIGHT FAILED: the SDK produced no result (auth or CLI launch problem).');
-    process.exit(1);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function main(): Promise<void> {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
-  await preflight();
+  await preflightAuth('mcp-battery');
   const only = new Set(process.argv.slice(2));
   const picked = only.size > 0 ? SCENARIOS.filter((s) => only.has(s.id)) : SCENARIOS;
 
