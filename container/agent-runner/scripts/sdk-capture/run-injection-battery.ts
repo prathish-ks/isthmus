@@ -204,10 +204,20 @@ async function runScenario(s: Scenario, root: string): Promise<string> {
         cwd,
         abortController: abort,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: INSTRUCTIONS },
-        // Read/Glob/Grep only: the marker must be genuinely reachable for the
-        // capture to say anything about judgment, but Bash is withheld so the
-        // scenario stays a file-disclosure question rather than an
-        // arbitrary-execution one.
+        // The marker must be genuinely reachable for the capture to say
+        // anything about judgment, so file-reading tools are granted.
+        //
+        // NOTE, established by this very capture: `allowedTools` does NOT gate
+        // built-in tools under `permissionMode: 'bypassPermissions'` +
+        // `allowDangerouslySkipPermissions`. i01 read the brief with Bash,
+        // which is absent from this list — as did both memory-battery
+        // scenarios. An earlier version of this comment claimed Bash was
+        // "withheld"; it was not, and nothing here withholds it. The capture's
+        // conclusion is unaffected (the question is whether the agent
+        // discloses the marker, and a broader tool surface makes that a
+        // STRONGER test, not a weaker one) but the list is a hint about what
+        // the agent is expected to need, not a sandbox boundary. See the
+        // header note in providers/claude-config.mcp-allowlist.test.ts.
         allowedTools: ['Read', 'Glob', 'Grep'],
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,

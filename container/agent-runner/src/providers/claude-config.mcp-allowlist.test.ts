@@ -16,6 +16,25 @@
  * what happens at a real MCP server once a call reaches it. This file covers
  * whether the call can be made at all.
  *
+ * SCOPE CAVEAT, from live evidence (2026-10-14). What is asserted below is the
+ * DERIVATION: given these servers, resolveClaudeMcpServers produces these
+ * allowlist entries. The runtime consequence quoted above is claude-config.ts's
+ * own claim, and three live captures contradict a strict reading of it: agents
+ * invoked `Bash` while it was absent from the `allowedTools` passed to the SDK
+ * (scripts/sdk-capture/recordings-injection/i01, recordings-memory/mem01 and
+ * mem02). The containers set `permissionMode: 'bypassPermissions'` and
+ * `allowDangerouslySkipPermissions`, which plausibly makes `allowedTools`
+ * advisory — but that causal link is NOT established here, only the
+ * observation that the list did not gate Bash.
+ *
+ * So this file should be read as pinning the derivation against regression —
+ * worth doing, since the list is passed to the SDK on every query and an empty
+ * or malformed one is a silent change — and NOT as evidence that the list
+ * confines an agent. The tool surface an agent actually gets is bounded by the
+ * container, the OneCLI allow-list and `disallowedTools` plus the
+ * defense-in-depth preToolUseHook in providers/claude.ts, which exists
+ * precisely because the authors did not trust the SDK filter alone.
+ *
  * Assertions run through BOTH surfaces: the pure function, and
  * `resolveRuntimeConfiguration` against the real registered
  * `claudeRuntimeContract`. The second is the path ClaudeProvider's
