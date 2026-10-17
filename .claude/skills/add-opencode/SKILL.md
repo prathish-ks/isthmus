@@ -18,8 +18,11 @@ overwrite every skill-owned provider file with its canonical registry copy:
 
 ```nc:copy from-branch:providers
 src/providers/opencode.ts
+src/providers/opencode-auth-stub.ts
 src/providers/opencode-registration.test.ts
 container/agent-runner/src/providers/opencode.ts
+container/agent-runner/src/providers/opencode-auth.ts
+container/agent-runner/src/providers/opencode-auth.test.ts
 container/agent-runner/src/providers/mcp-to-opencode.ts
 container/agent-runner/src/providers/mcp-to-opencode.test.ts
 container/agent-runner/src/providers/opencode-registration.test.ts
@@ -64,7 +67,30 @@ version as the globally installed `opencode-ai` CLI:
 Do not use `latest`. OpenCode's CLI and SDK have changed their session API in
 lockstep before; mismatched versions can build cleanly and fail at runtime.
 
-### 4. Install the pin guard
+### 4. Install the setup-time credential flow
+
+OpenCode's own interactive auth step — choose a backend, sign in to ChatGPT or
+enter an API key, pick a default model — routes every credential through
+whichever gateway is selected (`setup/gateways/credential-store.ts`), the same
+seam Iron Proxy's own skill provides a `scripts/credential-store.ts` adapter
+for. These are skill-owned files, not sourced from the `providers` branch:
+
+```nc:copy
+payload/scripts/opencode-auth.ts -> .claude/skills/add-opencode/scripts/opencode-auth.ts
+payload/scripts/opencode-auth.test.ts -> .claude/skills/add-opencode/scripts/opencode-auth.test.ts
+payload/scripts/opencode-model-config.ts -> .claude/skills/add-opencode/scripts/opencode-model-config.ts
+payload/scripts/opencode-model-config.test.ts -> .claude/skills/add-opencode/scripts/opencode-model-config.test.ts
+payload/scripts/opencode-vault.ts -> .claude/skills/add-opencode/scripts/opencode-vault.ts
+payload/scripts/opencode-vault.test.ts -> .claude/skills/add-opencode/scripts/opencode-vault.test.ts
+```
+
+Run it once after install, or whenever credentials need to change:
+
+```bash
+pnpm exec tsx .claude/skills/add-opencode/scripts/opencode-auth.ts
+```
+
+### 5. Install the pin guard
 
 Copy the structural test that asserts the CLI manifest and SDK package stay on
 the same exact version:
@@ -73,7 +99,7 @@ the same exact version:
 opencode-cli-tools.test.ts -> src/opencode-cli-tools.test.ts
 ```
 
-### 5. Build and validate
+### 6. Build and validate
 
 ```nc:run effect:build
 pnpm run build
@@ -84,11 +110,11 @@ pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit
 ```
 
 ```nc:run effect:test
-pnpm exec vitest run src/providers/opencode-registration.test.ts src/opencode-cli-tools.test.ts
+pnpm exec vitest run src/providers/opencode-registration.test.ts src/opencode-cli-tools.test.ts .claude/skills/add-opencode/scripts/opencode-auth.test.ts .claude/skills/add-opencode/scripts/opencode-model-config.test.ts .claude/skills/add-opencode/scripts/opencode-vault.test.ts
 ```
 
 ```nc:run effect:test
-cd container/agent-runner && bun test src/providers/opencode-registration.test.ts
+cd container/agent-runner && bun test src/providers/opencode-registration.test.ts src/providers/opencode-auth.test.ts
 ```
 
 ```nc:run effect:build
