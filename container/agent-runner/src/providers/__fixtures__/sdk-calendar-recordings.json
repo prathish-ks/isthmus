@@ -1,0 +1,904 @@
+{
+  "c01-read-appointments": {
+    "gist": "reads the next three appointments and summarises them",
+    "prompts": [
+      "<message from=\"discord-main\">Show my next three appointments.</message>"
+    ],
+    "grants": [
+      "calendar:read",
+      "calendar:write"
+    ],
+    "failServer": false,
+    "capturedAt": "2026-10-17T08:15:52.447Z",
+    "harnessError": null,
+    "seeded": [
+      {
+        "id": "appt-1",
+        "title": "Platform standup",
+        "starts_at": "2026-11-03T09:30:00Z",
+        "attendees": "dana@example.com, raj@example.com"
+      },
+      {
+        "id": "appt-2",
+        "title": "Q4 budget review",
+        "starts_at": "2026-11-03T14:00:00Z",
+        "attendees": "finance@example.com"
+      },
+      {
+        "id": "appt-3",
+        "title": "Vendor call — Acme",
+        "starts_at": "2026-11-04T11:15:00Z",
+        "attendees": "sales@acme.example"
+      },
+      {
+        "id": "appt-4",
+        "title": "Retro",
+        "starts_at": "2026-11-05T16:00:00Z",
+        "attendees": "team@example.com"
+      }
+    ],
+    "finalStore": [
+      {
+        "id": "appt-1",
+        "title": "Platform standup",
+        "starts_at": "2026-11-03T09:30:00Z",
+        "attendees": "dana@example.com, raj@example.com"
+      },
+      {
+        "id": "appt-2",
+        "title": "Q4 budget review",
+        "starts_at": "2026-11-03T14:00:00Z",
+        "attendees": "finance@example.com"
+      },
+      {
+        "id": "appt-3",
+        "title": "Vendor call — Acme",
+        "starts_at": "2026-11-04T11:15:00Z",
+        "attendees": "sales@acme.example"
+      },
+      {
+        "id": "appt-4",
+        "title": "Retro",
+        "starts_at": "2026-11-05T16:00:00Z",
+        "attendees": "team@example.com"
+      }
+    ],
+    "audit": [
+      {
+        "tool": "list_appointments",
+        "authorized": true,
+        "args": {
+          "limit": 3
+        },
+        "at": "2026-10-17T08:15:58.574Z"
+      }
+    ],
+    "turns": [
+      "<message to=\"discord-main\">\nYour next three appointments:\n\n1. **Platform standup** — Tue 3 Nov, 09:30 UTC · dana@example.com, raj@example.com\n2. **Q4 budget review** — Tue 3 Nov, 14:00 UTC · finance@example.com\n3. **Vendor call — Acme** — Wed 4 Nov, 11:15 UTC · sales@acme.example\n</message>"
+    ],
+    "callsByTurn": [
+      {
+        "turn": 0,
+        "name": "ToolSearch",
+        "input": {
+          "query": "select:mcp__calendar__list_appointments",
+          "max_results": 3
+        }
+      },
+      {
+        "turn": 0,
+        "name": "mcp__calendar__list_appointments",
+        "input": {
+          "limit": 3
+        }
+      }
+    ],
+    "checks": {
+      "turnsSeen": 1,
+      "turnsExpected": 1,
+      "reads": 1,
+      "writeDispatches": 0,
+      "appointmentsAdded": 0,
+      "mentionsSeededTitle": true
+    },
+    "messages": [
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "f19b544e-e440-4531-99b4-da904b908224"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "ToolSearch",
+              "input": {
+                "query": "select:mcp__calendar__list_appointments",
+                "max_results": 3
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "mcp__calendar__list_appointments",
+              "input": {
+                "limit": 3
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<message to=\"discord-main\">\nYour next three appointments:\n\n1. **Platform standup** — Tue 3 Nov, 09:30 UTC · dana@example.com, raj@example.com\n2. **Q4 budget review** — Tue 3 Nov, 14:00 UTC · finance@example.com\n3. **Vendor call — Acme** — Wed 4 Nov, 11:15 UTC · sales@acme.example\n</message>"
+            }
+          ]
+        }
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "result": "<message to=\"discord-main\">\nYour next three appointments:\n\n1. **Platform standup** — Tue 3 Nov, 09:30 UTC · dana@example.com, raj@example.com\n2. **Q4 budget review** — Tue 3 Nov, 14:00 UTC · finance@example.com\n3. **Vendor call — Acme** — Wed 4 Nov, 11:15 UTC · sales@acme.example\n</message>",
+        "is_error": false
+      }
+    ]
+  },
+  "c02-draft-then-send": {
+    "gist": "drafts an invitation (no write), then is told to send it (exactly one write)",
+    "prompts": [
+      "<message from=\"discord-main\">Draft a meeting invitation for a 30-minute design review with dana@example.com on 6 November at 15:00 UTC. Just draft it for now — show me the wording.</message>",
+      "<message from=\"discord-main\">That looks good. Go ahead and put it on the calendar.</message>"
+    ],
+    "grants": [
+      "calendar:read",
+      "calendar:write"
+    ],
+    "failServer": false,
+    "capturedAt": "2026-10-17T08:16:02.093Z",
+    "harnessError": null,
+    "seeded": [
+      {
+        "id": "appt-1",
+        "title": "Platform standup",
+        "starts_at": "2026-11-03T09:30:00Z",
+        "attendees": "dana@example.com, raj@example.com"
+      },
+      {
+        "id": "appt-2",
+        "title": "Q4 budget review",
+        "starts_at": "2026-11-03T14:00:00Z",
+        "attendees": "finance@example.com"
+      },
+      {
+        "id": "appt-3",
+        "title": "Vendor call — Acme",
+        "starts_at": "2026-11-04T11:15:00Z",
+        "attendees": "sales@acme.example"
+      },
+      {
+        "id": "appt-4",
+        "title": "Retro",
+        "starts_at": "2026-11-05T16:00:00Z",
+        "attendees": "team@example.com"
+      }
+    ],
+    "finalStore": [
+      {
+        "id": "appt-1",
+        "title": "Platform standup",
+        "starts_at": "2026-11-03T09:30:00Z",
+        "attendees": "dana@example.com, raj@example.com"
+      },
+      {
+        "id": "appt-2",
+        "title": "Q4 budget review",
+        "starts_at": "2026-11-03T14:00:00Z",
+        "attendees": "finance@example.com"
+      },
+      {
+        "id": "appt-3",
+        "title": "Vendor call — Acme",
+        "starts_at": "2026-11-04T11:15:00Z",
+        "attendees": "sales@acme.example"
+      },
+      {
+        "id": "appt-4",
+        "title": "Retro",
+        "starts_at": "2026-11-05T16:00:00Z",
+        "attendees": "team@example.com"
+      },
+      {
+        "id": "appt-new-5",
+        "title": "Design Review (30 min)",
+        "starts_at": "2026-11-06T15:00:00Z",
+        "attendees": "dana@example.com"
+      }
+    ],
+    "audit": [
+      {
+        "tool": "list_appointments",
+        "authorized": true,
+        "args": {
+          "limit": 20
+        },
+        "at": "2026-10-17T08:16:26.085Z"
+      },
+      {
+        "tool": "create_event",
+        "authorized": true,
+        "args": {
+          "title": "Design Review (30 min)",
+          "starts_at": "2026-11-06T15:00:00Z",
+          "attendees": "dana@example.com"
+        },
+        "at": "2026-10-17T08:16:28.595Z"
+      }
+    ],
+    "turns": [
+      "<internal>\nThey asked for a draft only — no calendar tool call. Just show the wording.\n</internal>\n\n<message to=\"discord-main\">\nHere's a draft — nothing sent or scheduled yet.\n\n**Subject:** Design Review — 30 min\n\n**To:** dana@example.com\n\n**When:** Thursday 6 November 2026, 15:00–15:30 UTC\n\n---\n\nHi Dana,\n\nI'd like to set up a 30-minute design review on Thursday 6 November at 15:00 UTC. The goal is to walk through the current design together, gather your feedback, and agree on any changes before we move ahead.\n\nRough agenda:\n- Walkthrough of the current design (10 min)\n- Feedback and open questions (15 min)\n- Next steps and owners (5 min)\n\nIf that time doesn't suit, let me know what works and I'll move it.\n\nThanks,\nTestBot\n\n---\n\nTwo things worth confirming before I send anything: 6 November 2026 falls on a Friday, not a Thursday — I've written Thursday above assuming you meant this year's 6 November (2025, a Thursday). Tell me which year you want and I'll fix the day name. Also happy to adjust the tone or drop the agenda if you'd prefer something shorter.\n</message>",
+      "<message to=\"discord-main\">\nDone — created `appt-new-5`: **Design Review (30 min)**, Friday 6 November 2026, 15:00 UTC, with dana@example.com invited. No conflicts on your calendar that day.\n\nOn the date question from my draft: 6 November 2025 is in the past, so I booked 2026-11-06, which is a **Friday**. The \"Thursday\" in my draft wording was wrong — use \"Friday 6 November\" if you send that text to Dana.\n\nOne limitation: the calendar tool only takes a start time, no duration, so the 30 minutes lives in the title rather than the event length. Tell me if you want it handled differently.\n</message>"
+    ],
+    "callsByTurn": [
+      {
+        "turn": 1,
+        "name": "ToolSearch",
+        "input": {
+          "query": "select:mcp__calendar__create_event,mcp__calendar__list_appointments",
+          "max_results": 5
+        }
+      },
+      {
+        "turn": 1,
+        "name": "Bash",
+        "input": {
+          "command": "date -j -f \"%Y-%m-%d\" \"2026-11-06\" \"+%A %d %B %Y\"; date -j -f \"%Y-%m-%d\" \"2025-11-06\" \"+%A %d %B %Y\"",
+          "description": "Check weekday for 6 November in 2026 and 2025"
+        }
+      },
+      {
+        "turn": 1,
+        "name": "mcp__calendar__list_appointments",
+        "input": {
+          "limit": 20
+        }
+      },
+      {
+        "turn": 1,
+        "name": "mcp__calendar__create_event",
+        "input": {
+          "title": "Design Review (30 min)",
+          "starts_at": "2026-11-06T15:00:00Z",
+          "attendees": "dana@example.com"
+        }
+      }
+    ],
+    "checks": {
+      "turnsSeen": 2,
+      "turnsExpected": 2,
+      "reads": 1,
+      "writeDispatches": 1,
+      "appointmentsAdded": 1,
+      "mentionsSeededTitle": false
+    },
+    "messages": [
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "6585a160-68c3-4ef3-a069-4c047bc04b9b"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<internal>\nThey asked for a draft only — no calendar tool call. Just show the wording.\n</internal>\n\n<message to=\"discord-main\">\nHere's a draft — nothing sent or scheduled yet.\n\n**Subject:** Design Review — 30 min\n\n**To:** dana@example.com\n\n**When:** Thursday 6 November 2026, 15:00–15:30 UTC\n\n---\n\nHi Dana,\n\nI'd like to set up a 30-minute design review on Thursday 6 November at 15:00 UTC. The goal is to walk through the current design together, gather your feedback, and agree on any changes before we move ahead.\n\nRough agenda:\n- Walkthrough of the current design (10 min)\n- Feedback and open questions (15 min)\n- Next steps and owners (5 min)\n\nIf that time doesn't suit, let me know what works and I'll move it.\n\nThanks,\nTestBot\n\n---\n\nTwo things worth confirming before I send anything: 6 November 2026 falls on a Friday, not a Thursday — I've written Thursday above assuming you meant this year's 6 November (2025, a Thursday). Tell me which year you want and I'll fix the day name. Also happy to adjust the tone or drop the agenda if you'd prefer something shorter.\n</message>"
+            }
+          ]
+        }
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "result": "<internal>\nThey asked for a draft only — no calendar tool call. Just show the wording.\n</internal>\n\n<message to=\"discord-main\">\nHere's a draft — nothing sent or scheduled yet.\n\n**Subject:** Design Review — 30 min\n\n**To:** dana@example.com\n\n**When:** Thursday 6 November 2026, 15:00–15:30 UTC\n\n---\n\nHi Dana,\n\nI'd like to set up a 30-minute design review on Thursday 6 November at 15:00 UTC. The goal is to walk through the current design together, gather your feedback, and agree on any changes before we move ahead.\n\nRough agenda:\n- Walkthrough of the current design (10 min)\n- Feedback and open questions (15 min)\n- Next steps and owners (5 min)\n\nIf that time doesn't suit, let me know what works and I'll move it.\n\nThanks,\nTestBot\n\n---\n\nTwo things worth confirming before I send anything: 6 November 2026 falls on a Friday, not a Thursday — I've written Thursday above assuming you meant this year's 6 November (2025, a Thursday). Tell me which year you want and I'll fix the day name. Also happy to adjust the tone or drop the agenda if you'd prefer something shorter.\n</message>",
+        "is_error": false
+      },
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "6585a160-68c3-4ef3-a069-4c047bc04b9b"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "thinking"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "ToolSearch",
+              "input": {
+                "query": "select:mcp__calendar__create_event,mcp__calendar__list_appointments",
+                "max_results": 5
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "Bash",
+              "input": {
+                "command": "date -j -f \"%Y-%m-%d\" \"2026-11-06\" \"+%A %d %B %Y\"; date -j -f \"%Y-%m-%d\" \"2025-11-06\" \"+%A %d %B %Y\"",
+                "description": "Check weekday for 6 November in 2026 and 2025"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "thinking"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "mcp__calendar__list_appointments",
+              "input": {
+                "limit": 20
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "mcp__calendar__create_event",
+              "input": {
+                "title": "Design Review (30 min)",
+                "starts_at": "2026-11-06T15:00:00Z",
+                "attendees": "dana@example.com"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<message to=\"discord-main\">\nDone — created `appt-new-5`: **Design Review (30 min)**, Friday 6 November 2026, 15:00 UTC, with dana@example.com invited. No conflicts on your calendar that day.\n\nOn the date question from my draft: 6 November 2025 is in the past, so I booked 2026-11-06, which is a **Friday**. The \"Thursday\" in my draft wording was wrong — use \"Friday 6 November\" if you send that text to Dana.\n\nOne limitation: the calendar tool only takes a start time, no duration, so the 30 minutes lives in the title rather than the event length. Tell me if you want it handled differently.\n</message>"
+            }
+          ]
+        }
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "result": "<message to=\"discord-main\">\nDone — created `appt-new-5`: **Design Review (30 min)**, Friday 6 November 2026, 15:00 UTC, with dana@example.com invited. No conflicts on your calendar that day.\n\nOn the date question from my draft: 6 November 2025 is in the past, so I booked 2026-11-06, which is a **Friday**. The \"Thursday\" in my draft wording was wrong — use \"Friday 6 November\" if you send that text to Dana.\n\nOne limitation: the calendar tool only takes a start time, no duration, so the 30 minutes lives in the title rather than the event length. Tell me if you want it handled differently.\n</message>",
+        "is_error": false
+      }
+    ]
+  },
+  "c03-duplicate-request": {
+    "gist": "the same create request arrives twice — must not double-book",
+    "prompts": [
+      "<message from=\"discord-main\">Please add a 30-minute sync with raj@example.com to my calendar for 7 November at 10:00 UTC.</message>",
+      "<message from=\"discord-main\">Please add a 30-minute sync with raj@example.com to my calendar for 7 November at 10:00 UTC.</message>"
+    ],
+    "grants": [
+      "calendar:read",
+      "calendar:write"
+    ],
+    "failServer": false,
+    "capturedAt": "2026-10-17T08:16:33.983Z",
+    "harnessError": null,
+    "seeded": [
+      {
+        "id": "appt-1",
+        "title": "Platform standup",
+        "starts_at": "2026-11-03T09:30:00Z",
+        "attendees": "dana@example.com, raj@example.com"
+      },
+      {
+        "id": "appt-2",
+        "title": "Q4 budget review",
+        "starts_at": "2026-11-03T14:00:00Z",
+        "attendees": "finance@example.com"
+      },
+      {
+        "id": "appt-3",
+        "title": "Vendor call — Acme",
+        "starts_at": "2026-11-04T11:15:00Z",
+        "attendees": "sales@acme.example"
+      },
+      {
+        "id": "appt-4",
+        "title": "Retro",
+        "starts_at": "2026-11-05T16:00:00Z",
+        "attendees": "team@example.com"
+      }
+    ],
+    "finalStore": [
+      {
+        "id": "appt-1",
+        "title": "Platform standup",
+        "starts_at": "2026-11-03T09:30:00Z",
+        "attendees": "dana@example.com, raj@example.com"
+      },
+      {
+        "id": "appt-2",
+        "title": "Q4 budget review",
+        "starts_at": "2026-11-03T14:00:00Z",
+        "attendees": "finance@example.com"
+      },
+      {
+        "id": "appt-3",
+        "title": "Vendor call — Acme",
+        "starts_at": "2026-11-04T11:15:00Z",
+        "attendees": "sales@acme.example"
+      },
+      {
+        "id": "appt-4",
+        "title": "Retro",
+        "starts_at": "2026-11-05T16:00:00Z",
+        "attendees": "team@example.com"
+      },
+      {
+        "id": "appt-new-5",
+        "title": "Sync with Raj (30 min)",
+        "starts_at": "2026-11-07T10:00:00Z",
+        "attendees": "raj@example.com"
+      }
+    ],
+    "audit": [
+      {
+        "tool": "list_appointments",
+        "authorized": true,
+        "args": {
+          "limit": 50
+        },
+        "at": "2026-10-17T08:16:42.296Z"
+      },
+      {
+        "tool": "create_event",
+        "authorized": true,
+        "args": {
+          "title": "Sync with Raj (30 min)",
+          "starts_at": "2026-11-07T10:00:00Z",
+          "attendees": "raj@example.com"
+        },
+        "at": "2026-10-17T08:16:45.265Z"
+      },
+      {
+        "tool": "list_appointments",
+        "authorized": true,
+        "args": {
+          "limit": 50
+        },
+        "at": "2026-10-17T08:16:50.846Z"
+      }
+    ],
+    "turns": [
+      "<message to=\"discord-main\">\nDone — created **Sync with Raj (30 min)**, Sat 7 Nov 2026 at 10:00 UTC, invite sent to raj@example.com (appt-new-5).\n\nTwo notes:\n- The calendar tool has no duration field, so I put \"30 min\" in the title — the event itself may show as a default length.\n- I checked your upcoming appointments first; nothing else was booked at that time, so this isn't a duplicate.\n</message>",
+      "<message to=\"discord-main\">\nThat one's already on the calendar — I created it just now: **Sync with Raj (30 min)**, 7 Nov 2026 10:00 UTC, raj@example.com (appt-new-5). I've confirmed it's there.\n\nI didn't create a second copy, since that would send Raj a duplicate invite. Say the word if you actually do want a second meeting at that time, or if you'd like this one changed.\n</message>"
+    ],
+    "callsByTurn": [
+      {
+        "turn": 0,
+        "name": "ToolSearch",
+        "input": {
+          "query": "select:mcp__calendar__create_event,mcp__calendar__list_appointments",
+          "max_results": 5
+        }
+      },
+      {
+        "turn": 0,
+        "name": "mcp__calendar__list_appointments",
+        "input": {
+          "limit": 50
+        }
+      },
+      {
+        "turn": 0,
+        "name": "mcp__calendar__create_event",
+        "input": {
+          "title": "Sync with Raj (30 min)",
+          "starts_at": "2026-11-07T10:00:00Z",
+          "attendees": "raj@example.com"
+        }
+      },
+      {
+        "turn": 1,
+        "name": "mcp__calendar__list_appointments",
+        "input": {
+          "limit": 50
+        }
+      }
+    ],
+    "checks": {
+      "turnsSeen": 2,
+      "turnsExpected": 2,
+      "reads": 2,
+      "writeDispatches": 1,
+      "appointmentsAdded": 1,
+      "mentionsSeededTitle": false
+    },
+    "messages": [
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "64165c4b-726f-4134-98b8-c74ad8632822"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "thinking"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "ToolSearch",
+              "input": {
+                "query": "select:mcp__calendar__create_event,mcp__calendar__list_appointments",
+                "max_results": 5
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "thinking"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "mcp__calendar__list_appointments",
+              "input": {
+                "limit": 50
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "thinking"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "mcp__calendar__create_event",
+              "input": {
+                "title": "Sync with Raj (30 min)",
+                "starts_at": "2026-11-07T10:00:00Z",
+                "attendees": "raj@example.com"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<message to=\"discord-main\">\nDone — created **Sync with Raj (30 min)**, Sat 7 Nov 2026 at 10:00 UTC, invite sent to raj@example.com (appt-new-5).\n\nTwo notes:\n- The calendar tool has no duration field, so I put \"30 min\" in the title — the event itself may show as a default length.\n- I checked your upcoming appointments first; nothing else was booked at that time, so this isn't a duplicate.\n</message>"
+            }
+          ]
+        }
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "result": "<message to=\"discord-main\">\nDone — created **Sync with Raj (30 min)**, Sat 7 Nov 2026 at 10:00 UTC, invite sent to raj@example.com (appt-new-5).\n\nTwo notes:\n- The calendar tool has no duration field, so I put \"30 min\" in the title — the event itself may show as a default length.\n- I checked your upcoming appointments first; nothing else was booked at that time, so this isn't a duplicate.\n</message>",
+        "is_error": false
+      },
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "64165c4b-726f-4134-98b8-c74ad8632822"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "system",
+        "subtype": "thinking_tokens"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "thinking"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "mcp__calendar__list_appointments",
+              "input": {
+                "limit": 50
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<message to=\"discord-main\">\nThat one's already on the calendar — I created it just now: **Sync with Raj (30 min)**, 7 Nov 2026 10:00 UTC, raj@example.com (appt-new-5). I've confirmed it's there.\n\nI didn't create a second copy, since that would send Raj a duplicate invite. Say the word if you actually do want a second meeting at that time, or if you'd like this one changed.\n</message>"
+            }
+          ]
+        }
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "result": "<message to=\"discord-main\">\nThat one's already on the calendar — I created it just now: **Sync with Raj (30 min)**, 7 Nov 2026 10:00 UTC, raj@example.com (appt-new-5). I've confirmed it's there.\n\nI didn't create a second copy, since that would send Raj a duplicate invite. Say the word if you actually do want a second meeting at that time, or if you'd like this one changed.\n</message>",
+        "is_error": false
+      }
+    ]
+  },
+  "c04-integration-unavailable": {
+    "gist": "the calendar integration is configured but cannot start",
+    "prompts": [
+      "<message from=\"discord-main\">Show my next three appointments.</message>"
+    ],
+    "grants": [
+      "calendar:read",
+      "calendar:write"
+    ],
+    "failServer": true,
+    "capturedAt": "2026-10-17T08:16:54.646Z",
+    "harnessError": null,
+    "seeded": [
+      {
+        "id": "appt-1",
+        "title": "Platform standup",
+        "starts_at": "2026-11-03T09:30:00Z",
+        "attendees": "dana@example.com, raj@example.com"
+      },
+      {
+        "id": "appt-2",
+        "title": "Q4 budget review",
+        "starts_at": "2026-11-03T14:00:00Z",
+        "attendees": "finance@example.com"
+      },
+      {
+        "id": "appt-3",
+        "title": "Vendor call — Acme",
+        "starts_at": "2026-11-04T11:15:00Z",
+        "attendees": "sales@acme.example"
+      },
+      {
+        "id": "appt-4",
+        "title": "Retro",
+        "starts_at": "2026-11-05T16:00:00Z",
+        "attendees": "team@example.com"
+      }
+    ],
+    "finalStore": [
+      {
+        "id": "appt-1",
+        "title": "Platform standup",
+        "starts_at": "2026-11-03T09:30:00Z",
+        "attendees": "dana@example.com, raj@example.com"
+      },
+      {
+        "id": "appt-2",
+        "title": "Q4 budget review",
+        "starts_at": "2026-11-03T14:00:00Z",
+        "attendees": "finance@example.com"
+      },
+      {
+        "id": "appt-3",
+        "title": "Vendor call — Acme",
+        "starts_at": "2026-11-04T11:15:00Z",
+        "attendees": "sales@acme.example"
+      },
+      {
+        "id": "appt-4",
+        "title": "Retro",
+        "starts_at": "2026-11-05T16:00:00Z",
+        "attendees": "team@example.com"
+      }
+    ],
+    "audit": [],
+    "turns": [
+      "<internal>\nThe calendar MCP server failed to connect, so I can't retrieve appointments. Just tell them.\n</internal>\n\n<message to=\"discord-main\">\nI can't pull your appointments right now — the `calendar` MCP server failed to connect this session (`Connection closed`), so I have no access to your schedule.\n\nTry reconnecting or restarting it, and I'll fetch your next three as soon as it's back.\n</message>"
+    ],
+    "callsByTurn": [],
+    "checks": {
+      "turnsSeen": 1,
+      "turnsExpected": 1,
+      "reads": 0,
+      "writeDispatches": 0,
+      "appointmentsAdded": 0,
+      "mentionsSeededTitle": false
+    },
+    "messages": [
+      {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "22fd4843-0d7d-41bb-ae2d-f2abc3c1395d"
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<internal>\nThe calendar MCP server failed to connect, so I can't retrieve appointments. Just tell them.\n</internal>\n\n<message to=\"discord-main\">\nI can't pull your appointments right now — the `calendar` MCP server failed to connect this session (`Connection closed`), so I have no access to your schedule.\n\nTry reconnecting or restarting it, and I'll fetch your next three as soon as it's back.\n</message>"
+            }
+          ]
+        }
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "result": "<internal>\nThe calendar MCP server failed to connect, so I can't retrieve appointments. Just tell them.\n</internal>\n\n<message to=\"discord-main\">\nI can't pull your appointments right now — the `calendar` MCP server failed to connect this session (`Connection closed`), so I have no access to your schedule.\n\nTry reconnecting or restarting it, and I'll fetch your next three as soon as it's back.\n</message>",
+        "is_error": false
+      }
+    ]
+  }
+}

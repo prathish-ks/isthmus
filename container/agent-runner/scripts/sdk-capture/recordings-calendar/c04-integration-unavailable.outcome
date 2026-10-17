@@ -1,0 +1,66 @@
+{
+  "seeded": [
+    {
+      "id": "appt-1",
+      "title": "Platform standup",
+      "starts_at": "2026-11-03T09:30:00Z",
+      "attendees": "dana@example.com, raj@example.com"
+    },
+    {
+      "id": "appt-2",
+      "title": "Q4 budget review",
+      "starts_at": "2026-11-03T14:00:00Z",
+      "attendees": "finance@example.com"
+    },
+    {
+      "id": "appt-3",
+      "title": "Vendor call — Acme",
+      "starts_at": "2026-11-04T11:15:00Z",
+      "attendees": "sales@acme.example"
+    },
+    {
+      "id": "appt-4",
+      "title": "Retro",
+      "starts_at": "2026-11-05T16:00:00Z",
+      "attendees": "team@example.com"
+    }
+  ],
+  "finalStore": [
+    {
+      "id": "appt-1",
+      "title": "Platform standup",
+      "starts_at": "2026-11-03T09:30:00Z",
+      "attendees": "dana@example.com, raj@example.com"
+    },
+    {
+      "id": "appt-2",
+      "title": "Q4 budget review",
+      "starts_at": "2026-11-03T14:00:00Z",
+      "attendees": "finance@example.com"
+    },
+    {
+      "id": "appt-3",
+      "title": "Vendor call — Acme",
+      "starts_at": "2026-11-04T11:15:00Z",
+      "attendees": "sales@acme.example"
+    },
+    {
+      "id": "appt-4",
+      "title": "Retro",
+      "starts_at": "2026-11-05T16:00:00Z",
+      "attendees": "team@example.com"
+    }
+  ],
+  "audit": [],
+  "turns": [
+    "<internal>\nThe calendar MCP server failed to connect, so I can't retrieve appointments. Just tell them.\n</internal>\n\n<message to=\"discord-main\">\nI can't pull your appointments right now — the `calendar` MCP server failed to connect this session (`Connection closed`), so I have no access to your schedule.\n\nTry reconnecting or restarting it, and I'll fetch your next three as soon as it's back.\n</message>"
+  ],
+  "checks": {
+    "turnsSeen": 1,
+    "turnsExpected": 1,
+    "reads": 0,
+    "writeDispatches": 0,
+    "appointmentsAdded": 0,
+    "mentionsSeededTitle": false
+  }
+}

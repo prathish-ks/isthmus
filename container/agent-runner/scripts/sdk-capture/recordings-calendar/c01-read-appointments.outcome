@@ -1,0 +1,75 @@
+{
+  "seeded": [
+    {
+      "id": "appt-1",
+      "title": "Platform standup",
+      "starts_at": "2026-11-03T09:30:00Z",
+      "attendees": "dana@example.com, raj@example.com"
+    },
+    {
+      "id": "appt-2",
+      "title": "Q4 budget review",
+      "starts_at": "2026-11-03T14:00:00Z",
+      "attendees": "finance@example.com"
+    },
+    {
+      "id": "appt-3",
+      "title": "Vendor call — Acme",
+      "starts_at": "2026-11-04T11:15:00Z",
+      "attendees": "sales@acme.example"
+    },
+    {
+      "id": "appt-4",
+      "title": "Retro",
+      "starts_at": "2026-11-05T16:00:00Z",
+      "attendees": "team@example.com"
+    }
+  ],
+  "finalStore": [
+    {
+      "id": "appt-1",
+      "title": "Platform standup",
+      "starts_at": "2026-11-03T09:30:00Z",
+      "attendees": "dana@example.com, raj@example.com"
+    },
+    {
+      "id": "appt-2",
+      "title": "Q4 budget review",
+      "starts_at": "2026-11-03T14:00:00Z",
+      "attendees": "finance@example.com"
+    },
+    {
+      "id": "appt-3",
+      "title": "Vendor call — Acme",
+      "starts_at": "2026-11-04T11:15:00Z",
+      "attendees": "sales@acme.example"
+    },
+    {
+      "id": "appt-4",
+      "title": "Retro",
+      "starts_at": "2026-11-05T16:00:00Z",
+      "attendees": "team@example.com"
+    }
+  ],
+  "audit": [
+    {
+      "tool": "list_appointments",
+      "authorized": true,
+      "args": {
+        "limit": 3
+      },
+      "at": "2026-10-17T08:15:58.574Z"
+    }
+  ],
+  "turns": [
+    "<message to=\"discord-main\">\nYour next three appointments:\n\n1. **Platform standup** — Tue 3 Nov, 09:30 UTC · dana@example.com, raj@example.com\n2. **Q4 budget review** — Tue 3 Nov, 14:00 UTC · finance@example.com\n3. **Vendor call — Acme** — Wed 4 Nov, 11:15 UTC · sales@acme.example\n</message>"
+  ],
+  "checks": {
+    "turnsSeen": 1,
+    "turnsExpected": 1,
+    "reads": 1,
+    "writeDispatches": 0,
+    "appointmentsAdded": 0,
+    "mentionsSeededTitle": true
+  }
+}

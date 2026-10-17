@@ -1,0 +1,2 @@
+{"tool":"list_appointments","authorized":true,"args":{"limit":20},"at":"2026-10-17T08:16:26.085Z"}
+{"tool":"create_event","authorized":true,"args":{"title":"Design Review (30 min)","starts_at":"2026-11-06T15:00:00Z","attendees":"dana@example.com"},"at":"2026-10-17T08:16:28.595Z"}
