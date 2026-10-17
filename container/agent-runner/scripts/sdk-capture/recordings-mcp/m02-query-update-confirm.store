@@ -1,0 +1,17 @@
+[
+  {
+    "id": "rec-1",
+    "body": "first sample",
+    "updated_at": "2026-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "rec-2",
+    "body": "second sample",
+    "updated_at": "2026-01-02T00:00:00.000Z"
+  },
+  {
+    "id": "rec-3",
+    "body": "harmless test record",
+    "updated_at": "2026-10-12T11:58:11.496Z"
+  }
+]

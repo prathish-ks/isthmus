@@ -1,0 +1,20 @@
+{
+  "turns": [
+    "<message to=\"discord-main\">\n**$3,000 / 4 people — what that buys**\n\n$750pp is a solid road-trip or short-haul budget, but tight for long-haul flights (4 international tickets alone would eat 60–80% of it). So here's a 6-day drive-to trip outline — tell me your home city and I'll make it specific.\n\n**Outline**\n- **Day 1** — Drive out (3–5 hrs), grocery stop, settle into a rental with a kitchen\n- **Day 2** — Big free day: hike / beach / park. Pack lunch\n- **Day 3** — The one paid attraction (aquarium, boat trip, theme park)\n- **Day 4** — Slow day. Town wander, market, one nice sit-down dinner\n- **Day 5** — Second outdoor day + a short scenic detour\n- **Day 6** — Drive home, lunch on the road\n\n**Budget**\n| Item | Cost |\n|---|---|\n| Fuel + tolls/parking | $300 |\n| Lodging (5 nights × ~$190, whole rental) | $950 |\n| Food (cook ~half, eat out ~half) | $700 |\n| Activities + entry fees | $450 |\n| Misc / souvenirs | $250 |\n| **Buffer** | **$350** |\n\n**Where the money is won:** a rental with a kitchen beats two hotel rooms, and cooking breakfast every day saves roughly $300 over the week.\n\nWant me to re-cut this for a specific destination, or price out a flight-based version instead?\n</message>",
+    "<message to=\"discord-main\">\n**Re-cut for $2,500** — $625pp. Easiest fix is dropping one night and cooking a bit more; the trip shape stays the same.\n\n**5 days instead of 6** — cut Day 4 (the slow day), keep both outdoor days and the one paid attraction.\n\n| Item | Cost | vs. $3k plan |\n|---|---|---|\n| Fuel + tolls/parking | $300 | — |\n| Lodging (4 nights × ~$175) | $700 | −$250 |\n| Food | $600 | −$100 |\n| Activities + entry fees | $350 | −$100 |\n| Misc | $200 | −$50 |\n| **Buffer** | **$350** | — |\n\n**What actually changed:** one fewer night, and the \"nice dinner\" becomes one meal out instead of two or three. Everything worth doing survives.\n\n**If you'd rather keep all 6 days:** stay 5 nights at ~$150 (shoulder-season or slightly further from the main town) and hold food to $500 by cooking breakfast and lunch daily. Tighter, but it works.\n\nStill happy to make this concrete — just need your home city and roughly when you're going.\n</message>",
+    "<message to=\"discord-main\">\n**5-day road trip — 4 people, $2,500**\n\n**Day 1 — Travel out**\nLeave mid-morning, 3–5 hrs drive. Grocery stop before you arrive (breakfasts, lunch supplies, snacks). Settle in, easy dinner at the rental.\n\n**Day 2 — Big outdoor day**\nHike, beach, or park — the free headline activity. Pack lunch. Casual dinner out if everyone's wiped.\n\n**Day 3 — The paid attraction**\nYour one splurge: aquarium, boat trip, theme park, guided tour. Full day. Eat there, budget for it.\n\n**Day 4 — Outdoors + town**\nMorning walk or second trail, afternoon in town — market, shops, wander. **This is the nice dinner.** The one proper sit-down meal of the trip.\n\n**Day 5 — Scenic route home**\nPack up, take the longer road back with one worthwhile stop. Lunch on the road.\n\n**Budget**\n| Item | Cost |\n|---|---|\n| Fuel + tolls/parking | $300 |\n| Lodging (4 nights × ~$175, whole rental w/ kitchen) | $700 |\n| Food | $600 |\n| Activities + entry fees | $350 |\n| Misc / souvenirs | $200 |\n| **Buffer** | **$350** |\n| **Total** | **$2,500** |\n\n**Food breakdown** ($600 over 5 days, 4 people): ~$150 groceries up front covers all breakfasts and most lunches. That leaves ~$450 for roughly four meals out — three casual (~$80 each) and one proper dinner (~$150) on Day 4.\n\n**Two rules that keep this on budget:** book a whole rental with a kitchen rather than two hotel rooms, and keep it to one paid attraction. The $350 buffer is real — don't spend it in the planning stage.\n\nGive me your home city and rough dates and I'll turn this into an actual destination with real prices.\n</message>"
+  ],
+  "toolCalls": [],
+  "filesAfter": {},
+  "checks": {
+    "turnsSeen": 3,
+    "turnsExpected": 3,
+    "toolNames": [],
+    "searched": false,
+    "fetched": false,
+    "linkCount": 0,
+    "isoDateCount": 0,
+    "claimsHavingTransacted": false,
+    "filesWritten": []
+  }
+}

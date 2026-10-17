@@ -615,17 +615,27 @@ function hostPathCanonical(hostPath: string): boolean {
  *
  * Two exemptions, neither able to admit a credential's bytes:
  *
- * - An absolute path. The mount classes pass material by reference: mount the
- *   file read-only, put its path in an env var.
+ * - An absolute MULTI-SEGMENT path. The mount classes pass material by
+ *   reference: mount the file read-only, put its path in an env var.
  *   `PROXY_CLIENT_KEY=/run/session/session-key.pem` is that pattern
  *   working exactly as intended, and a key-name check alone rejects it —
  *   denying every session whose auxiliary containers need their own client
  *   key. A path is a pointer; the thing it points at is governed by
  *   the mount classes, where it is actually checkable.
+ *
+ *   Multi-segment, not merely leading-slash: this exemption is tested FIRST
+ *   and short-circuits both checks below, so anything it admits is admitted
+ *   unconditionally. Base64 may legitimately begin with '/', which made
+ *   `DB_PASSWORD=/wEAAAABxyz…` exempt while the identical bytes without the
+ *   slash were denied — the exemption admitting a credential's bytes, which
+ *   is exactly what this comment used to promise it could not do. Requiring
+ *   a '/'-separated segment pair keeps every real mount path working (they
+ *   are all rooted under a mount directory) while a single opaque token no
+ *   longer buys exemption by starting with a slash.
  */
 export function isSecretShaped(key: string, value: string): boolean {
   // A path is a pointer, never a credential, whatever the key is called.
-  if (/^\/[^\s]*$/.test(value)) return false;
+  if (/^\/(?:[^\s/]+\/)+[^\s/]+$/.test(value)) return false;
   return /(_KEY|_TOKEN|_SECRET|PASSWORD)$/i.test(key) || looksLikeCredential(value);
 }
 

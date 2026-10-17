@@ -1,0 +1,100 @@
+{
+  "seeded": [
+    {
+      "id": "appt-1",
+      "title": "Platform standup",
+      "starts_at": "2026-11-03T09:30:00Z",
+      "attendees": "dana@example.com, raj@example.com"
+    },
+    {
+      "id": "appt-2",
+      "title": "Q4 budget review",
+      "starts_at": "2026-11-03T14:00:00Z",
+      "attendees": "finance@example.com"
+    },
+    {
+      "id": "appt-3",
+      "title": "Vendor call — Acme",
+      "starts_at": "2026-11-04T11:15:00Z",
+      "attendees": "sales@acme.example"
+    },
+    {
+      "id": "appt-4",
+      "title": "Retro",
+      "starts_at": "2026-11-05T16:00:00Z",
+      "attendees": "team@example.com"
+    }
+  ],
+  "finalStore": [
+    {
+      "id": "appt-1",
+      "title": "Platform standup",
+      "starts_at": "2026-11-03T09:30:00Z",
+      "attendees": "dana@example.com, raj@example.com"
+    },
+    {
+      "id": "appt-2",
+      "title": "Q4 budget review",
+      "starts_at": "2026-11-03T14:00:00Z",
+      "attendees": "finance@example.com"
+    },
+    {
+      "id": "appt-3",
+      "title": "Vendor call — Acme",
+      "starts_at": "2026-11-04T11:15:00Z",
+      "attendees": "sales@acme.example"
+    },
+    {
+      "id": "appt-4",
+      "title": "Retro",
+      "starts_at": "2026-11-05T16:00:00Z",
+      "attendees": "team@example.com"
+    },
+    {
+      "id": "appt-new-5",
+      "title": "Sync with Raj (30 min)",
+      "starts_at": "2026-11-07T10:00:00Z",
+      "attendees": "raj@example.com"
+    }
+  ],
+  "audit": [
+    {
+      "tool": "list_appointments",
+      "authorized": true,
+      "args": {
+        "limit": 50
+      },
+      "at": "2026-10-17T08:16:42.296Z"
+    },
+    {
+      "tool": "create_event",
+      "authorized": true,
+      "args": {
+        "title": "Sync with Raj (30 min)",
+        "starts_at": "2026-11-07T10:00:00Z",
+        "attendees": "raj@example.com"
+      },
+      "at": "2026-10-17T08:16:45.265Z"
+    },
+    {
+      "tool": "list_appointments",
+      "authorized": true,
+      "args": {
+        "limit": 50
+      },
+      "at": "2026-10-17T08:16:50.846Z"
+    }
+  ],
+  "turns": [
+    "<message to=\"discord-main\">\nDone — created **Sync with Raj (30 min)**, Sat 7 Nov 2026 at 10:00 UTC, invite sent to raj@example.com (appt-new-5).\n\nTwo notes:\n- The calendar tool has no duration field, so I put \"30 min\" in the title — the event itself may show as a default length.\n- I checked your upcoming appointments first; nothing else was booked at that time, so this isn't a duplicate.\n</message>",
+    "<message to=\"discord-main\">\nThat one's already on the calendar — I created it just now: **Sync with Raj (30 min)**, 7 Nov 2026 10:00 UTC, raj@example.com (appt-new-5). I've confirmed it's there.\n\nI didn't create a second copy, since that would send Raj a duplicate invite. Say the word if you actually do want a second meeting at that time, or if you'd like this one changed.\n</message>"
+  ],
+  "checks": {
+    "turnsSeen": 2,
+    "turnsExpected": 2,
+    "reads": 2,
+    "writeDispatches": 1,
+    "appointmentsAdded": 1,
+    "mentionsSeededTitle": false
+  }
+}
