@@ -52,7 +52,7 @@ vi.mock('./install-command.js', async (original) => {
   };
 });
 
-const { run } = await import('./setup.js');
+const { run, checkModelList } = await import('./setup.js');
 const { installCommand } = await import('./install-command.js');
 const installCommandMock = vi.mocked(installCommand);
 const { controlPaths } = await import('./control.js');
@@ -164,5 +164,26 @@ describe('amd64 emulation probe', () => {
         (file) => (file === 'status' ? 'enabled' : missing()),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('checkModelList', () => {
+  const listResponse = (ids: string[]) =>
+    `HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ data: ids.map((id) => ({ id })) })}`;
+
+  it('accepts a 200 with an OpenAI-shaped model list', () => {
+    expect(() => checkModelList(listResponse(['llama3']), 11434)).not.toThrow();
+    expect(() => checkModelList(listResponse([]), 11434)).not.toThrow();
+  });
+
+  it.each([
+    ['a non-200 status', 'HTTP/1.0 404 Not Found\r\n\r\n{}'],
+    ['no body at all', 'HTTP/1.0 200 OK\r\n\r\n'],
+    ['a body that is not JSON', 'HTTP/1.0 200 OK\r\n\r\nnot json'],
+    ['a body without a data array', 'HTTP/1.0 200 OK\r\n\r\n{}'],
+    ['a data entry without a string id', 'HTTP/1.0 200 OK\r\n\r\n{"data":[{"id":1}]}'],
+    ['an empty response (connection refused/reset)', ''],
+  ])('refuses %s', (_label, response) => {
+    expect(() => checkModelList(response, 11434)).toThrow('did not answer GET /v1/models');
   });
 });

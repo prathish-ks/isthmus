@@ -424,16 +424,6 @@ needs a live test), not just a bucket of "deferred":
     `rm-project-residue` plan/remove action runs after container
     removal but before the data group's `.env` backup and `data/`
     deletion, since the volume's encryption keys live there.
-  - `#3920`'s Codex failure-assist half — closed (Isthmus PR `#79`):
-    `offerCodexFailureAssist()`'s bare, fully-interactive
-    `spawn('codex', ...)` now carries `--sandbox read-only
-    --ask-for-approval on-request`, matching upstream's real fix and
-    bringing it to the same bar as Claude's own already-fixed
-    equivalent (`CLAUDE_READ_ONLY_ARGS`). Its OpenCode half was
-    confirmed not applicable, not just left on the sibling branch:
-    upstream's own fix for that half never landed on upstream's
-    `providers` branch either (confirmed byte-identical), so there is
-    nothing on this fork to port.
   - `#3964`'s core half — closed (Isthmus PR `#80`): `decide()` now
     consults a provider's declared `modelAuthorities`, not just
     `modelDomains`, in `isDefaultApprovedModelHost()` — closing a
@@ -447,39 +437,58 @@ needs a live test), not just a bucket of "deferred":
   - `setup/onecli.ts`'s installer piping to `sh` instead of an explicit
     `/bin/sh` (named during `#4059`) — closed (Isthmus PR `#78`): pipes
     to an explicit `/bin/sh` now, with a regression test asserting it.
-- **In an open PR, not yet merged — do not call this closed until it
-  lands** (the Step 9/Step 10 and `#3920` corrections above are exactly
+  - `#3965`'s Iron Proxy half — closed (Isthmus PR `#89`,
+    `fix/3965-iron-local-model-setup-validator`). Unlike the OpenCode
+    half (below), this one is self-contained: Iron Proxy already exists
+    on this fork, and `#3966`/`#4015` already taught the gateway itself
+    (the Go front proxy, the TS approval seam) about a keyless local
+    model at `host.docker.internal`. This closes the matching gap one
+    layer up — the setup-time URL validator (`provider-credentials.ts`'s
+    `ironModelEndpoint`) rejected that exact URL shape as plain HTTP
+    even though the gateway would have allowed it once configured.
+- **In open PRs, not yet merged — do not call this closed until they
+  land** (the Step 9/Step 10 and `#3920` corrections above are exactly
   why this gets its own bucket instead of being written as done):
-  - `#3965`'s Iron Proxy half — `fix/3965-iron-local-model-setup-validator`.
-    Unlike the OpenCode half (below), this one is self-contained: Iron
-    Proxy already exists on this fork, and `#3966`/`#4015` already
-    taught the gateway itself (the Go front proxy, the TS approval seam)
-    about a keyless local model at `host.docker.internal`. This closes
-    the matching gap one layer up — the setup-time URL validator
-    (`provider-credentials.ts`'s `ironModelEndpoint`) rejected that exact
-    URL shape as plain HTTP even though the gateway would have allowed
-    it once configured. Move to "Closed, not deferred" once merged.
+  - `#3965`'s OpenCode half — built across three branches, none merged
+    yet: `feat/opencode-gateway-auth-providers` (base `providers`:
+    container writes its own auth placeholder at server start; host
+    resolves `OPENCODE_AUTH_MODE`, passes through `OPENCODE_BASE_URL`),
+    `feat/opencode-gateway-auth-main` (base `main`: the credential-store
+    seam `opencode-auth.ts` needs — fixing a real pre-existing dangling
+    type import as a side effect — plus the full setup-time auth flow
+    itself, ported verbatim from upstream). Depends on `#3965`'s Iron
+    half above for the local-model URL check specifically to actually
+    work end to end (verified directly: merged the two `main`-based
+    branches locally and called the real chain — `getCredentialStore()`
+    → Iron's adapter → `ironModelEndpoint()` — confirming a
+    `host.docker.internal` URL is accepted and port 80 is rejected).
+    Not a 1:1 port of upstream's own seam: upstream resolves an
+    arbitrary gateway by scanning every installed skill's `gateway.json`
+    manifest; Isthmus has no such catalog, so this maps the one gateway
+    that actually implements the adapter shape (Iron Proxy) directly.
+    Move to "Closed, not deferred" once all three branches merge.
 - **Large, separate efforts — reasonable to defer past this promotion,
   tracked with an owner**:
-  - `#3965`'s OpenCode half — not yet addressed by any Isthmus PR.
-    Upstream's PR checks an OpenCode local-model URL against the
-    selected gateway at the setup prompt itself (`opencode-auth.ts`,
-    a validator calling the gateway's `modelEndpoint()`). Scoped for
-    real (using the `/promote-upstream` skill directly on this one
-    deferred item, not a full release promotion): `opencode-auth.ts`
-    depends on upstream's `setup/gateways/` module (12 files — catalog,
-    selection, install, credential-store — a generic, skill-manifest-
-    driven seam), which doesn't exist on this fork in any form; Isthmus's
-    actual gateway machinery (`src/gateway-providers/`) is a differently-
-    shaped, registry-based seam. Isthmus's own `add-opencode` skill has
-    no setup-time payload at all today — no auth flow, host-model
-    detection, vault, or model-selection CLI (`opencode-auth.ts`,
-    `opencode-host.ts`, `opencode-vault.ts`, `opencode-model-config.ts`,
-    `opencode-models.ts` — none exist on this fork). This is a genuinely
-    new ~24-file subsystem to build, not a port of something partially
-    there — sized like `#3883` was before its own dedicated PR, not a
-    quick patch. Still deferred, now with a real inventory behind that
-    disposition instead of an assumption.
+  - `#3920`'s Codex failure-assist half — fixed, but not on `main`.
+    **Correction**: an earlier pass of this document (2026-10-12) said
+    this was closed by Isthmus PR `#79`; it is not. PR `#79` merged
+    against base `providers` (confirmed via its own GitHub metadata),
+    not `main` — `setup/providers/codex.ts` doesn't exist on `main` at
+    all, only on the `providers` sibling branch, matching how Codex
+    support is installed on this fork (a skill-copied asset, not a
+    trunk file). The fix itself is real (`offerCodexFailureAssist()`'s
+    bare, fully-interactive `spawn('codex', ...)` now carries
+    `--sandbox read-only --ask-for-approval on-request`, matching
+    upstream's real fix) and confirmed present on `providers`' current
+    tip — it just hasn't reached `main`, because nothing of this file
+    lives there to receive it. Matches the original framing this entry
+    had before the incorrect correction: fixed on the sibling branch,
+    but that branch still needs its own dedicated review pass before
+    being offered to users; not interchangeable with "closed." Its
+    OpenCode half remains confirmed not applicable (upstream's own fix
+    for that half never landed on upstream's own `providers` branch
+    either) — that part of the original finding was accurate and is
+    unaffected by this correction.
 
 ## Open before Step 8/9/10 — all closed
 
@@ -596,16 +605,31 @@ needs a live test), not just a bucket of "deferred":
     default-to-lift-and-shift principle this port followed, and its own
     counterpoint that verbatim-porting upstream's code is still not a
     substitute for the Step 3 security read.
-  - `#3883` (PR `#81`), `#3920`'s Codex half (PR `#79`, OpenCode half
-    confirmed not applicable), `#3964`'s core half (PR `#80`, OpenCode
-    half confirmed not applicable), and `setup/onecli.ts`'s `sh` → an
-    explicit `/bin/sh` (PR `#78`) — all closed, moved from "Large,
-    separate efforts" to "Closed, not deferred."
+  - `#3883` (PR `#81`), `#3920`'s Codex half (PR `#79` — see
+    **correction** below, this was wrong), `#3964`'s core half (PR
+    `#80`, OpenCode half confirmed not applicable), and
+    `setup/onecli.ts`'s `sh` → an explicit `/bin/sh` (PR `#78`) — all
+    closed, moved from "Large, separate efforts" to "Closed, not
+    deferred."
   - `#3965` is the one item still genuinely open — no PR in `#78`–`#84`
     touched it, and its own applicability (same question already
     answered for `#3920`/`#3964`'s OpenCode halves) hasn't actually
     been checked yet, so it's named as its own item rather than folded
     into the others' pattern by assumption.
+- 2026-10-13 — **Correction** to the entry above: `#3920`'s Codex
+  failure-assist half is not closed on `main`. It was marked closed
+  because PR `#79` fixed the real bug — but PR `#79` merged against
+  base `providers`, not `main` (checked its GitHub metadata directly
+  after the mistake was caught; `setup/providers/codex.ts` doesn't
+  exist on `main` at all). Moved back to "Large, separate efforts"
+  with the corrected scope, recorded honestly here rather than quietly
+  edited away, matching this document's own established practice for
+  a premature claim (the Step 9/Step 10 conflation entry above did the
+  same). `#3883` (PR `#81`), `#3964`'s core half (PR `#80`), and
+  `setup/onecli.ts`'s `sh` fix (PR `#78`) were all independently
+  re-checked against their own PR metadata at the same time and
+  confirmed genuinely merged against `main` — the mistake was specific
+  to `#3920`, not a pattern across all four.
 - 2026-10-13 — Scoped `#3965` for real, using the `/promote-upstream`
   skill directly on this one deferred item rather than waiting for the
   next full release promotion. It splits into two pieces of very
@@ -621,3 +645,11 @@ needs a live test), not just a bucket of "deferred":
   form today — a genuinely new subsystem, not something to fold into a
   quick patch. Updated the entry above to carry this real inventory
   instead of the prior "not yet checked" placeholder.
+- 2026-10-17 — PR `#89` (`fix/3965-iron-local-model-setup-validator`)
+  merged with CI green. `#3965`'s Iron Proxy half moved from "In an
+  open PR, not yet merged" to "Closed, not deferred" above — that
+  bucket is now empty and removed; it existed only to hold this one
+  item. Built the full OpenCode half in the same pass (host + container
+  gateway-credential integration, the setup-time auth flow itself) —
+  tracked separately below, not folded into this entry, since none of
+  it has a merged PR yet.
