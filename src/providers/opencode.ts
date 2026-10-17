@@ -18,11 +18,13 @@ const PASSTHROUGH_KEYS = [
   'OPENCODE_PROVIDER',
   'OPENCODE_MODEL',
   'OPENCODE_SMALL_MODEL',
+  'OPENCODE_BASE_URL',
   'ANTHROPIC_BASE_URL',
   'OPENCODE_MODEL_CONTEXT_LIMIT',
   'OPENCODE_MODEL_OUTPUT_LIMIT',
   'OPENCODE_MODEL_INPUT_MODALITIES',
 ] as const;
+const AUTH_MODE_KEY = 'OPENCODE_AUTH_MODE';
 
 function mergeNoProxy(current: string | undefined, additions: string): string {
   if (!current?.trim()) return additions;
@@ -40,8 +42,9 @@ function mergeNoProxy(current: string | undefined, additions: string): string {
 }
 
 registerProviderContainerConfig('opencode', (ctx) => {
+  const coreOwnsProviderSurfaces = (ctx as typeof ctx & { coreOwnsProviderSurfaces?: true }).coreOwnsProviderSurfaces;
   const opencodeDir = path.join(ctx.sessionDir, 'opencode-xdg');
-  fs.mkdirSync(opencodeDir, { recursive: true });
+  if (!coreOwnsProviderSurfaces) fs.mkdirSync(opencodeDir, { recursive: true });
 
   const env: Record<string, string> = {
     XDG_DATA_HOME: '/opencode-xdg',
@@ -53,14 +56,18 @@ registerProviderContainerConfig('opencode', (ctx) => {
   // EnvironmentFile — so under launchd/systemd, ctx.hostEnv carries none of
   // these. Fall back to the `.env` file the way the claude provider does;
   // a real exported variable still wins over the file.
-  const dotenv = readEnvFile([...PASSTHROUGH_KEYS]);
+  const dotenv = readEnvFile([...PASSTHROUGH_KEYS, AUTH_MODE_KEY]);
   for (const key of PASSTHROUGH_KEYS) {
     const value = ctx.hostEnv[key] ?? dotenv[key];
     if (value) env[key] = value;
   }
 
-  return {
-    mounts: [{ hostPath: opencodeDir, containerPath: '/opencode-xdg', readonly: false }],
-    env,
-  };
+  const mounts = coreOwnsProviderSurfaces
+    ? []
+    : [{ hostPath: opencodeDir, containerPath: '/opencode-xdg', readonly: false }];
+  const authMode: string | undefined = ctx.hostEnv[AUTH_MODE_KEY] ?? dotenv[AUTH_MODE_KEY];
+  // The container initializes its own non-secret auth state before server startup.
+  env[AUTH_MODE_KEY] = authMode === 'chatgpt' ? 'chatgpt' : 'api-key';
+
+  return { mounts, env };
 });
