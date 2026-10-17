@@ -437,6 +437,36 @@ needs a live test), not just a bucket of "deferred":
   - `setup/onecli.ts`'s installer piping to `sh` instead of an explicit
     `/bin/sh` (named during `#4059`) — closed (Isthmus PR `#78`): pipes
     to an explicit `/bin/sh` now, with a regression test asserting it.
+  - `#3965`'s Iron Proxy half — closed (Isthmus PR `#89`,
+    `fix/3965-iron-local-model-setup-validator`). Unlike the OpenCode
+    half (below), this one is self-contained: Iron Proxy already exists
+    on this fork, and `#3966`/`#4015` already taught the gateway itself
+    (the Go front proxy, the TS approval seam) about a keyless local
+    model at `host.docker.internal`. This closes the matching gap one
+    layer up — the setup-time URL validator (`provider-credentials.ts`'s
+    `ironModelEndpoint`) rejected that exact URL shape as plain HTTP
+    even though the gateway would have allowed it once configured.
+- **In open PRs, not yet merged — do not call this closed until they
+  land** (the Step 9/Step 10 and `#3920` corrections above are exactly
+  why this gets its own bucket instead of being written as done):
+  - `#3965`'s OpenCode half — built across three branches, none merged
+    yet: `feat/opencode-gateway-auth-providers` (base `providers`:
+    container writes its own auth placeholder at server start; host
+    resolves `OPENCODE_AUTH_MODE`, passes through `OPENCODE_BASE_URL`),
+    `feat/opencode-gateway-auth-main` (base `main`: the credential-store
+    seam `opencode-auth.ts` needs — fixing a real pre-existing dangling
+    type import as a side effect — plus the full setup-time auth flow
+    itself, ported verbatim from upstream). Depends on `#3965`'s Iron
+    half above for the local-model URL check specifically to actually
+    work end to end (verified directly: merged the two `main`-based
+    branches locally and called the real chain — `getCredentialStore()`
+    → Iron's adapter → `ironModelEndpoint()` — confirming a
+    `host.docker.internal` URL is accepted and port 80 is rejected).
+    Not a 1:1 port of upstream's own seam: upstream resolves an
+    arbitrary gateway by scanning every installed skill's `gateway.json`
+    manifest; Isthmus has no such catalog, so this maps the one gateway
+    that actually implements the adapter shape (Iron Proxy) directly.
+    Move to "Closed, not deferred" once all three branches merge.
 - **Large, separate efforts — reasonable to defer past this promotion,
   tracked with an owner**:
   - `#3920`'s Codex failure-assist half — fixed, but not on `main`.
@@ -459,15 +489,6 @@ needs a live test), not just a bucket of "deferred":
     for that half never landed on upstream's own `providers` branch
     either) — that part of the original finding was accurate and is
     unaffected by this correction.
-  - `#3965` — not yet addressed by any Isthmus PR. Upstream's PR checks
-    an OpenCode local-model URL against the selected gateway at the
-    setup prompt itself (`OPENCODE_BASE_URL`, a validator calling the
-    gateway's `modelEndpoint()`). This fork's `providers` branch has no
-    matching interactive setup-prompt flow for OpenCode today — the
-    same root cause `#3920`/`#3964`'s OpenCode halves were ruled not
-    applicable for — but that determination hasn't actually been made
-    for `#3965` specifically yet; don't assume it from the pattern
-    alone without checking the `providers` branch directly first.
 
 ## Open before Step 8/9/10 — all closed
 
@@ -609,3 +630,26 @@ needs a live test), not just a bucket of "deferred":
   re-checked against their own PR metadata at the same time and
   confirmed genuinely merged against `main` — the mistake was specific
   to `#3920`, not a pattern across all four.
+- 2026-10-13 — Scoped `#3965` for real, using the `/promote-upstream`
+  skill directly on this one deferred item rather than waiting for the
+  next full release promotion. It splits into two pieces of very
+  different size: the Iron Proxy half is self-contained (Isthmus
+  already has the touched file; `#3966`/`#4015` already built the
+  underlying keyless-local-model mechanism this half's setup-time
+  validator needed to catch up with) — ported in open PR
+  `fix/3965-iron-local-model-setup-validator`, not yet merged. The
+  OpenCode half is not a port at all: it needs upstream's `setup/
+  gateways/` module (12 files, a seam this fork has no equivalent of)
+  plus roughly a dozen more files for a setup-time payload
+  (auth/host/vault/model-selection) `add-opencode` doesn't have in any
+  form today — a genuinely new subsystem, not something to fold into a
+  quick patch. Updated the entry above to carry this real inventory
+  instead of the prior "not yet checked" placeholder.
+- 2026-10-17 — PR `#89` (`fix/3965-iron-local-model-setup-validator`)
+  merged with CI green. `#3965`'s Iron Proxy half moved from "In an
+  open PR, not yet merged" to "Closed, not deferred" above — that
+  bucket is now empty and removed; it existed only to hold this one
+  item. Built the full OpenCode half in the same pass (host + container
+  gateway-credential integration, the setup-time auth flow itself) —
+  tracked separately below, not folded into this entry, since none of
+  it has a merged PR yet.
