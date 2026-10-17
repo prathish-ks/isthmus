@@ -424,16 +424,6 @@ needs a live test), not just a bucket of "deferred":
     `rm-project-residue` plan/remove action runs after container
     removal but before the data group's `.env` backup and `data/`
     deletion, since the volume's encryption keys live there.
-  - `#3920`'s Codex failure-assist half — closed (Isthmus PR `#79`):
-    `offerCodexFailureAssist()`'s bare, fully-interactive
-    `spawn('codex', ...)` now carries `--sandbox read-only
-    --ask-for-approval on-request`, matching upstream's real fix and
-    bringing it to the same bar as Claude's own already-fixed
-    equivalent (`CLAUDE_READ_ONLY_ARGS`). Its OpenCode half was
-    confirmed not applicable, not just left on the sibling branch:
-    upstream's own fix for that half never landed on upstream's
-    `providers` branch either (confirmed byte-identical), so there is
-    nothing on this fork to port.
   - `#3964`'s core half — closed (Isthmus PR `#80`): `decide()` now
     consults a provider's declared `modelAuthorities`, not just
     `modelDomains`, in `isDefaultApprovedModelHost()` — closing a
@@ -449,6 +439,26 @@ needs a live test), not just a bucket of "deferred":
     to an explicit `/bin/sh` now, with a regression test asserting it.
 - **Large, separate efforts — reasonable to defer past this promotion,
   tracked with an owner**:
+  - `#3920`'s Codex failure-assist half — fixed, but not on `main`.
+    **Correction**: an earlier pass of this document (2026-10-12) said
+    this was closed by Isthmus PR `#79`; it is not. PR `#79` merged
+    against base `providers` (confirmed via its own GitHub metadata),
+    not `main` — `setup/providers/codex.ts` doesn't exist on `main` at
+    all, only on the `providers` sibling branch, matching how Codex
+    support is installed on this fork (a skill-copied asset, not a
+    trunk file). The fix itself is real (`offerCodexFailureAssist()`'s
+    bare, fully-interactive `spawn('codex', ...)` now carries
+    `--sandbox read-only --ask-for-approval on-request`, matching
+    upstream's real fix) and confirmed present on `providers`' current
+    tip — it just hasn't reached `main`, because nothing of this file
+    lives there to receive it. Matches the original framing this entry
+    had before the incorrect correction: fixed on the sibling branch,
+    but that branch still needs its own dedicated review pass before
+    being offered to users; not interchangeable with "closed." Its
+    OpenCode half remains confirmed not applicable (upstream's own fix
+    for that half never landed on upstream's own `providers` branch
+    either) — that part of the original finding was accurate and is
+    unaffected by this correction.
   - `#3965` — not yet addressed by any Isthmus PR. Upstream's PR checks
     an OpenCode local-model URL against the selected gateway at the
     setup prompt itself (`OPENCODE_BASE_URL`, a validator calling the
@@ -574,13 +584,28 @@ needs a live test), not just a bucket of "deferred":
     default-to-lift-and-shift principle this port followed, and its own
     counterpoint that verbatim-porting upstream's code is still not a
     substitute for the Step 3 security read.
-  - `#3883` (PR `#81`), `#3920`'s Codex half (PR `#79`, OpenCode half
-    confirmed not applicable), `#3964`'s core half (PR `#80`, OpenCode
-    half confirmed not applicable), and `setup/onecli.ts`'s `sh` → an
-    explicit `/bin/sh` (PR `#78`) — all closed, moved from "Large,
-    separate efforts" to "Closed, not deferred."
+  - `#3883` (PR `#81`), `#3920`'s Codex half (PR `#79` — see
+    **correction** below, this was wrong), `#3964`'s core half (PR
+    `#80`, OpenCode half confirmed not applicable), and
+    `setup/onecli.ts`'s `sh` → an explicit `/bin/sh` (PR `#78`) — all
+    closed, moved from "Large, separate efforts" to "Closed, not
+    deferred."
   - `#3965` is the one item still genuinely open — no PR in `#78`–`#84`
     touched it, and its own applicability (same question already
     answered for `#3920`/`#3964`'s OpenCode halves) hasn't actually
     been checked yet, so it's named as its own item rather than folded
     into the others' pattern by assumption.
+- 2026-10-13 — **Correction** to the entry above: `#3920`'s Codex
+  failure-assist half is not closed on `main`. It was marked closed
+  because PR `#79` fixed the real bug — but PR `#79` merged against
+  base `providers`, not `main` (checked its GitHub metadata directly
+  after the mistake was caught; `setup/providers/codex.ts` doesn't
+  exist on `main` at all). Moved back to "Large, separate efforts"
+  with the corrected scope, recorded honestly here rather than quietly
+  edited away, matching this document's own established practice for
+  a premature claim (the Step 9/Step 10 conflation entry above did the
+  same). `#3883` (PR `#81`), `#3964`'s core half (PR `#80`), and
+  `setup/onecli.ts`'s `sh` fix (PR `#78`) were all independently
+  re-checked against their own PR metadata at the same time and
+  confirmed genuinely merged against `main` — the mistake was specific
+  to `#3920`, not a pattern across all four.
