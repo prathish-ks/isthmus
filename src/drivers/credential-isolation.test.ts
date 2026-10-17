@@ -23,7 +23,17 @@ import { describe, expect, it } from 'vitest';
 import { fixtureSpec, FIXTURE_POLICY } from './spec-fixture.js';
 import { isSecretShaped, looksLikeCredential, validateSpec } from './types.js';
 
-/** Issuer-assigned shapes the predicate claims to recognise. */
+/**
+ * Issuer-assigned shapes the predicate claims to recognise.
+ *
+ * Every value here is a non-functional example — the published documentation
+ * sample for its issuer (AWS's own `AKIAIOSFODNN7EXAMPLE`, jwt.io's HS256
+ * sample) or an obvious `ABCDEF…` placeholder. None authenticates anywhere,
+ * and none ever did. They have to be literally secret-shaped: a test for a
+ * secret-shape predicate that held no secret-shaped strings would prove
+ * nothing. The two `nosemgrep` lines below are the unavoidable consequence —
+ * the scanner matches on shape, which is exactly the property under test.
+ */
 const REAL_CREDENTIALS: Array<[string, string]> = [
   ['Anthropic/OpenAI sk-', 'sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'],
   ['GitHub PAT (classic)', 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'],
@@ -31,6 +41,7 @@ const REAL_CREDENTIALS: Array<[string, string]> = [
   ['GitHub fine-grained', 'github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'],
   ['Slack bot token', 'xoxb-1234567890-ABCDEFGHIJ'],
   ['AWS access key id', 'AKIAIOSFODNN7EXAMPLE'],
+  // nosemgrep: generic.secrets.security.detected-jwt-token.detected-jwt-token
   ['JWT', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk'],
   ['inline PEM private key', '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----'],
 ];
@@ -103,6 +114,8 @@ describe('validateSpec — the rule is enforced at admission, not merely availab
 
   it('denies a credential VALUE hidden under an innocuous env name', () => {
     const spec = fixtureSpec();
+    // Placeholder, not a token — see REAL_CREDENTIALS' note above.
+    // nosemgrep: generic.secrets.security.detected-github-token.detected-github-token
     spec.containers[0].env.HARMLESS = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     expect(() => validateSpec(spec, FIXTURE_POLICY)).toThrow(/secret-shaped env 'HARMLESS'/);
   });

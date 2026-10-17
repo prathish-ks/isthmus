@@ -55,6 +55,11 @@ const ANALYST_PERSONA = 'You are Ledger, a concise financial analyst. Never use 
 const PLANNER_PERSONA = 'You are Wanda, a friendly travel planner. Be warm and use emoji freely.';
 
 function groupDirOf(folder: string): string {
+  // False positive: `folder` is always one of this file's own two literal
+  // folder names, never external input. Same disposition as this project's
+  // other path-join-resolve-traversal false positives (see
+  // .github/workflows/ci.yml's semgrep-scope comment).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return path.join(TEST_ROOT, folder);
 }
 
@@ -69,11 +74,13 @@ async function seed(id: string, folder: string, persona: string): Promise<AgentG
   await createAgentGroup(ag);
   await ensureContainerConfig(ag.id);
   fs.mkdirSync(groupDirOf(folder), { recursive: true });
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   fs.writeFileSync(path.join(groupDirOf(folder), PERSONA_PREPEND_FILE), persona);
   return ag;
 }
 
 function docPathOf(ag: AgentGroup): string {
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
   return path.join(groupDirOf(ag.folder), CLAUDE_SPEC.fileName);
 }
 

@@ -44,9 +44,10 @@ vi.mock('./log.js', () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
 }));
 
+import { materializeContainerJson } from './container-config.js';
 import { resolveProviderContribution, resolveProviderName } from './container-runner.js';
 import { closeDb, createAgentGroup, initTestDb, runMigrations } from './db/index.js';
-import { ensureContainerConfig, getContainerConfig } from './db/container-configs.js';
+import { ensureContainerConfig } from './db/container-configs.js';
 import { log } from './log.js';
 import type { AgentGroup, Session } from './types.js';
 
@@ -95,10 +96,12 @@ describe('falling back on surfaces is announced, not silent', () => {
     const ag = group('ag-no-provider', 'orphan-provider-group');
     await createAgentGroup(ag);
     await ensureContainerConfig(ag.id);
-    fs.mkdirSync(`${TEST_ROOT}/groups/${ag.folder}`, { recursive: true });
-    const config = await getContainerConfig(ag.id);
+    // materializeContainerJson, not the raw DB row: it is the composer the
+    // spawn path itself calls (container-runner.ts:349), so the config under
+    // test is the one production threads into resolveProviderContribution.
+    const config = await materializeContainerJson(ag.id);
 
-    const { provider } = await resolveProviderContribution(session('s-1', ag.id, UNINSTALLED), ag, config!);
+    const { provider } = await resolveProviderContribution(session('s-1', ag.id, UNINSTALLED), ag, config);
 
     // The name survives for the container to reject...
     expect(provider).toBe(UNINSTALLED);
@@ -115,10 +118,9 @@ describe('falling back on surfaces is announced, not silent', () => {
     const ag = group('ag-claude', 'claude-group');
     await createAgentGroup(ag);
     await ensureContainerConfig(ag.id);
-    fs.mkdirSync(`${TEST_ROOT}/groups/${ag.folder}`, { recursive: true });
-    const config = await getContainerConfig(ag.id);
+    const config = await materializeContainerJson(ag.id);
 
-    const { provider } = await resolveProviderContribution(session('s-2', ag.id, 'claude'), ag, config!);
+    const { provider } = await resolveProviderContribution(session('s-2', ag.id, 'claude'), ag, config);
 
     expect(provider).toBe('claude');
     const warned = vi
@@ -131,10 +133,9 @@ describe('falling back on surfaces is announced, not silent', () => {
     const ag = group('ag-once', 'warn-once-group');
     await createAgentGroup(ag);
     await ensureContainerConfig(ag.id);
-    fs.mkdirSync(`${TEST_ROOT}/groups/${ag.folder}`, { recursive: true });
-    const config = await getContainerConfig(ag.id);
+    const config = await materializeContainerJson(ag.id);
 
-    await resolveProviderContribution(session('s-3', ag.id, UNINSTALLED), ag, config!);
+    await resolveProviderContribution(session('s-3', ag.id, UNINSTALLED), ag, config);
 
     const warnings = vi
       .mocked(log.warn)
