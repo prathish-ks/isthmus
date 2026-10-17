@@ -14,6 +14,7 @@ import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 import { mcpServersToOpenCodeConfig } from './mcp-to-opencode.js';
 import { getAllDestinations } from '../destinations.js';
+import { initializeOpenCodeAuth } from './opencode-auth.js';
 
 function log(msg: string): void {
   console.error(`[opencode-provider] ${msg}`);
@@ -97,6 +98,7 @@ function spawnOpencodeServer(
   timeoutMs = 10_000,
 ): Promise<{ url: string; proc: ChildProcess }> {
   return new Promise((resolve, reject) => {
+    initializeOpenCodeAuth(process.env.XDG_DATA_HOME ?? '/opencode-xdg', process.env.OPENCODE_AUTH_MODE);
     const hostname = '127.0.0.1';
     const port = 4096;
     const proc = spawn('opencode', ['serve', `--hostname=${hostname}`, `--port=${port}`], {
