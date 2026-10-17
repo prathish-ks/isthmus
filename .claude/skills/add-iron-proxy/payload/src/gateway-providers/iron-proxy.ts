@@ -22,6 +22,7 @@ import {
   seenRuleFile,
 } from './iron-proxy-credential-scope.js';
 import { localModelOrigins, localModelPorts } from './iron-proxy-local-model.js';
+import { buildGatewayManagedStub } from '../providers/opencode-auth-stub.js';
 import {
   registerGatewayProvider,
   type GatewayContribution,
@@ -352,6 +353,27 @@ function codexAuthMount(
   ];
 }
 
+/**
+ * Install-wide, matching every other OPENCODE_* setting the OpenCode
+ * provider itself reads from `.env` (src/providers/opencode.ts) — OpenCode
+ * has no per-group config today, so this doesn't either.
+ */
+function opencodeAuthMode(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.OPENCODE_AUTH_MODE?.trim() || readEnvFile(['OPENCODE_AUTH_MODE']).OPENCODE_AUTH_MODE?.trim();
+}
+
+/**
+ * OpenCode's own auth.json reader checks OPENCODE_AUTH_CONTENT before ever
+ * touching the file on disk, so no mount is needed. Emitted only for
+ * chatgpt mode: API-key backends already route through the plain
+ * ANTHROPIC_BASE_URL + authEnv placeholder below, via the same OneCLI/Iron
+ * header-rewrite every other provider uses.
+ */
+function opencodeAuthEnv(settings: IronProxySettings): Record<string, string> {
+  if (!settings.managed || opencodeAuthMode() !== 'chatgpt') return {};
+  return { OPENCODE_AUTH_CONTENT: JSON.stringify(buildGatewayManagedStub()) };
+}
+
 export function ironProxyContribution(settings: IronProxySettings, input: GatewaySessionInput): GatewayContribution {
   const token = signedWorkloadToken(input.runtimeIdentity, fs.readFileSync(settings.identityKey));
   const proxy = `http://workload:${encodeURIComponent(token)}@${PROXY_HOST}:${settings.port}`;
@@ -369,6 +391,7 @@ export function ironProxyContribution(settings: IronProxySettings, input: Gatewa
       GIT_SSL_CAINFO: AGENT_CA_PATH,
       [settings.authEnv]: PLACEHOLDER,
       ...(settings.anthropicBaseUrl ? { ANTHROPIC_BASE_URL: settings.anthropicBaseUrl } : {}),
+      ...opencodeAuthEnv(settings),
     },
     mounts: [
       ...codexAuthMount(settings, input),

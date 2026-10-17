@@ -144,6 +144,46 @@ describe('Iron Proxy provider', () => {
     }
   });
 
+  it('emits a synthetic OpenCode ChatGPT auth.json only in managed chatgpt mode', () => {
+    const configured = { ...settings, managed: true };
+    fs.mkdirSync(path.dirname(configured.identityKey), { recursive: true });
+    fs.writeFileSync(configured.identityKey, Buffer.alloc(32, 7));
+    try {
+      vi.stubEnv('OPENCODE_AUTH_MODE', 'chatgpt');
+      const contribution = ironProxyContribution(configured, input);
+      const stub = JSON.parse(contribution.env!.OPENCODE_AUTH_CONTENT!);
+      expect(stub.openai).toMatchObject({
+        type: 'oauth',
+        access: 'nc-opencode-token-v1',
+        refresh: 'nc-opencode-token-v1',
+      });
+      expect(stub.openai.expires).toBeGreaterThan(Date.now());
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(path.join(materialRoot, 'iron-proxy'), { recursive: true, force: true });
+    }
+  });
+
+  it('omits OPENCODE_AUTH_CONTENT outside managed chatgpt mode', () => {
+    fs.mkdirSync(path.dirname(settings.identityKey), { recursive: true });
+    fs.writeFileSync(settings.identityKey, Buffer.alloc(32, 7));
+    try {
+      // Unmanaged (OneCLI/no gateway control): API-key mode already routes
+      // through the plain ANTHROPIC_BASE_URL + authEnv placeholder.
+      vi.stubEnv('OPENCODE_AUTH_MODE', 'chatgpt');
+      expect(ironProxyContribution(settings, input).env!.OPENCODE_AUTH_CONTENT).toBeUndefined();
+      vi.unstubAllEnvs();
+
+      // Managed, but no chatgpt mode selected.
+      const configured = { ...settings, managed: true };
+      vi.stubEnv('OPENCODE_AUTH_MODE', 'api');
+      expect(ironProxyContribution(configured, input).env!.OPENCODE_AUTH_CONTENT).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(path.join(materialRoot, 'iron-proxy'), { recursive: true, force: true });
+    }
+  });
+
   it('keeps stock managed credentials separate from the immutable approval front', () => {
     const config = parseYaml(ironProxyConfig({ ...settings, managed: true }));
     const front = JSON.parse(ironFrontConfig({ ...settings, managed: true }));
