@@ -309,6 +309,14 @@ func ValidateSpec(spec Session, policy Policy, capabilities *Capabilities) error
 			if !hostPathCanonical(m.HostPath) {
 				return deniedByPolicy("mount %s must be a canonical absolute path (no '..', '.', '//', or trailing '/')", m.HostPath)
 			}
+			// The destination, judged by the same rule as the source. '' and
+			// '/' are the sharp cases: both leave an empty prefix, and an
+			// empty prefix contains every absolute path, so one malformed
+			// destination would exempt every value in this container's env
+			// from the secret-shape check below.
+			if !hostPathCanonical(m.ContainerPath) {
+				return deniedByPolicy("mount destination %q must be a canonical absolute path (no '..', '.', '//', or trailing '/')", m.ContainerPath)
+			}
 			if seenTargets[m.ContainerPath] {
 				return specInvalid("duplicate containerPath %s on %s", m.ContainerPath, container.Role)
 			}
@@ -593,16 +601,24 @@ func IsSecretShaped(key, value string, mountTargets []string) bool {
 }
 
 // isDeclaredMountReference reports whether value names one of this
-// container's mount targets or a file inside one. Canonical-absolute first,
-// so '..' cannot sit under a declared target lexically while resolving
-// outside it.
+// container's mount targets or a file inside one.
+//
+// Canonical-absolute on BOTH sides: on the value so '..' cannot sit under a
+// declared target lexically while resolving outside it, and on each target
+// because a degenerate one ("" or "/") leaves an empty prefix — and an empty
+// prefix contains every absolute path, so one malformed target would exempt
+// everything. ValidateSpec rejects such a target outright; this is the second
+// layer, kept because IsSecretShaped is exported and called with targets this
+// function did not assemble.
 func isDeclaredMountReference(value string, mountTargets []string) bool {
 	if !hostPathCanonical(value) {
 		return false
 	}
 	for _, target := range mountTargets {
-		root := strings.TrimSuffix(target, "/")
-		if value == root || strings.HasPrefix(value, root+"/") {
+		if !hostPathCanonical(target) {
+			continue
+		}
+		if value == target || strings.HasPrefix(value, target+"/") {
 			return true
 		}
 	}

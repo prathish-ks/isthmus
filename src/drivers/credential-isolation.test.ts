@@ -139,6 +139,31 @@ describe('validateSpec — the rule is enforced at admission, not merely availab
     expect(() => validateSpec(spec, FIXTURE_POLICY)).not.toThrow();
   });
 
+  it('refuses a malformed mount destination outright', () => {
+    // The admission half of the degenerate-target case. Rejecting the spec is
+    // better than merely ignoring the target, because a destination of '' or
+    // '/' is malformed on its own terms — the duplicate-target check above it
+    // is meaningless on such a value too, and the kernel should not be
+    // relying on a runtime to refuse what it could refuse itself.
+    for (const junk of ['', '/', '/workspace/', '/work/../space']) {
+      const spec = fixtureSpec();
+      spec.containers[0].mounts[0].containerPath = junk;
+      expect(() => validateSpec(spec, FIXTURE_POLICY)).toThrow(
+        /mount destination .* must be a canonical absolute path/,
+      );
+    }
+  });
+
+  it('a malformed destination cannot buy an exemption for a secret in the same container', () => {
+    // The two halves together, as the end-to-end claim: this is the exact
+    // spec shape that reached admission unrejected before, with the secret
+    // riding along beside the malformed mount.
+    const spec = fixtureSpec();
+    spec.containers[0].mounts[0].containerPath = '';
+    spec.containers[0].env.DB_PASSWORD = '/wEAAAABx/AQIDBAUGBwgJCgsMDQ4PEBESExQ';
+    expect(() => validateSpec(spec, FIXTURE_POLICY)).toThrow();
+  });
+
   it('denies the same path on a container that does not mount it', () => {
     // The sharp edge the exemption's old shape test could not see. This value
     // is a legitimate mount reference ON THE PROXY, and byte-for-byte the
@@ -239,6 +264,22 @@ describe('the path exemption cannot be bought with any choice of bytes', () => {
     // exemption the containment test would hand it.
     expect(isSecretShaped('PROXY_CLIENT_KEY', '/workspace/../etc/shadow', DECLARED)).toBe(true);
     expect(isSecretShaped('PROXY_CLIENT_KEY', '/workspace//agent', DECLARED)).toBe(true);
+  });
+
+  it('ignores a degenerate target that would otherwise contain everything', () => {
+    // '' and '/' both leave an empty prefix, and an empty prefix contains
+    // every absolute path — so a single malformed mount destination would
+    // exempt every value in the container's environment, which is the whole
+    // rule inverted by one bad string. The predicate must discard such a
+    // target rather than honour it.
+    for (const junk of ['', '/', '/workspace/', '/work/../space', '//workspace']) {
+      expect(isSecretShaped('DB_PASSWORD', '/wEAAAABx/AQIDBAUGBwgJCgsMDQ4PEBESExQ', [junk])).toBe(true);
+    }
+  });
+
+  it('still honours the valid targets alongside a degenerate one', () => {
+    // Discarding the junk target must not discard the real one next to it.
+    expect(isSecretShaped('PROXY_CLIENT_KEY', '/workspace/agent/memory', ['', '/workspace'])).toBe(false);
   });
 
   it('is not fooled by a target name that is only a string prefix', () => {

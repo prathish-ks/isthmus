@@ -102,6 +102,53 @@ func TestIsSecretShaped_DotDotCannotForgeContainment(t *testing.T) {
 	}
 }
 
+// The admission half: a malformed destination is refused outright rather than
+// merely ignored. The kernel should not rely on a runtime to reject what it
+// can reject itself — and the duplicate-target check is meaningless on such a
+// value too.
+func TestValidateSpec_RejectsMalformedMountDestination(t *testing.T) {
+	for _, junk := range []string{"", "/", "/workspace/", "/work/../space"} {
+		spec := baseSpec([]Spec{{
+			Class: ClassGroupState, HostPath: "/data/groups/test-agent", ContainerPath: junk,
+			Mode: ModeRW, GroupScope: "ag-1",
+		}})
+		if err := ValidateSpec(spec, basePolicy(), caps()); err == nil {
+			t.Fatalf("expected denial for malformed mount destination %q", junk)
+		}
+	}
+}
+
+// The two halves together: the exact spec shape that reached admission
+// unrejected before, with the secret riding beside the malformed mount.
+func TestValidateSpec_MalformedDestinationBuysNoExemption(t *testing.T) {
+	spec := baseSpec([]Spec{{
+		Class: ClassGroupState, HostPath: "/data/groups/test-agent", ContainerPath: "",
+		Mode: ModeRW, GroupScope: "ag-1",
+	}})
+	spec.Containers[0].Env = map[string]string{"DB_PASSWORD": "/wEAAAABx/AQIDBAUGBwgJCgsMDQ4PEBESExQ"}
+	if err := ValidateSpec(spec, basePolicy(), caps()); err == nil {
+		t.Fatal("a malformed destination must not let a secret-shaped env value through")
+	}
+}
+
+// A degenerate target ("" or "/") leaves an empty prefix, and an empty prefix
+// contains every absolute path — the whole rule inverted by one bad string.
+// The predicate must discard such a target rather than honour it.
+func TestIsSecretShaped_DegenerateTargetGrantsNothing(t *testing.T) {
+	for _, junk := range []string{"", "/", "/workspace/", "/work/../space", "//workspace"} {
+		if !IsSecretShaped("DB_PASSWORD", "/wEAAAABx/AQIDBAUGBwgJCgsMDQ4PEBESExQ", []string{junk}) {
+			t.Fatalf("a malformed target must grant no exemption: %q", junk)
+		}
+	}
+}
+
+// Discarding a junk target must not discard a real one beside it.
+func TestIsSecretShaped_ValidTargetSurvivesADegenerateOne(t *testing.T) {
+	if IsSecretShaped("PROXY_CLIENT_KEY", "/workspace/agent/memory", []string{"", "/workspace"}) {
+		t.Fatal("a valid target alongside a degenerate one must still be honoured")
+	}
+}
+
 // The value half must keep working regardless of how the key is named — the
 // name is chosen by whoever is leaking.
 func TestIsSecretShaped_CredentialValueUnderInnocuousKey(t *testing.T) {

@@ -538,6 +538,18 @@ export function validateSpec(spec: SessionSpec, policy: MountPolicy, capabilitie
           `mount ${mount.hostPath} must be a canonical absolute path (no '..', '.', '//', or trailing '/')`,
         );
       }
+      if (!hostPathCanonical(mount.containerPath)) {
+        // The destination, judged by the same rule as the source. This was
+        // unchecked for as long as only the source side carried meaning —
+        // and it stopped being cosmetic the moment the secret-shape
+        // exemption began measuring membership in these targets. '' and '/'
+        // are the sharp cases: both leave an empty prefix, and an empty
+        // prefix contains every absolute path, so a single malformed
+        // destination would exempt every value in this container's env.
+        throw deniedByPolicy(
+          `mount destination '${mount.containerPath}' must be a canonical absolute path (no '..', '.', '//', or trailing '/')`,
+        );
+      }
       if (seenTargets.has(mount.containerPath)) {
         // Two sources for one target would make the realized mount an ordering
         // artifact. Composition resolves collisions (contributed mounts win),
@@ -654,19 +666,27 @@ export function isSecretShaped(key: string, value: string, mountTargets: readonl
  * Does `value` name one of this container's mount targets, or a file inside
  * one?
  *
- * Canonical-absolute first — `hostPathCanonical` is about absolute-path
- * canonicality, not about host paths specifically — so a value cannot use
- * '..' to sit under a declared target lexically while resolving outside it.
- * Then plain containment, with the target's own trailing slash (if a composer
- * wrote one) normalised away so `/run/session/` and `/run/session` behave the
- * same.
+ * Canonical-absolute on BOTH sides — `hostPathCanonical` is about
+ * absolute-path canonicality, not about host paths specifically. On the value
+ * so it cannot use '..' to sit under a declared target lexically while
+ * resolving outside it; on each target because a degenerate one ('' or '/')
+ * leaves an empty prefix, and an empty prefix contains every absolute path —
+ * one malformed target would otherwise exempt everything.
+ *
+ * validateSpec now rejects such a target outright, so this is the second of
+ * two layers. It is worth keeping: `isSecretShaped` is exported and called
+ * with targets this function did not assemble, and a predicate whose answer
+ * can be inverted by a junk argument is the wrong shape for a security check.
+ *
+ * Requiring canonical targets is also why there is no trailing-slash
+ * normalisation here any more: canonical already means no trailing slash, so
+ * the case the normalisation existed for is now simply refused.
  */
 function isDeclaredMountReference(value: string, mountTargets: readonly string[]): boolean {
   if (!hostPathCanonical(value)) return false;
-  return mountTargets.some((target) => {
-    const root = target.endsWith('/') ? target.slice(0, -1) : target;
-    return value === root || value.startsWith(`${root}/`);
-  });
+  return mountTargets.some(
+    (target) => hostPathCanonical(target) && (value === target || value.startsWith(`${target}/`)),
+  );
 }
 
 /**
