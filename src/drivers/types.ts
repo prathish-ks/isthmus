@@ -538,6 +538,18 @@ export function validateSpec(spec: SessionSpec, policy: MountPolicy, capabilitie
           `mount ${mount.hostPath} must be a canonical absolute path (no '..', '.', '//', or trailing '/')`,
         );
       }
+      if (!hostPathCanonical(mount.containerPath)) {
+        // The destination, judged by the same rule as the source. This was
+        // unchecked for as long as only the source side carried meaning —
+        // and it stopped being cosmetic the moment the secret-shape
+        // exemption began measuring membership in these targets. '' and '/'
+        // are the sharp cases: both leave an empty prefix, and an empty
+        // prefix contains every absolute path, so a single malformed
+        // destination would exempt every value in this container's env.
+        throw deniedByPolicy(
+          `mount destination '${mount.containerPath}' must be a canonical absolute path (no '..', '.', '//', or trailing '/')`,
+        );
+      }
       if (seenTargets.has(mount.containerPath)) {
         // Two sources for one target would make the realized mount an ordering
         // artifact. Composition resolves collisions (contributed mounts win),
@@ -575,8 +587,14 @@ export function validateSpec(spec: SessionSpec, policy: MountPolicy, capabilitie
         throw deniedByPolicy(`mount ${mount.hostPath} violates class ${mount.class} scope ${mount.groupScope}`);
       }
     }
+    // This container's own targets, never the spec's: a path is a pointer
+    // only on the container that can actually follow it. The agent naming
+    // the proxy's `/run/session/session-key.pem` is not passing material by
+    // reference — it is the identity-material rule above restated, since the
+    // agent has no such mount.
+    const mountTargets = [...seenTargets];
     for (const [key, value] of Object.entries(container.env)) {
-      if (isSecretShaped(key, value)) {
+      if (isSecretShaped(key, value, mountTargets)) {
         throw deniedByPolicy(`secret-shaped env '${key}' on ${container.role}`);
       }
     }
@@ -613,20 +631,62 @@ function hostPathCanonical(hostPath: string): boolean {
  * `ANTHROPIC_API_KEY` is caught while the identical credential in
  * `ANTHROPIC_AUTH`, `GW_CRED` or `SESSION_BEARER` passes straight through.
  *
- * Two exemptions, neither able to admit a credential's bytes:
+ * One exemption, and it is deliberately not a shape test. The mount classes
+ * pass material by reference: mount the file read-only, put its path in an env
+ * var. `PROXY_CLIENT_KEY=/run/session/session-key.pem` on the container that
+ * actually mounts that file is that pattern working as intended, and a
+ * key-name check alone rejects it — denying every session whose auxiliary
+ * containers need their own client key. So the exemption admits a value that
+ * points INTO a mount this container declares; what it points at is then
+ * governed by the mount classes, where it is checkable.
  *
- * - An absolute path. The mount classes pass material by reference: mount the
- *   file read-only, put its path in an env var.
- *   `PROXY_CLIENT_KEY=/run/session/session-key.pem` is that pattern
- *   working exactly as intended, and a key-name check alone rejects it —
- *   denying every session whose auxiliary containers need their own client
- *   key. A path is a pointer; the thing it points at is governed by
- *   the mount classes, where it is actually checkable.
+ * Membership, not syntax — and that is the whole point. Two earlier versions
+ * tried to recognise "a path" by its shape, and both admitted credential
+ * bytes, because no shape test separates a path from a secret that looks like
+ * one: base64's alphabet includes '/', so a secret can be rooted
+ * (`/wEAAAAB…`) AND carry interior separators (`/9j/4AAQSkZJRgABAQ…` is a
+ * JPEG's base64 head). Requiring a leading slash admitted the first.
+ * Requiring a '/'-separated segment PAIR admitted the second, while the
+ * comment here claimed it could not — `DB_PASSWORD=/wEAAAABx/AQIDB…` was
+ * exempt. A declared mount target cannot be guessed from the value, which is
+ * what makes this version different in kind rather than merely stricter.
+ *
+ * An empty `mountTargets` therefore grants no exemption at all. That is the
+ * fail-closed default a caller with no mount context should get — see
+ * securitycheck.checkCredentialExposure, which scans a bare env snapshot.
  */
-export function isSecretShaped(key: string, value: string): boolean {
-  // A path is a pointer, never a credential, whatever the key is called.
-  if (/^\/[^\s]*$/.test(value)) return false;
+export function isSecretShaped(key: string, value: string, mountTargets: readonly string[] = []): boolean {
+  // A pointer into declared, class-governed storage is not a credential,
+  // whatever the key is called. Anything else faces both checks.
+  if (isDeclaredMountReference(value, mountTargets)) return false;
   return /(_KEY|_TOKEN|_SECRET|PASSWORD)$/i.test(key) || looksLikeCredential(value);
+}
+
+/**
+ * Does `value` name one of this container's mount targets, or a file inside
+ * one?
+ *
+ * Canonical-absolute on BOTH sides — `hostPathCanonical` is about
+ * absolute-path canonicality, not about host paths specifically. On the value
+ * so it cannot use '..' to sit under a declared target lexically while
+ * resolving outside it; on each target because a degenerate one ('' or '/')
+ * leaves an empty prefix, and an empty prefix contains every absolute path —
+ * one malformed target would otherwise exempt everything.
+ *
+ * validateSpec now rejects such a target outright, so this is the second of
+ * two layers. It is worth keeping: `isSecretShaped` is exported and called
+ * with targets this function did not assemble, and a predicate whose answer
+ * can be inverted by a junk argument is the wrong shape for a security check.
+ *
+ * Requiring canonical targets is also why there is no trailing-slash
+ * normalisation here any more: canonical already means no trailing slash, so
+ * the case the normalisation existed for is now simply refused.
+ */
+function isDeclaredMountReference(value: string, mountTargets: readonly string[]): boolean {
+  if (!hostPathCanonical(value)) return false;
+  return mountTargets.some(
+    (target) => hostPathCanonical(target) && (value === target || value.startsWith(`${target}/`)),
+  );
 }
 
 /**

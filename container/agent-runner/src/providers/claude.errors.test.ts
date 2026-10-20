@@ -79,6 +79,11 @@ describe('a failed turn result: SDK notice vs. generic', () => {
     ['Not logged in · Please run /login', OWNER_HINT],
     [`  ${AUTH_ERROR}\n`, OWNER_HINT],
     ['Invalid auth token · Fix external auth token', OWNER_HINT],
+    // Captured verbatim from a real CLI run (2026-10-12) with a lapsed
+    // keychain OAuth session; it had been absent from SDK_NOTICES, so this
+    // auth failure reached the channel as a bare SDK string while its three
+    // siblings above got the owner hint.
+    ['Failed to authenticate: OAuth session expired and could not be refreshed', OWNER_HINT],
     ['Credit balance is too low', OWNER_HINT],
     ['Prompt is too long', 'This conversation got too long. An admin can send /clear to start a new one.'],
   ])('uses SDK notice %p plus its chat hint as the error when errors[] is empty', async (result, hint) => {
@@ -100,7 +105,13 @@ describe('a failed turn result: SDK notice vs. generic', () => {
   });
 
   it('keeps errors[] as the error when the SDK provides it', async () => {
-    sdkMessages.push({ type: 'result', subtype: 'success', is_error: true, result: AUTH_ERROR, errors: [BILLING_ERROR] });
+    sdkMessages.push({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: AUTH_ERROR,
+      errors: [BILLING_ERROR],
+    });
     expect(await resultEvents()).toEqual([{ type: 'result', text: AUTH_ERROR, isError: true, error: BILLING_ERROR }]);
   });
 

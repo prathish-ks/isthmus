@@ -302,14 +302,26 @@ func ValidateSpec(spec Session, policy Policy, capabilities *Capabilities) error
 
 	for _, container := range spec.Containers {
 		seenTargets := make(map[string]bool)
+		// Ordered alongside the map so the env check below has a slice to
+		// range over; the map stays the duplicate-target test.
+		mountTargets := make([]string, 0, len(container.Mounts))
 		for _, m := range container.Mounts {
 			if !hostPathCanonical(m.HostPath) {
 				return deniedByPolicy("mount %s must be a canonical absolute path (no '..', '.', '//', or trailing '/')", m.HostPath)
+			}
+			// The destination, judged by the same rule as the source. '' and
+			// '/' are the sharp cases: both leave an empty prefix, and an
+			// empty prefix contains every absolute path, so one malformed
+			// destination would exempt every value in this container's env
+			// from the secret-shape check below.
+			if !hostPathCanonical(m.ContainerPath) {
+				return deniedByPolicy("mount destination %q must be a canonical absolute path (no '..', '.', '//', or trailing '/')", m.ContainerPath)
 			}
 			if seenTargets[m.ContainerPath] {
 				return specInvalid("duplicate containerPath %s on %s", m.ContainerPath, container.Role)
 			}
 			seenTargets[m.ContainerPath] = true
+			mountTargets = append(mountTargets, m.ContainerPath)
 
 			required := ClassRequiredByPath(m.HostPath, policy)
 			if required == "" && pluginsRoot != "" && underRoot(m.HostPath, pluginsRoot) {
@@ -344,8 +356,12 @@ func ValidateSpec(spec Session, policy Policy, capabilities *Capabilities) error
 			}
 		}
 
+		// This container's own targets, never the spec's: a path is a pointer
+		// only on the container that can follow it. The agent naming the
+		// proxy's /run/session/session-key.pem is the identity-material rule
+		// above restated, since the agent has no such mount.
 		for key, value := range container.Env {
-			if IsSecretShaped(key, value) {
+			if IsSecretShaped(key, value, mountTargets) {
 				return deniedByPolicy("secret-shaped env '%s' on %s", key, container.Role)
 			}
 		}
@@ -554,7 +570,6 @@ func LabelValueLegal(value string) bool {
 // ---------- secret/credential checks (types.ts:526-553) ----------
 
 var (
-	pathValueRe = regexp.MustCompile(`^/[^\s]*$`)
 	secretKeyRe = regexp.MustCompile(`(?i)(_KEY|_TOKEN|_SECRET|PASSWORD)$`)
 	credSkRe    = regexp.MustCompile(`^sk-[A-Za-z0-9_-]{20,}$`)
 	credGhRe    = regexp.MustCompile(`^(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}$`)
@@ -565,12 +580,49 @@ var (
 	credPemRe   = regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 )
 
-// IsSecretShaped ports types.ts:526-530 verbatim.
-func IsSecretShaped(key, value string) bool {
-	if pathValueRe.MatchString(value) {
+// IsSecretShaped ports types.ts's isSecretShaped, including its one
+// exemption: a value that points INTO a mount the container declares is a
+// pointer, not a credential, whatever the key is called.
+//
+// The exemption is membership in mountTargets, never the value's shape. Two
+// earlier versions tested shape and both admitted credential bytes — base64's
+// alphabet includes '/', so a secret can be rooted (`/wEAAAAB…`) and can
+// carry interior separators (`/9j/4AAQSkZJRgABAQ…`), which defeated the
+// leading-slash and segment-pair tests in turn. See types.ts's doc comment
+// for the full reasoning; the two implementations must stay in lockstep.
+//
+// A nil or empty mountTargets grants no exemption: fail-closed for callers
+// with no mount context, such as securitycheck.checkCredentialExposure.
+func IsSecretShaped(key, value string, mountTargets []string) bool {
+	if isDeclaredMountReference(value, mountTargets) {
 		return false
 	}
 	return secretKeyRe.MatchString(key) || LooksLikeCredential(value)
+}
+
+// isDeclaredMountReference reports whether value names one of this
+// container's mount targets or a file inside one.
+//
+// Canonical-absolute on BOTH sides: on the value so '..' cannot sit under a
+// declared target lexically while resolving outside it, and on each target
+// because a degenerate one ("" or "/") leaves an empty prefix — and an empty
+// prefix contains every absolute path, so one malformed target would exempt
+// everything. ValidateSpec rejects such a target outright; this is the second
+// layer, kept because IsSecretShaped is exported and called with targets this
+// function did not assemble.
+func isDeclaredMountReference(value string, mountTargets []string) bool {
+	if !hostPathCanonical(value) {
+		return false
+	}
+	for _, target := range mountTargets {
+		if !hostPathCanonical(target) {
+			continue
+		}
+		if value == target || strings.HasPrefix(value, target+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // LooksLikeCredential ports types.ts:543-553 verbatim.

@@ -345,8 +345,11 @@ func writeAllowlist(t *testing.T, path string, a Allowlist) {
 // --- secret-shape unit coverage beyond the capture cases ---
 
 func TestIsSecretShaped_PathValueExemption(t *testing.T) {
-	if IsSecretShaped("ANTHROPIC_API_KEY", "/run/session/session-key.pem") {
-		t.Fatal("a path value must be exempt regardless of key name (types.ts:526-530)")
+	// Exempt because the container declares the mount, not because the value
+	// looks like a path — see credential_isolation_test.go's header.
+	targets := []string{"/run/session/session-key.pem"}
+	if IsSecretShaped("ANTHROPIC_API_KEY", "/run/session/session-key.pem", targets) {
+		t.Fatal("a path into a declared mount must be exempt regardless of key name")
 	}
 }
 

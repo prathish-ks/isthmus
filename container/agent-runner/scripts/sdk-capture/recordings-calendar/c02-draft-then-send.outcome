@@ -1,0 +1,92 @@
+{
+  "seeded": [
+    {
+      "id": "appt-1",
+      "title": "Platform standup",
+      "starts_at": "2026-11-03T09:30:00Z",
+      "attendees": "dana@example.com, raj@example.com"
+    },
+    {
+      "id": "appt-2",
+      "title": "Q4 budget review",
+      "starts_at": "2026-11-03T14:00:00Z",
+      "attendees": "finance@example.com"
+    },
+    {
+      "id": "appt-3",
+      "title": "Vendor call — Acme",
+      "starts_at": "2026-11-04T11:15:00Z",
+      "attendees": "sales@acme.example"
+    },
+    {
+      "id": "appt-4",
+      "title": "Retro",
+      "starts_at": "2026-11-05T16:00:00Z",
+      "attendees": "team@example.com"
+    }
+  ],
+  "finalStore": [
+    {
+      "id": "appt-1",
+      "title": "Platform standup",
+      "starts_at": "2026-11-03T09:30:00Z",
+      "attendees": "dana@example.com, raj@example.com"
+    },
+    {
+      "id": "appt-2",
+      "title": "Q4 budget review",
+      "starts_at": "2026-11-03T14:00:00Z",
+      "attendees": "finance@example.com"
+    },
+    {
+      "id": "appt-3",
+      "title": "Vendor call — Acme",
+      "starts_at": "2026-11-04T11:15:00Z",
+      "attendees": "sales@acme.example"
+    },
+    {
+      "id": "appt-4",
+      "title": "Retro",
+      "starts_at": "2026-11-05T16:00:00Z",
+      "attendees": "team@example.com"
+    },
+    {
+      "id": "appt-new-5",
+      "title": "Design Review (30 min)",
+      "starts_at": "2026-11-06T15:00:00Z",
+      "attendees": "dana@example.com"
+    }
+  ],
+  "audit": [
+    {
+      "tool": "list_appointments",
+      "authorized": true,
+      "args": {
+        "limit": 20
+      },
+      "at": "2026-10-17T08:16:26.085Z"
+    },
+    {
+      "tool": "create_event",
+      "authorized": true,
+      "args": {
+        "title": "Design Review (30 min)",
+        "starts_at": "2026-11-06T15:00:00Z",
+        "attendees": "dana@example.com"
+      },
+      "at": "2026-10-17T08:16:28.595Z"
+    }
+  ],
+  "turns": [
+    "<internal>\nThey asked for a draft only — no calendar tool call. Just show the wording.\n</internal>\n\n<message to=\"discord-main\">\nHere's a draft — nothing sent or scheduled yet.\n\n**Subject:** Design Review — 30 min\n\n**To:** dana@example.com\n\n**When:** Thursday 6 November 2026, 15:00–15:30 UTC\n\n---\n\nHi Dana,\n\nI'd like to set up a 30-minute design review on Thursday 6 November at 15:00 UTC. The goal is to walk through the current design together, gather your feedback, and agree on any changes before we move ahead.\n\nRough agenda:\n- Walkthrough of the current design (10 min)\n- Feedback and open questions (15 min)\n- Next steps and owners (5 min)\n\nIf that time doesn't suit, let me know what works and I'll move it.\n\nThanks,\nTestBot\n\n---\n\nTwo things worth confirming before I send anything: 6 November 2026 falls on a Friday, not a Thursday — I've written Thursday above assuming you meant this year's 6 November (2025, a Thursday). Tell me which year you want and I'll fix the day name. Also happy to adjust the tone or drop the agenda if you'd prefer something shorter.\n</message>",
+    "<message to=\"discord-main\">\nDone — created `appt-new-5`: **Design Review (30 min)**, Friday 6 November 2026, 15:00 UTC, with dana@example.com invited. No conflicts on your calendar that day.\n\nOn the date question from my draft: 6 November 2025 is in the past, so I booked 2026-11-06, which is a **Friday**. The \"Thursday\" in my draft wording was wrong — use \"Friday 6 November\" if you send that text to Dana.\n\nOne limitation: the calendar tool only takes a start time, no duration, so the 30 minutes lives in the title rather than the event length. Tell me if you want it handled differently.\n</message>"
+  ],
+  "checks": {
+    "turnsSeen": 2,
+    "turnsExpected": 2,
+    "reads": 1,
+    "writeDispatches": 1,
+    "appointmentsAdded": 1,
+    "mentionsSeededTitle": false
+  }
+}
