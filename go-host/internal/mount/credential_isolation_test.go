@@ -125,6 +125,10 @@ func TestValidateSpec_MalformedDestinationBuysNoExemption(t *testing.T) {
 		Class: ClassGroupState, HostPath: "/data/groups/test-agent", ContainerPath: "",
 		Mode: ModeRW, GroupScope: "ag-1",
 	}})
+	// gosec G101 matches an assignment to a credential-named key, which is
+	// precisely the fixture this test needs — a credential-NAMED key carrying
+	// a path-shaped value. The value is a placeholder; see this file's header.
+	//nolint:gosec // G101: deliberately credential-shaped test input, not a credential
 	spec.Containers[0].Env = map[string]string{"DB_PASSWORD": "/wEAAAABx/AQIDBAUGBwgJCgsMDQ4PEBESExQ"}
 	if err := ValidateSpec(spec, basePolicy(), caps()); err == nil {
 		t.Fatal("a malformed destination must not let a secret-shaped env value through")
