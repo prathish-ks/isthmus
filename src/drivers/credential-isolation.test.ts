@@ -20,7 +20,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { fixtureSpec, FIXTURE_POLICY } from './spec-fixture.js';
+import { fixtureSpec, fixtureSpecWithAux, FIXTURE_POLICY } from './spec-fixture.js';
 import { isSecretShaped, looksLikeCredential, validateSpec } from './types.js';
 
 /**
@@ -96,12 +96,20 @@ describe('isSecretShaped — the admission rule measures BOTH key and value', ()
     expect(isSecretShaped('NANOCLAW_SESSION_ID', '3f2504e0-4f89-11d3-9a0c-0305e82c3301')).toBe(false);
   });
 
-  it('admits a PATH under a credential-named key — material travels by reference', () => {
+  it('admits a path into a DECLARED mount — material travels by reference', () => {
     // The documented pattern: mount the file read-only, put its path in the
     // env var. A key-name check alone would deny every session whose
     // auxiliary containers need their own client key.
-    expect(isSecretShaped('PROXY_CLIENT_KEY', '/run/session/session-key.pem')).toBe(false);
-    expect(isSecretShaped('TLS_SECRET', '/run/session/tls/cert.pem')).toBe(false);
+    const targets = ['/run/session', '/run/session/tls'];
+    expect(isSecretShaped('PROXY_CLIENT_KEY', '/run/session/session-key.pem', targets)).toBe(false);
+    expect(isSecretShaped('TLS_SECRET', '/run/session/tls/cert.pem', targets)).toBe(false);
+  });
+
+  it('grants no exemption when the caller supplies no mount context', () => {
+    // Fail-closed by default: a caller holding only an env snapshot cannot
+    // verify any mount, so it gets the strict rule.
+    expect(isSecretShaped('PROXY_CLIENT_KEY', '/run/session/session-key.pem')).toBe(true);
+    expect(isSecretShaped('PROXY_CLIENT_KEY', '/run/session/session-key.pem', [])).toBe(true);
   });
 });
 
@@ -120,10 +128,29 @@ describe('validateSpec — the rule is enforced at admission, not merely availab
     expect(() => validateSpec(spec, FIXTURE_POLICY)).toThrow(/secret-shaped env 'HARMLESS'/);
   });
 
-  it('allows a path-valued credential-named env var through', () => {
-    const spec = fixtureSpec();
-    spec.containers[0].env.PROXY_CLIENT_KEY = '/run/session/session-key.pem';
+  it('allows a path-valued credential-named env var on the container that mounts it', () => {
+    // The auxiliary fixture: containers[1] is the egress-proxy, which the
+    // fixture gives /run/session/session-key.pem as a mount target. Passing
+    // material by reference, as documented.
+    const spec = fixtureSpecWithAux();
+    const proxy = spec.containers[1];
+    expect(proxy.mounts.map((m) => m.containerPath)).toContain('/run/session/session-key.pem');
+    proxy.env.PROXY_CLIENT_KEY = '/run/session/session-key.pem';
     expect(() => validateSpec(spec, FIXTURE_POLICY)).not.toThrow();
+  });
+
+  it('denies the same path on a container that does not mount it', () => {
+    // The sharp edge the exemption's old shape test could not see. This value
+    // is a legitimate mount reference ON THE PROXY, and byte-for-byte the
+    // same string here — but the agent has no such mount, so for the agent it
+    // is just an opaque string under a credential-named key. Admitting it
+    // would restate the identity-material leak the mount rules already deny:
+    // the agent naming the proxy's client key.
+    const spec = fixtureSpec();
+    const agent = spec.containers[0];
+    expect(agent.mounts.map((m) => m.containerPath)).not.toContain('/run/session/session-key.pem');
+    agent.env.PROXY_CLIENT_KEY = '/run/session/session-key.pem';
+    expect(() => validateSpec(spec, FIXTURE_POLICY)).toThrow(/secret-shaped env 'PROXY_CLIENT_KEY'/);
   });
 
   it('the contributed lane permits credential NAMES — that is its purpose', () => {
@@ -158,31 +185,65 @@ describe('validateSpec — the rule is enforced at admission, not merely availab
   });
 });
 
-describe('the path exemption cannot be bought with a leading slash', () => {
-  // Regression: the exemption was `^\/[^\s]*$` and is tested FIRST, so it
-  // short-circuits both checks below — and base64 may legitimately begin with
-  // '/'. `DB_PASSWORD=/wEAAAABxyz…` was therefore admitted while the identical
-  // bytes without the slash were denied: the one exemption documented as
-  // unable to admit a credential's bytes, doing exactly that. Now requires a
-  // '/'-separated segment pair.
+describe('the path exemption cannot be bought with any choice of bytes', () => {
+  // Regression, and a record of two wrong answers. The exemption is tested
+  // FIRST and short-circuits both checks, so anything it admits is admitted
+  // unconditionally. It was twice written as a test on the value's SHAPE:
+  //
+  //   ^\/[^\s]*$                 admitted any opaque token starting with '/',
+  //                              and base64 may legitimately start with '/'.
+  //   ^\/(?:[^\s/]+\/)+[^\s/]+$  required a segment PAIR — but base64's
+  //                              alphabet CONTAINS '/', so a secret can carry
+  //                              interior separators just as easily.
+  //
+  // The second fix was mine, and the comment shipped with it asserted that a
+  // segment pair "keeps every real mount path working while a single opaque
+  // token no longer buys exemption" — true of the examples I checked, false
+  // of base64 in general. The rule is now membership in a declared mount
+  // target, which is not a property of the bytes at all.
+  const DECLARED = ['/run/session', '/workspace', '/install/data/gateway-trust', '/home/node/.claude'];
+
   it('denies an opaque single-segment token under a credential-named key', () => {
-    expect(isSecretShaped('DB_PASSWORD', '/wEAAAABxyzQWERTYUIOP0123456789')).toBe(true);
+    expect(isSecretShaped('DB_PASSWORD', '/wEAAAABxyzQWERTYUIOP0123456789', DECLARED)).toBe(true);
+  });
+
+  it('denies base64 carrying interior separators, however many', () => {
+    for (const v of [
+      '/wEAAAABx/AQIDBAUGBwgJCgsMDQ4PEBESExQ',
+      '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAA', // a JPEG's base64 head
+      '/a/b/c/d/e/f/g/h',
+    ]) {
+      expect(isSecretShaped('DB_PASSWORD', v, DECLARED)).toBe(true);
+    }
   });
 
   it('denies it identically with or without the leading slash', () => {
     const bytes = 'wEAAAABxyzQWERTYUIOP0123456789';
-    expect(isSecretShaped('DB_PASSWORD', `/${bytes}`)).toBe(isSecretShaped('DB_PASSWORD', bytes));
+    expect(isSecretShaped('DB_PASSWORD', `/${bytes}`, DECLARED)).toBe(isSecretShaped('DB_PASSWORD', bytes, DECLARED));
   });
 
-  it('still admits every real mount-path shape', () => {
-    // Each is rooted under a mount directory, so each has a segment pair.
+  it('still admits every real mount path, and the target itself', () => {
     for (const p of [
       '/run/session/session-key.pem',
       '/workspace/agent/memory',
       '/install/data/gateway-trust/ca.pem',
       '/home/node/.claude/settings.json',
+      '/workspace',
     ]) {
-      expect(isSecretShaped('PROXY_CLIENT_KEY', p)).toBe(false);
+      expect(isSecretShaped('PROXY_CLIENT_KEY', p, DECLARED)).toBe(false);
     }
+  });
+
+  it('refuses a non-canonical path that would otherwise appear contained', () => {
+    // '..' must not walk out of a declared target and still collect the
+    // exemption the containment test would hand it.
+    expect(isSecretShaped('PROXY_CLIENT_KEY', '/workspace/../etc/shadow', DECLARED)).toBe(true);
+    expect(isSecretShaped('PROXY_CLIENT_KEY', '/workspace//agent', DECLARED)).toBe(true);
+  });
+
+  it('is not fooled by a target name that is only a string prefix', () => {
+    // '/workspace-evil' starts with '/workspace' as text but is a different
+    // directory, so the containment test must compare path segments.
+    expect(isSecretShaped('DB_PASSWORD', '/workspace-evil/leak', DECLARED)).toBe(true);
   });
 });

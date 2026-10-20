@@ -26,6 +26,18 @@
  * decision NanoClaw itself owns — which MCP namespaces reach the agent at
  * all — is covered by providers/claude-config.mcp-allowlist.test.ts.
  *
+ * Which bounds what these cases can be read to assure, and the limit is worth
+ * saying out loud: the grant policy under test is this file's own
+ * (test-utils/records-mcp-server.ts). These cases show that a server
+ * enforcing its grants is enforced END TO END — the client cannot reach a
+ * withheld tool by guessing its name, a refusal surfaces as a visible error,
+ * and a denied write leaves the store untouched. They cannot show that an
+ * arbitrary third-party MCP server an operator wires in enforces anything at
+ * all, because that server's authorization is its own code. Since the SDK
+ * gate is deliberately not the enforcement point, a permissive MCP server is
+ * permissive in production — wiring one is a trust decision, and this suite
+ * is not evidence about servers it does not contain.
+ *
  * InMemoryTransport rather than a stdio subprocess: StdioClientTransport
  * spawns the server process itself, and test-utils/run-bun.ts documents a
  * live Bun bug (oven-sh/bun#34069) where a child's exit can be lost and hang

@@ -183,7 +183,12 @@ func checkCredentialExposure(opts Options) Result {
 	}
 	var flagged []string
 	for k, v := range opts.EnvSnapshot {
-		if mount.IsSecretShaped(k, v) || mount.LooksLikeCredential(v) {
+		// nil targets: a bare env snapshot carries no mount context, so no
+		// path value earns the mount-reference exemption here. Strictly more
+		// conservative than the old shape test, which is the right direction
+		// for an advisory check whose remediation is "verify these are
+		// placeholders" — a reader can confirm a real mount, this cannot.
+		if mount.IsSecretShaped(k, v, nil) || mount.LooksLikeCredential(v) {
 			flagged = append(flagged, k)
 		}
 	}

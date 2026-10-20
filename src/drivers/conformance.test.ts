@@ -618,11 +618,17 @@ describe('conformance: the no-secrets rule measures values, not names', () => {
 
   // The other half, and the one that matters more operationally: a false
   // positive here does not warn, it denies every session at once. These are
-  // all values a real spec carries — material passed by reference is
-  // credential-NAMED on purpose and must stay exempt while `sk-`-anything
-  // stays denied.
+  // all values a real AGENT spec carries, and they must stay accepted while
+  // `sk-`-anything stays denied.
+  //
+  // `PROXY_CLIENT_KEY=/run/session/session-key.pem` used to head this table
+  // and no longer belongs in it. The exemption for material passed by
+  // reference is now membership in a mount the container declares, and that
+  // path is the PROXY's identity material — a class the agent may never mount
+  // at all. Asserting the agent may name it was asserting that the admission
+  // rule accepts a combination two other rules forbid. The two cases below
+  // the loop replace it: accepted on the proxy, refused on the agent.
   const legitimate: Array<[string, string]> = [
-    ['PROXY_CLIENT_KEY', '/run/session/session-key.pem'],
     ['NODE_EXTRA_CA_CERTS', '/run/session/proxy-ca.pem'],
     ['HTTPS_PROXY', 'http://127.0.0.1:15001'],
     ['TZ', 'Europe/London'],
@@ -637,6 +643,23 @@ describe('conformance: the no-secrets rule measures values, not names', () => {
       await expect(h.driver.prepare(spec)).resolves.toBeDefined();
     });
   }
+
+  // Material passed by reference, as the design intends: the container naming
+  // the file is the container that mounts it.
+  eachDriver('accepts a credential-named path on the container that declares the mount', async (h) => {
+    const spec = fixtureSpecWithAux();
+    spec.containers[1].env.PROXY_CLIENT_KEY = '/run/session/session-key.pem';
+    await expect(h.driver.prepare(spec)).resolves.toBeDefined();
+  });
+
+  // The same bytes on a container with no such mount. Not a pointer — just a
+  // string under a credential-named key, and the only reason the old rule
+  // admitted it is that it looked path-shaped.
+  eachDriver('refuses the same credential-named path on a container without the mount', async (h) => {
+    const spec = fixtureSpec();
+    spec.containers[0].env.PROXY_CLIENT_KEY = '/run/session/session-key.pem';
+    await expect(h.driver.prepare(spec)).rejects.toMatchObject({ kind: 'denied-by-policy' });
+  });
 });
 
 describe('conformance: failure taxonomy', () => {
